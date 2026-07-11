@@ -1,13 +1,19 @@
 :root {
-  --space-0: #050817;
-  --space-1: #07183e;
-  --space-2: #123d78;
-  --glass: rgb(191 205 232 / 28%);
-  --glass-strong: rgb(221 228 242 / 72%);
-  --glass-border: rgb(255 255 255 / 18%);
+  --space-0: #040713;
+  --space-1: #071436;
+  --space-2: #10366d;
+  --space-3: #194b8d;
+  --glass: rgb(177 197 229 / 29%);
+  --glass-soft: rgb(154 181 220 / 22%);
+  --glass-strong: rgb(226 232 244 / 84%);
+  --glass-border: rgb(255 255 255 / 20%);
   --text-primary: #f7f8fc;
   --text-muted: #d3d9e7;
+  --text-dim: #aebbd2;
   --danger: #bf1323;
   --radius-card: 1.5rem;
   --radius-control: 999px;
+  --app-width: 26.875rem;
+  --safe-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  --safe-top: max(1rem, env(safe-area-inset-top));
 }
