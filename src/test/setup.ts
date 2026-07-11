@@ -18,6 +18,7 @@ const matchMedia = vi.fn((query: string): MediaQueryList => ({
 
 vi.stubGlobal("matchMedia", matchMedia);
 Element.prototype.scrollIntoView = vi.fn();
+HTMLCanvasElement.prototype.getContext = vi.fn(() => null) as typeof HTMLCanvasElement.prototype.getContext;
 vi.stubGlobal(
   "fetch",
   vi.fn(() => Promise.reject(new Error("Network access is disabled in unit tests."))),

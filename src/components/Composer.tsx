@@ -35,7 +35,7 @@ export function Composer({
     const textarea = textareaRef.current;
     if (textarea === null) return;
     textarea.style.height = "auto";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 112)}px`;
+    textarea.style.height = `${Math.max(24, Math.min(textarea.scrollHeight, 112))}px`;
   }, [value]);
 
   const submit = () => {
