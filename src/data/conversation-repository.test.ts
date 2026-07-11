@@ -104,6 +104,14 @@ describe("ConversationRepository", () => {
     expect(await repository.getLocale()).toBe("ja-JP");
   });
 
+  it("records a locale change on the active conversation", async () => {
+    const conversation = await repository.createConversation("zh-CN", 10);
+
+    await repository.setConversationLocale(conversation.id, "ja-JP");
+
+    expect(await repository.getConversation(conversation.id)).toMatchObject({ locale: "ja-JP" });
+  });
+
   it("clears all local application data", async () => {
     const conversation = await repository.createConversation("zh-CN", 10);
     await repository.putMessage({

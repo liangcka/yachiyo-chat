@@ -104,6 +104,10 @@ export class ConversationRepository {
     await this.db.settings.put({ key: "locale", value: locale });
   }
 
+  async setConversationLocale(id: string, locale: Locale): Promise<void> {
+    await this.db.conversations.update(id, { locale });
+  }
+
   async getLocale(): Promise<Locale> {
     return (await this.db.settings.get("locale"))?.value ?? "zh-CN";
   }
