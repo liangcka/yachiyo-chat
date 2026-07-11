@@ -27,3 +27,13 @@ export function noContentResponse(initialHeaders?: HeadersInit): Response {
     headers: noStoreHeaders(initialHeaders),
   });
 }
+
+export function isSameOriginRequest(request: Request): boolean {
+  const suppliedOrigin = request.headers.get("origin");
+  return suppliedOrigin !== null && suppliedOrigin === new URL(request.url).origin;
+}
+
+export function isJsonRequest(request: Request): boolean {
+  const mediaType = request.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
+  return mediaType === "application/json";
+}

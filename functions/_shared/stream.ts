@@ -1,0 +1,316 @@
+import type { ChatLocale } from "./validation";
+
+export type ClientStreamEvent =
+  | { type: "delta"; text: string }
+  | { type: "done"; truncated: boolean }
+  | { type: "error"; code: "PROVIDER_STREAM_ERROR" };
+
+interface ProxyOptions {
+  abort?: () => void;
+  signal?: AbortSignal;
+}
+
+const maximumOutputCharacters = 200;
+const encoder = new TextEncoder();
+
+function takeUnicodePrefix(
+  value: string,
+  maximum: number,
+): { text: string; characters: number; hasMore: boolean } {
+  let text = "";
+  let characters = 0;
+
+  for (const character of value) {
+    if (characters >= maximum) {
+      return { text, characters, hasMore: true };
+    }
+    text += character;
+    characters += 1;
+  }
+
+  return { text, characters, hasMore: false };
+}
+
+function encodeClientEvent(event: ClientStreamEvent): Uint8Array {
+  if (event.type === "delta") {
+    return encoder.encode(`event: delta\ndata: ${JSON.stringify({ text: event.text })}\n\n`);
+  }
+  if (event.type === "done") {
+    return encoder.encode(
+      `event: done\ndata: ${JSON.stringify({ truncated: event.truncated })}\n\n`,
+    );
+  }
+  return encoder.encode(`event: error\ndata: ${JSON.stringify({ code: event.code })}\n\n`);
+}
+
+function responseFromEvents(events: ClientStreamEvent[]): Response {
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const event of events) {
+          controller.enqueue(encodeClientEvent(event));
+        }
+        controller.close();
+      },
+    }),
+    { headers: streamHeaders() },
+  );
+}
+
+function streamHeaders(): Headers {
+  return new Headers({
+    "cache-control": "no-store",
+    "content-type": "text/event-stream; charset=utf-8",
+    "x-accel-buffering": "no",
+  });
+}
+
+function recordData(record: string): string | null {
+  const dataLines = record
+    .split(/\r?\n/u)
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).replace(/^ /u, ""));
+  return dataLines.length === 0 ? null : dataLines.join("\n");
+}
+
+function extractDeltaContent(data: string): string | null {
+  const parsed: unknown = JSON.parse(data);
+  if (typeof parsed !== "object" || parsed === null || "error" in parsed) {
+    throw new TypeError("Invalid provider event");
+  }
+
+  const choices = (parsed as Record<string, unknown>).choices;
+  if (!Array.isArray(choices)) {
+    throw new TypeError("Invalid provider event");
+  }
+  if (choices.length === 0) {
+    return null;
+  }
+
+  const first = choices[0];
+  if (typeof first !== "object" || first === null) {
+    throw new TypeError("Invalid provider event");
+  }
+  const delta = (first as Record<string, unknown>).delta;
+  if (typeof delta !== "object" || delta === null) {
+    throw new TypeError("Invalid provider event");
+  }
+  const content = (delta as Record<string, unknown>).content;
+  if (content === undefined || content === null || content === "") {
+    return null;
+  }
+  if (typeof content !== "string") {
+    throw new TypeError("Invalid provider event");
+  }
+  return content;
+}
+
+export function proxyStepFunStream(upstream: Response, options: ProxyOptions = {}): Response {
+  if (upstream.body === null) {
+    return responseFromEvents([{ type: "error", code: "PROVIDER_STREAM_ERROR" }]);
+  }
+
+  const reader = upstream.body.getReader();
+  let abortCalled = false;
+  let closed = false;
+
+  const abortUpstream = () => {
+    if (!abortCalled) {
+      abortCalled = true;
+      options.abort?.();
+    }
+  };
+
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let emittedCharacters = 0;
+
+      const close = () => {
+        if (!closed) {
+          closed = true;
+          controller.close();
+        }
+      };
+
+      const finish = (truncated: boolean) => {
+        if (closed) {
+          return;
+        }
+        controller.enqueue(encodeClientEvent({ type: "done", truncated }));
+        close();
+      };
+
+      const fail = async () => {
+        if (closed) {
+          return;
+        }
+        controller.enqueue(
+          encodeClientEvent({ type: "error", code: "PROVIDER_STREAM_ERROR" }),
+        );
+        abortUpstream();
+        try {
+          await reader.cancel();
+        } catch {
+          // The provider may already have closed a failed stream.
+        }
+        close();
+      };
+
+      const handleData = async (data: string): Promise<boolean> => {
+        if (data === "[DONE]") {
+          finish(false);
+          return false;
+        }
+
+        const content = extractDeltaContent(data);
+        if (content === null) {
+          return true;
+        }
+
+        const remaining = maximumOutputCharacters - emittedCharacters;
+        const accepted = takeUnicodePrefix(content, remaining);
+        if (accepted.characters > 0) {
+          emittedCharacters += accepted.characters;
+          controller.enqueue(encodeClientEvent({ type: "delta", text: accepted.text }));
+        }
+
+        if (accepted.hasMore || accepted.characters === remaining) {
+          abortUpstream();
+          try {
+            await reader.cancel();
+          } catch {
+            // The response limit has already determined the client result.
+          }
+          finish(true);
+          return false;
+        }
+        return true;
+      };
+
+      const consumeRecords = async (flush: boolean): Promise<boolean> => {
+        while (!closed) {
+          const separator = /\r?\n\r?\n/u.exec(buffer);
+          if (separator === null) {
+            break;
+          }
+
+          const record = buffer.slice(0, separator.index);
+          buffer = buffer.slice(separator.index + separator[0].length);
+          const data = recordData(record);
+          if (data !== null && !(await handleData(data))) {
+            return false;
+          }
+        }
+
+        if (flush && buffer.trim().length > 0) {
+          const data = recordData(buffer);
+          buffer = "";
+          if (data !== null && !(await handleData(data))) {
+            return false;
+          }
+        }
+        return true;
+      };
+
+      const onAbort = () => {
+        if (closed) {
+          return;
+        }
+        abortUpstream();
+        void reader.cancel().catch(() => undefined);
+        close();
+      };
+      options.signal?.addEventListener("abort", onAbort, { once: true });
+
+      void (async () => {
+        try {
+          if (options.signal?.aborted) {
+            onAbort();
+            return;
+          }
+
+          while (!closed) {
+            const { done, value } = await reader.read();
+            if (done) {
+              buffer += decoder.decode();
+              if (await consumeRecords(true)) {
+                finish(false);
+              }
+              return;
+            }
+
+            buffer += decoder.decode(value, { stream: true });
+            if (!(await consumeRecords(false))) {
+              return;
+            }
+          }
+        } catch {
+          if (!options.signal?.aborted) {
+            await fail();
+          }
+        } finally {
+          options.signal?.removeEventListener("abort", onAbort);
+        }
+      })();
+    },
+    async cancel() {
+      closed = true;
+      abortUpstream();
+      await reader.cancel();
+    },
+  });
+
+  return new Response(body, { headers: streamHeaders() });
+}
+
+export function mockChatResponse(locale: ChatLocale): Response {
+  const text =
+    locale === "ja-JP"
+      ? "彩葉〜今日もお疲れさま！（笑顔で温かいパンケーキを差し出す）"
+      : "彩叶~今天也辛苦啦！（笑着递上热乎乎的松饼）";
+  const characters = [...text];
+  const midpoint = Math.ceil(characters.length / 2);
+  return responseFromEvents([
+    { type: "delta", text: characters.slice(0, midpoint).join("") },
+    { type: "delta", text: characters.slice(midpoint).join("") },
+    { type: "done", truncated: false },
+  ]);
+}
+
+export async function collectClientEvents(
+  stream: ReadableStream<Uint8Array>,
+): Promise<ClientStreamEvent[]> {
+  const text = await new Response(stream).text();
+  const events: ClientStreamEvent[] = [];
+
+  for (const record of text.split(/\r?\n\r?\n/u)) {
+    if (record.trim().length === 0) {
+      continue;
+    }
+    const lines = record.split(/\r?\n/u);
+    const eventName = lines.find((line) => line.startsWith("event:"))?.slice(6).trim();
+    const data = recordData(record);
+    if (data === null) {
+      throw new TypeError("Invalid client event");
+    }
+    const payload: unknown = JSON.parse(data);
+    if (typeof payload !== "object" || payload === null) {
+      throw new TypeError("Invalid client event");
+    }
+    const value = payload as Record<string, unknown>;
+
+    if (eventName === "delta" && typeof value.text === "string") {
+      events.push({ type: "delta", text: value.text });
+    } else if (eventName === "done" && typeof value.truncated === "boolean") {
+      events.push({ type: "done", truncated: value.truncated });
+    } else if (eventName === "error" && value.code === "PROVIDER_STREAM_ERROR") {
+      events.push({ type: "error", code: "PROVIDER_STREAM_ERROR" });
+    } else {
+      throw new TypeError("Invalid client event");
+    }
+  }
+
+  return events;
+}

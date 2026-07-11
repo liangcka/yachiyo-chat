@@ -15,6 +15,7 @@ export const SESSION_COOKIE = "yachiyo_session";
 export const SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 
 const maxTokenLength = 1_024;
+const mockSigningSecret = "mock-only-yachiyo-session-secret-not-for-production";
 const textDecoder = new TextDecoder("utf-8", { fatal: true });
 
 function isSessionPayload(value: unknown): value is SessionPayload {
@@ -117,4 +118,17 @@ export async function sessionFromRequest(
 ): Promise<SessionPayload | null> {
   const token = sessionTokenFromCookie(request.headers.get("cookie"));
   return token === null ? null : verifySession(token, secret, now);
+}
+
+export function resolveSessionSigningSecret(
+  env: Pick<Env, "APP_MODE" | "SESSION_SIGNING_SECRET">,
+): string | null {
+  if (env.APP_MODE === "mock") {
+    return env.SESSION_SIGNING_SECRET || mockSigningSecret;
+  }
+
+  return typeof env.SESSION_SIGNING_SECRET === "string" &&
+    env.SESSION_SIGNING_SECRET.length >= 32
+    ? env.SESSION_SIGNING_SECRET
+    : null;
 }

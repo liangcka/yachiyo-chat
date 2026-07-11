@@ -4,6 +4,8 @@ import {
   sha256Bytes,
 } from "../_shared/crypto";
 import {
+  isJsonRequest,
+  isSameOriginRequest,
   jsonResponse,
   noContentResponse,
   problemResponse,
@@ -16,6 +18,7 @@ import {
 } from "../_shared/rate-limit";
 import {
   clearSessionCookie,
+  resolveSessionSigningSecret,
   SESSION_MAX_AGE_SECONDS,
   sessionCookie,
   sessionFromRequest,
@@ -28,24 +31,7 @@ interface SessionContext {
 }
 
 const mockAccessCode = "yachiyo-local-access";
-const mockSigningSecret = "mock-only-yachiyo-session-secret-not-for-production";
 const maximumBodyLength = 1_024;
-
-function isSameOrigin(request: Request): boolean {
-  const suppliedOrigin = request.headers.get("origin");
-  return suppliedOrigin !== null && suppliedOrigin === new URL(request.url).origin;
-}
-
-function signingSecret(env: Env): string | null {
-  if (env.APP_MODE === "mock") {
-    return env.SESSION_SIGNING_SECRET || mockSigningSecret;
-  }
-
-  return typeof env.SESSION_SIGNING_SECRET === "string" &&
-    env.SESSION_SIGNING_SECRET.length >= 32
-    ? env.SESSION_SIGNING_SECRET
-    : null;
-}
 
 function authAttemptLimit(env: Env): number | null {
   if (!/^\d+$/u.test(env.AUTH_ATTEMPT_LIMIT)) {
@@ -71,8 +57,7 @@ function trustedAddress(request: Request): string {
 }
 
 async function parseAccessCode(request: Request): Promise<string | null> {
-  const mediaType = request.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
-  if (mediaType !== "application/json") {
+  if (!isJsonRequest(request)) {
     return null;
   }
 
@@ -122,7 +107,7 @@ async function matchesAccessCode(accessCode: string, env: Env): Promise<boolean 
 
 export async function onRequestGet(context: SessionContext): Promise<Response> {
   try {
-    const secret = signingSecret(context.env);
+    const secret = resolveSessionSigningSecret(context.env);
     if (secret === null) {
       return problemResponse("CONFIGURATION_ERROR", 503);
     }
@@ -136,7 +121,7 @@ export async function onRequestGet(context: SessionContext): Promise<Response> {
 
 export async function onRequestPost(context: SessionContext): Promise<Response> {
   try {
-    if (!isSameOrigin(context.request)) {
+    if (!isSameOriginRequest(context.request)) {
       return problemResponse("ORIGIN_NOT_ALLOWED", 403);
     }
 
@@ -145,7 +130,7 @@ export async function onRequestPost(context: SessionContext): Promise<Response> 
       return problemResponse("INVALID_REQUEST", 400);
     }
 
-    const secret = signingSecret(context.env);
+    const secret = resolveSessionSigningSecret(context.env);
     const limit = authAttemptLimit(context.env);
     const matches = await matchesAccessCode(accessCode, context.env);
     if (secret === null || limit === null || matches === null) {
@@ -191,7 +176,7 @@ export async function onRequestPost(context: SessionContext): Promise<Response> 
 }
 
 export async function onRequestDelete(context: SessionContext): Promise<Response> {
-  if (!isSameOrigin(context.request)) {
+  if (!isSameOriginRequest(context.request)) {
     return problemResponse("ORIGIN_NOT_ALLOWED", 403);
   }
 
