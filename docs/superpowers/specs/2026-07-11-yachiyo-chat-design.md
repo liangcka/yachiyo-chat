@@ -150,10 +150,11 @@ interface StoredImage {
 
 1. 对输入做长度限制和标准化；部署说明要求共享访问码使用至少 16 个随机字符，避免可离线猜测的短 PIN。
 2. 使用 Web Crypto 计算摘要，与 Cloudflare Secret 中保存的访问码摘要进行恒定时间比较。
-3. 验证成功后生成随机会话 ID 和 30 天到期时间。
-4. 使用 `SESSION_SIGNING_SECRET` 对会话负载进行 HMAC-SHA256 签名。
-5. 通过 `HttpOnly; Secure; SameSite=Strict; Path=/` Cookie 返回签名会话；前端 JavaScript 无法读取 Cookie。
-6. 验证失败只返回统一错误，不透露访问码是否接近正确值。
+3. 使用“来源 IP 的 HMAC 摘要 + 15 分钟窗口”在 KV 中限制失败尝试，默认最多 10 次；不保存原始 IP。
+4. 验证成功后生成随机会话 ID 和 30 天到期时间，并清除当前窗口的失败计数。
+5. 使用 `SESSION_SIGNING_SECRET` 对会话负载进行 HMAC-SHA256 签名。
+6. 通过 `HttpOnly; Secure; SameSite=Strict; Path=/` Cookie 返回签名会话；前端 JavaScript 无法读取 Cookie。
+7. 验证失败只返回统一错误，不透露访问码是否接近正确值；达到限制后统一返回 429。
 
 同时提供 `GET /api/session` 用于检查当前设备会话是否仍有效，`DELETE /api/session` 用于退出。
 
@@ -183,6 +184,7 @@ Secrets：
 - `STEPFUN_BASE_URL=https://api.stepfun.com/step_plan/v1`
 - `STEPFUN_MODEL=step-3.7-flash`
 - `DAILY_REQUEST_LIMIT=100`
+- `AUTH_ATTEMPT_LIMIT=10`
 
 KV 绑定：
 

@@ -64,7 +64,7 @@
 - `functions/_shared/http.ts` — JSON/SSE responses and sanitized error codes.
 - `functions/_shared/crypto.ts` — SHA-256, constant-time comparison, base64url and HMAC helpers.
 - `functions/_shared/session.ts` — signed HttpOnly device session cookie.
-- `functions/_shared/rate-limit.ts` — UTC-day KV quota consumption.
+- `functions/_shared/rate-limit.ts` — UTC-day chat quota and privacy-preserving access-code attempt limits.
 - `functions/_shared/validation.ts` — same-origin, body, history, text and image limits.
 - `functions/_shared/prompt.ts` — server-only import of `角色提示词.txt` and locale suffix composition.
 - `functions/_shared/stepfun.ts` — StepFun payload creation and outbound request.
@@ -198,7 +198,7 @@ export function App() {
 }
 ```
 
-`wrangler.jsonc` must set compatibility date `2026-07-11` and non-secret defaults for `STEPFUN_BASE_URL`, `STEPFUN_MODEL`, and `DAILY_REQUEST_LIMIT`, but omit `pages_build_output_dir` and all production KV IDs so dashboard configuration remains authoritative.
+`wrangler.jsonc` must set compatibility date `2026-07-11` and non-secret defaults for `STEPFUN_BASE_URL`, `STEPFUN_MODEL`, `DAILY_REQUEST_LIMIT`, and `AUTH_ATTEMPT_LIMIT`, but omit `pages_build_output_dir` and all production KV IDs so dashboard configuration remains authoritative.
 
 - [ ] **Step 5: Verify the foundation**
 
@@ -428,6 +428,7 @@ const bindings = {
   STEPFUN_BASE_URL: "https://api.stepfun.com/step_plan/v1",
   STEPFUN_MODEL: "step-3.7-flash",
   DAILY_REQUEST_LIMIT: "100",
+  AUTH_ATTEMPT_LIMIT: "10",
   STEPFUN_API_KEY: "test-only-never-live",
 };
 ```
@@ -459,11 +460,11 @@ export function clearSessionCookie(): string {
 }
 ```
 
-Compare the access-code digest as bytes in constant time. Normalize only outer whitespace; do not lowercase or Unicode-fold the secret. Reject access codes shorter than 16 or longer than 128 Unicode characters before hashing.
+Compare the access-code digest as bytes in constant time. Normalize only outer whitespace; do not lowercase or Unicode-fold the secret. Reject access codes shorter than 16 or longer than 128 Unicode characters before hashing. Before comparison, HMAC the trusted `CF-Connecting-IP` value with `SESSION_SIGNING_SECRET`, use only that digest in KV, and enforce at most 10 failed attempts per rolling 15-minute bucket. Missing/invalid IP values share a conservative anonymous bucket; raw IP addresses must never be persisted or logged.
 
 - [ ] **Step 4: Implement session handlers and quota consumption**
 
-`GET` returns `{ authenticated: boolean }`; `POST` accepts JSON `{ accessCode: string }`, verifies same-origin and content type, then returns 204 with the signed cookie; `DELETE` returns 204 with the clearing cookie. Wrong codes return localized-neutral problem code `ACCESS_DENIED` with status 403. When and only when `APP_MODE === "mock"`, accept the fixed local code `yachiyo-local-access` and use a fixed test-only signing key if secrets are absent; live mode must fail closed when either secret is missing.
+`GET` returns `{ authenticated: boolean }`; `POST` accepts JSON `{ accessCode: string }`, verifies same-origin and content type, checks the server-side attempt bucket, then returns 204 with the signed cookie. Wrong codes return localized-neutral problem code `ACCESS_DENIED` with status 403 until the bucket reaches its limit; subsequent attempts return `AUTH_RATE_LIMITED` with status 429. A successful login clears the current failure bucket. `DELETE` returns 204 with the clearing cookie. When and only when `APP_MODE === "mock"`, accept the fixed local code `yachiyo-local-access` and use a fixed test-only signing key if secrets are absent; live mode must fail closed when either secret is missing.
 
 ```ts
 export interface QuotaResult {
@@ -487,7 +488,7 @@ Use a UTC date key `quota:${yyyy-mm-dd}:${sid}` and `expirationTtl` equal to sec
 
 Run: `npm run test:functions -- functions/api/session.test.ts functions/_shared/rate-limit.test.ts`
 
-Expected: correct/wrong code, tampered/expired cookie, sign-out, quota increment, quota rejection, and UTC rollover tests pass.
+Expected: correct/wrong code, privacy-preserving IP bucket, 10-attempt rejection, successful-login counter reset, tampered/expired cookie, sign-out, quota increment, quota rejection, and UTC rollover tests pass.
 
 - [ ] **Step 6: Commit the secure session slice**
 
@@ -1041,7 +1042,7 @@ README must include:
 4. Cloudflare Pages Git build command `npm run build` and output directory `dist`.
 5. Dashboard KV binding `RATE_LIMIT_KV`.
 6. Secrets `STEPFUN_API_KEY`, `ACCESS_CODE_SHA256`, `SESSION_SIGNING_SECRET`.
-7. Variables `STEPFUN_BASE_URL`, `STEPFUN_MODEL`, `DAILY_REQUEST_LIMIT`, with `APP_MODE` absent or `live` in production.
+7. Variables `STEPFUN_BASE_URL`, `STEPFUN_MODEL`, `DAILY_REQUEST_LIMIT`, `AUTH_ATTEMPT_LIMIT`, with `APP_MODE` absent or `live` in production.
 8. A mandatory warning to revoke the key previously pasted into chat and deploy only a new key.
 9. A post-deploy smoke checklist for auth, chat, capture, locale, quota, offline history, and secret scanning.
 
