@@ -1,0 +1,5 @@
+# Copy this file to .dev.vars for local Pages Functions development.
+# Never commit .dev.vars. Replace every placeholder with a newly generated value.
+STEPFUN_API_KEY=replace-with-a-newly-rotated-stepfun-api-key
+ACCESS_CODE_SHA256=replace-with-the-sha256-digest-of-a-random-16-plus-character-code
+SESSION_SIGNING_SECRET=replace-with-at-least-32-random-bytes

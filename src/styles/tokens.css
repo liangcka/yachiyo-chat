@@ -1,0 +1,13 @@
+:root {
+  --space-0: #050817;
+  --space-1: #07183e;
+  --space-2: #123d78;
+  --glass: rgb(191 205 232 / 28%);
+  --glass-strong: rgb(221 228 242 / 72%);
+  --glass-border: rgb(255 255 255 / 18%);
+  --text-primary: #f7f8fc;
+  --text-muted: #d3d9e7;
+  --danger: #bf1323;
+  --radius-card: 1.5rem;
+  --radius-control: 999px;
+}

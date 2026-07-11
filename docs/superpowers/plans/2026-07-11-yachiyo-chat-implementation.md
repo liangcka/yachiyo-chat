@@ -60,7 +60,7 @@
 
 ### Pages Functions
 
-- `functions/runtime-types.d.ts`, `functions/types.d.ts`, `functions/text-modules.d.ts` — generated Workers runtime types plus Env, KV and `.txt` module declarations.
+- `functions/types.d.ts`, `functions/text-modules.d.ts` — documented manual Env and `.txt` module declarations; `npm run cf:types` can refresh runtime declarations in an ordinary writable checkout.
 - `functions/_shared/http.ts` — JSON/SSE responses and sanitized error codes.
 - `functions/_shared/crypto.ts` — SHA-256, constant-time comparison, base64url and HMAC helpers.
 - `functions/_shared/session.ts` — signed HttpOnly device session cookie.
@@ -105,7 +105,6 @@
 - Create: `src/styles/tokens.css`
 - Create: `src/styles/global.css`
 - Create: `functions/types.d.ts`
-- Create: `functions/runtime-types.d.ts`
 - Create: `functions/text-modules.d.ts`
 - Create: `functions/tsconfig.json`
 
@@ -166,7 +165,7 @@ Expected: FAIL because `src/App.tsx` does not exist.
 
 - [ ] **Step 4: Add configs and the minimal shell implementation**
 
-Use a project-reference TypeScript setup: browser files include `DOM`/`DOM.Iterable`; tooling files use Node types; `functions/tsconfig.json` uses `ESNext` and generated Workers types. Configure Vitest jsdom with `src/test/setup.ts`, fake IndexedDB, `@testing-library/jest-dom/vitest`, deterministic `matchMedia`, and no real network.
+Use a project-reference TypeScript setup: browser files include `DOM`/`DOM.Iterable`; tooling files use Node types; `functions/tsconfig.json` uses `ESNext`, `WebWorker`, and the documented manual `Env` declarations in `functions/types.d.ts`. Keep `npm run cf:types` as an operator command for refreshing runtime declarations in an ordinary writable checkout, but do not require generated output for the empty Functions foundation. Configure Vitest jsdom with `src/test/setup.ts`, fake IndexedDB, `@testing-library/jest-dom/vitest`, deterministic `matchMedia`, and no real network.
 
 Configure `vite.config.ts` with React and `VitePWA({ registerType: "prompt", strategies: "generateSW" })`. The manifest must use `Yachiyo Chat`, `Yachiyo`, `standalone`, portrait orientation, `#07102d` background, `#142d67` theme, and `/yachiyo-mark.svg` with `sizes: "any"`. Workbox must navigate-fallback to `/index.html` and denylist `/api/`.
 
