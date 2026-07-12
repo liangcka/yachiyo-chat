@@ -1,5 +1,5 @@
 import { Send, Square, X } from "lucide-react";
-import { useEffect, useRef, type FormEvent, type KeyboardEvent } from "react";
+import type { FormEvent, KeyboardEvent } from "react";
 import type { ChatPhase } from "../app/chat-reducer";
 import type { UiCopy } from "../i18n/messages";
 
@@ -26,17 +26,9 @@ export function Composer({
   phase,
   value,
 }: ComposerProps) {
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const streaming = phase === "streaming";
   const unavailable = disabled || phase === "loading" || phase === "offline";
   const canSend = value.trim().length > 0 || pendingImageDataUrl !== undefined;
-
-  useEffect(() => {
-    const textarea = textareaRef.current;
-    if (textarea === null) return;
-    textarea.style.height = "auto";
-    textarea.style.height = `${Math.max(24, Math.min(textarea.scrollHeight, 112))}px`;
-  }, [value]);
 
   const submit = () => {
     if (!streaming && !unavailable && canSend) onSend(value);
@@ -78,7 +70,6 @@ export function Composer({
       )}
       <div className="composer__input-wrap">
         <textarea
-          ref={textareaRef}
           aria-label={copy.inputHint}
           disabled={unavailable || streaming}
           maxLength={4000}

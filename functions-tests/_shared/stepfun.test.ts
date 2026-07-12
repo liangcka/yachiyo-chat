@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { ClientChatRequest } from "./validation";
-import { buildStepFunBody, resolveStepFunConfiguration } from "./stepfun";
+import type { ClientChatRequest } from "../../functions/_shared/validation";
+import { buildStepFunBody, resolveStepFunConfiguration } from "../../functions/_shared/stepfun";
 
 describe("buildStepFunBody", () => {
   it("maps text history to a low-effort streaming request", () => {

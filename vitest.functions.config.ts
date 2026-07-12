@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
 import path from "node:path";
 import {
   buildPagesASSETSBinding,
@@ -20,25 +19,8 @@ const bindings = {
   AUTH_ATTEMPT_LIMIT: "10",
 };
 
-const rolePromptModuleId = "\0virtual:yachiyo-role-prompt";
-const rolePromptPlugin = {
-  name: "yachiyo-role-prompt-test-module",
-  enforce: "pre" as const,
-  resolveId(source: string) {
-    return source.endsWith("角色提示词.txt") ? rolePromptModuleId : null;
-  },
-  async load(id: string) {
-    if (id !== rolePromptModuleId) {
-      return null;
-    }
-    const prompt = await readFile(path.resolve("角色提示词.txt"), "utf8");
-    return `export default ${JSON.stringify(prompt)};`;
-  },
-};
-
 export default defineConfig({
   plugins: [
-    rolePromptPlugin,
     cloudflareTest(async () => ({
       miniflare: {
         compatibilityDate: "2026-07-11",
@@ -51,7 +33,6 @@ export default defineConfig({
     })),
   ],
   test: {
-    include: ["functions/**/*.test.ts"],
-    passWithNoTests: true,
+    include: ["functions-tests/**/*.test.ts"],
   },
 });

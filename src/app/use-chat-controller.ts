@@ -44,7 +44,7 @@ export interface ChatControllerOptions {
 export interface ChatController extends ChatState {
   send(text: string): Promise<void>;
   retry(): Promise<void>;
-  stop(): void;
+  stop(): Promise<void>;
   newConversation(): Promise<void>;
   selectConversation(id: string): Promise<void>;
   setLocale(locale: Locale): Promise<void>;
@@ -69,12 +69,23 @@ interface InitialData {
 interface ActiveRun {
   assistant: ChatMessage;
   controller: AbortController;
+  finishing?: Promise<void>;
+  preparation: Promise<void>;
   text: string;
   timer?: ReturnType<typeof setTimeout>;
   token: number;
 }
 
 const partialPersistenceInterval = 250;
+const maximumRequestCharacters = 24_000;
+const maximumRequestMessageCharacters = 4_000;
+const maximumRequestMessages = 20;
+const retryableGenerationErrors = new Set([
+  "NETWORK_ERROR",
+  "PROVIDER_ERROR",
+  "SERVICE_UNAVAILABLE",
+  "STREAM_ERROR",
+]);
 
 function blobToDataUrl(image: StoredImage): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -90,6 +101,37 @@ function blobToDataUrl(image: StoredImage): Promise<string> {
 
 function isHistoryMessage(message: ChatMessage): boolean {
   return message.status === "complete" || message.status === "stopped";
+}
+
+function truncateUnicode(value: string, maximum: number): string {
+  let result = "";
+  let length = 0;
+  for (const character of value) {
+    if (length >= maximum) break;
+    result += character;
+    length += 1;
+  }
+  return result;
+}
+
+function requestHistory(messages: ChatMessage[]): Array<{ message: ChatMessage; text: string }> {
+  const eligible = messages.filter(isHistoryMessage);
+  const selected: Array<{ message: ChatMessage; text: string }> = [];
+  let totalCharacters = 0;
+
+  for (let index = eligible.length - 1; index >= 0 && selected.length < maximumRequestMessages; index -= 1) {
+    const message = eligible[index];
+    if (message === undefined) continue;
+    const text = truncateUnicode(message.text, maximumRequestMessageCharacters);
+    const isLastMessage = index === eligible.length - 1;
+    if (!isLastMessage && text.trim().length === 0) continue;
+    const characterLength = [...text].length;
+    if (totalCharacters + characterLength > maximumRequestCharacters) break;
+    selected.unshift({ message, text });
+    totalCharacters += characterLength;
+  }
+
+  return selected;
 }
 
 export function useChatController(options: ChatControllerOptions): ChatController {
@@ -158,10 +200,18 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       const latest = conversations[0];
       if (latest === undefined) return createConversation(locale);
       lastTimestampRef.current = Math.max(lastTimestampRef.current, latest.updatedAt);
+      const storedMessages = await servicesRef.current.repository.listMessages(latest.id);
+      const messages = storedMessages.map((message) =>
+        message.status === "streaming" ? { ...message, status: "stopped" as const } : message,
+      );
+      for (let index = 0; index < messages.length; index += 1) {
+        if (messages[index] !== storedMessages[index]) await queueMessage(messages[index]!);
+      }
+      if (locale !== latest.locale) await servicesRef.current.repository.setLocale(latest.locale);
       return {
         conversation: latest,
-        locale,
-        messages: await servicesRef.current.repository.listMessages(latest.id),
+        locale: latest.locale,
+        messages,
       };
     })();
 
@@ -190,24 +240,29 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         activeRef.current = undefined;
         if (active.timer !== undefined) clearTimeout(active.timer);
         active.controller.abort();
-        void queueMessage({
-          ...active.assistant,
-          status: "stopped",
-          text: active.text,
-        }).catch(() => undefined);
+        void active.preparation
+          .catch(() => undefined)
+          .then(() =>
+            queueMessage({
+              ...active.assistant,
+              status: "stopped",
+              text: active.text,
+            }),
+          )
+          .catch(() => undefined);
       }
     };
   }, [createConversation, emit, queueMessage]);
 
   const makeRequestMessages = useCallback(
     async (messages: ChatMessage[], pendingImage?: StoredImage): Promise<StreamChatMessage[]> => {
-      const history = messages.filter(isHistoryMessage).slice(-20);
+      const history = requestHistory(messages);
       const lastIndex = history.length - 1;
       return Promise.all(
-        history.map(async (message, index) => {
+        history.map(async ({ message, text }, index) => {
           const requestMessage: StreamChatMessage = {
             role: message.role,
-            text: message.text,
+            text,
           };
           if (index === lastIndex && message.role === "user" && message.imageId !== undefined) {
             const image =
@@ -229,24 +284,28 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       status: "complete" | "failed" | "stopped",
       errorCode?: string,
     ): Promise<void> => {
-      if (activeRef.current?.token !== run.token) return;
-      activeRef.current = undefined;
-      if (run.timer !== undefined) clearTimeout(run.timer);
-      const message: ChatMessage = { ...run.assistant, status, text: run.text };
-      if (mountedRef.current) {
-        if (status === "complete") emit({ messageId: run.assistant.id, type: "completed" });
-        else if (status === "stopped") emit({ messageId: run.assistant.id, type: "stopped" });
-        else {
-          emit({
-            errorCode: errorCode ?? "SERVICE_UNAVAILABLE",
-            messageId: run.assistant.id,
-            type: "failed",
-          });
+      if (run.finishing !== undefined) return run.finishing;
+      run.finishing = (async () => {
+        if (activeRef.current?.token !== run.token) return;
+        activeRef.current = undefined;
+        if (run.timer !== undefined) clearTimeout(run.timer);
+        const message: ChatMessage = { ...run.assistant, status, text: run.text };
+        if (mountedRef.current) {
+          if (status === "complete") emit({ messageId: run.assistant.id, type: "completed" });
+          else if (status === "stopped") emit({ messageId: run.assistant.id, type: "stopped" });
+          else {
+            emit({
+              errorCode: errorCode ?? "SERVICE_UNAVAILABLE",
+              messageId: run.assistant.id,
+              type: "failed",
+            });
+          }
         }
-      }
-      await queueMessage(message).catch(() => {
-        if (mountedRef.current) emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
-      });
+        await queueMessage(message).catch(() => {
+          if (mountedRef.current) emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
+        });
+      })();
+      return run.finishing;
     },
     [emit, queueMessage],
   );
@@ -265,16 +324,36 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         status: "streaming",
         text: "",
       };
-      await queueMessage(assistant);
 
       const run: ActiveRun = {
         assistant,
         controller: new AbortController(),
+        preparation: Promise.resolve(),
         text: "",
         token: ++runTokenRef.current,
       };
       activeRef.current = run;
       emit({ assistant, type: "send-started", user });
+
+      run.preparation = (async () => {
+        if (user !== undefined) await queueMessage(user);
+        if (pendingImage !== undefined) {
+          await servicesRef.current.repository.putImage(pendingImage);
+        }
+        await queueMessage(assistant);
+      })();
+
+      try {
+        await run.preparation;
+      } catch {
+        await finishRun(run, "failed", "STORAGE_ERROR");
+        return;
+      }
+      if (activeRef.current?.token !== run.token) return;
+      if (run.controller.signal.aborted) {
+        await finishRun(run, "stopped");
+        return;
+      }
 
       const schedulePartialPersistence = () => {
         if (run.timer !== undefined || activeRef.current?.token !== run.token) return;
@@ -340,7 +419,6 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
           snapshot.pendingImage === undefined
             ? undefined
             : { ...snapshot.pendingImage, conversationId: snapshot.activeConversation.id };
-        if (image !== undefined) await servicesRef.current.repository.putImage(image);
         const user: ChatMessage = {
           conversationId: snapshot.activeConversation.id,
           createdAt: nextTimestamp(),
@@ -350,7 +428,6 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
           status: "complete",
           text: normalized,
         };
-        await queueMessage(user);
         await startAssistant([...snapshot.messages, user], user, image);
       } catch {
         if (mountedRef.current) emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
@@ -358,7 +435,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         sendingRef.current = false;
       }
     },
-    [emit, nextTimestamp, queueMessage, startAssistant],
+    [emit, nextTimestamp, startAssistant],
   );
 
   const retry = useCallback(async (): Promise<void> => {
@@ -369,6 +446,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       snapshot.phase === "loading" ||
       snapshot.phase === "streaming" ||
       snapshot.phase === "offline" ||
+      !retryableGenerationErrors.has(snapshot.errorCode ?? "") ||
       !snapshot.messages.some(({ role }) => role === "user")
     ) {
       return;
@@ -381,19 +459,17 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     }
   }, [startAssistant]);
 
-  const stop = useCallback(() => {
+  const stop = useCallback(async (): Promise<void> => {
     const run = activeRef.current;
     if (run === undefined) return;
     run.controller.abort();
-    void finishRun(run, "stopped");
+    await run.preparation.catch(() => undefined);
+    await finishRun(run, "stopped");
   }, [finishRun]);
 
   const stopAndWait = useCallback(async () => {
-    const run = activeRef.current;
-    if (run === undefined) return;
-    run.controller.abort();
-    await finishRun(run, "stopped");
-  }, [finishRun]);
+    await stop();
+  }, [stop]);
 
   const newConversation = useCallback(async (): Promise<void> => {
     await stopAndWait();
@@ -449,7 +525,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
 
   const setOnline = useCallback(
     (online: boolean) => {
-      if (!online) stop();
+      if (!online) void stop();
       emit({ online, type: "connectivity-changed" });
     },
     [emit, stop],

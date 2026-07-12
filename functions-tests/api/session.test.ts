@@ -1,7 +1,7 @@
 import { createPagesEventContext, env } from "cloudflare:test";
-import { beforeEach, describe, expect, it } from "vitest";
-import { signSession, verifySession } from "../_shared/session";
-import { onRequestDelete, onRequestGet, onRequestPost } from "./session";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { signSession, verifySession } from "../../functions/_shared/session";
+import { onRequestDelete, onRequestGet, onRequestPost } from "../../functions/api/session";
 
 const origin = "https://yachiyo.test";
 
@@ -25,6 +25,43 @@ async function post(accessCode: string, ip?: string): Promise<Response> {
       data: {},
     }),
   );
+}
+
+function oversizedStreamingRequest(contentLength?: string): {
+  cancel: ReturnType<typeof vi.fn>;
+  request: Request;
+} {
+  const cancel = vi.fn();
+  let emitted = false;
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (!emitted) {
+        emitted = true;
+        controller.enqueue(new Uint8Array(1_025).fill(0x20));
+        return;
+      }
+      controller.enqueue(new TextEncoder().encode('{"accessCode":"correct horse moonlight"}'));
+      controller.close();
+    },
+    cancel,
+  });
+  const headers = new Headers({
+    "content-type": "application/json",
+    origin,
+    "cf-connecting-ip": "203.0.113.90",
+  });
+  if (contentLength !== undefined) {
+    headers.set("content-length", contentLength);
+  }
+
+  return {
+    cancel,
+    request: new Request(`${origin}/api/session`, {
+      method: "POST",
+      headers,
+      body,
+    }),
+  };
 }
 
 beforeEach(async () => {
@@ -84,6 +121,21 @@ describe("POST /api/session", () => {
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual({ error: { code: "ORIGIN_NOT_ALLOWED" } });
   });
+
+  it.each([undefined, "1"])(
+    "stream-limits an oversized body when Content-Length is %s",
+    async (contentLength) => {
+      const { cancel, request } = oversizedStreamingRequest(contentLength);
+
+      const response = await onRequestPost(
+        createPagesEventContext<typeof onRequestPost>({ request, params: {}, data: {} }),
+      );
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: { code: "INVALID_REQUEST" } });
+      expect(cancel).toHaveBeenCalledOnce();
+    },
+  );
 });
 
 describe("session verification", () => {

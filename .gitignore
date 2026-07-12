@@ -4,6 +4,7 @@ node_modules/
 dist/
 coverage/
 .wrangler/
+functions/_generated/
 
 .dev.vars
 .dev.vars.*
@@ -19,3 +20,4 @@ screenshots/
 
 *.local
 *.tsbuildinfo
+types/runtime-types.d.ts

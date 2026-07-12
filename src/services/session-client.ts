@@ -50,7 +50,11 @@ async function problemCode(response: Response): Promise<SessionClientErrorCode> 
 }
 
 export class SessionClient {
-  constructor(private readonly fetcher: typeof fetch = globalThis.fetch) {}
+  private readonly fetcher: typeof fetch;
+
+  constructor(fetcher: typeof fetch = globalThis.fetch) {
+    this.fetcher = (input, init) => fetcher(input, init);
+  }
 
   async check(signal?: AbortSignal): Promise<boolean> {
     const response = await this.request("GET", undefined, signal);

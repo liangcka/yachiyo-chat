@@ -1,4 +1,4 @@
-import rolePrompt from "../../角色提示词.txt";
+import rolePrompt from "../_generated/role-prompt";
 import type { ChatLocale } from "./validation";
 
 const localeSuffix: Record<ChatLocale, string> = {

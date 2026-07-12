@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSystemPrompt } from "./prompt";
+import { buildSystemPrompt } from "../../functions/_shared/prompt";
 
 describe("buildSystemPrompt", () => {
   it("preserves the canonical roles and appends Japanese runtime rules", () => {

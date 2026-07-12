@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ChatValidationError, validateChatRequest } from "./validation";
+import { ChatValidationError, validateChatRequest } from "../../functions/_shared/validation";
 
 const smallPng = "data:image/png;base64,iVBORw0KGgo=";
 

@@ -86,36 +86,41 @@ export async function onRequestPost(context: ChatContext): Promise<Response> {
   }
 
   const controller = new AbortController();
+  const deadlineController = new AbortController();
   let timedOut = false;
   const onClientAbort = () => controller.abort();
   context.request.signal.addEventListener("abort", onClientAbort, { once: true });
   const timeout = setTimeout(() => {
     timedOut = true;
+    deadlineController.abort();
     controller.abort();
   }, 30_000);
+  const cleanup = () => {
+    clearTimeout(timeout);
+    context.request.signal.removeEventListener("abort", onClientAbort);
+  };
 
   let upstream: Response;
   try {
     upstream = await requestStepFun(request, providerConfiguration!, controller.signal);
   } catch {
-    clearTimeout(timeout);
-    context.request.signal.removeEventListener("abort", onClientAbort);
+    cleanup();
     return timedOut
       ? problemResponse("PROVIDER_TIMEOUT", 504)
       : problemResponse("PROVIDER_UNAVAILABLE", 502);
   }
 
-  clearTimeout(timeout);
-  context.request.signal.removeEventListener("abort", onClientAbort);
-
   const contentType = upstream.headers.get("content-type")?.toLowerCase() ?? "";
   if (!upstream.ok || upstream.body === null || !contentType.includes("text/event-stream")) {
+    cleanup();
     await upstream.body?.cancel();
     return problemResponse("PROVIDER_ERROR", 502);
   }
 
   return proxyStepFunStream(upstream, {
     abort: () => controller.abort(),
-    signal: context.request.signal,
+    clientSignal: context.request.signal,
+    onFinalize: cleanup,
+    signal: deadlineController.signal,
   });
 }

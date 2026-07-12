@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { ChatMessage, Conversation, Locale } from "../domain/chat";
+import type { ChatMessage, Conversation, Locale, StoredImage } from "../domain/chat";
 import { copyFor } from "../i18n/messages";
 import { ChatClientError, type StreamChatOptions, type StreamChatRequest } from "../services/chat-client";
 import {
@@ -52,6 +52,16 @@ function repositoryWith(
 function ids(...values: string[]): () => string {
   let index = 0;
   return () => values[index++] ?? `generated-${index}`;
+}
+
+function deferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
 }
 
 describe("useChatController", () => {
@@ -272,5 +282,172 @@ describe("useChatController", () => {
     expect(result.current.locale).toBe("ja-JP");
     expect(repository.setLocale).toHaveBeenCalledWith("ja-JP");
     expect(repository.setConversationLocale).toHaveBeenCalledWith(conversation.id, "ja-JP");
+  });
+
+  it("cancels a send that is still persisting before switching conversations", async () => {
+    const firstWrite = deferred();
+    let writeCount = 0;
+    const nextConversation = { ...conversation, id: "conversation-2", title: "新的对话 2" };
+    const repository = repositoryWith({
+      createConversation: vi.fn(async () => nextConversation),
+      putMessage: vi.fn(async () => {
+        writeCount += 1;
+        if (writeCount === 1) await firstWrite.promise;
+      }),
+    });
+    const stream = vi.fn<StreamChatFunction>(async () => ({ truncated: false }));
+    const { result } = renderHook(() =>
+      useChatController({
+        id: ids("user-1", "assistant-1", "new-greeting"),
+        repository,
+        streamChat: stream,
+      }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    let sendPromise = Promise.resolve();
+    act(() => {
+      sendPromise = result.current.send("不要串到下一段对话");
+    });
+    await waitFor(() => expect(result.current.phase).toBe("streaming"));
+
+    let switchPromise = Promise.resolve();
+    act(() => {
+      switchPromise = result.current.newConversation();
+    });
+    expect(repository.createConversation).not.toHaveBeenCalled();
+
+    firstWrite.resolve();
+    await act(async () => {
+      await Promise.all([sendPromise, switchPromise]);
+    });
+
+    expect(stream).not.toHaveBeenCalled();
+    expect(result.current.activeConversation?.id).toBe(nextConversation.id);
+    expect(result.current.messages).toEqual([
+      expect.objectContaining({ conversationId: nextConversation.id, id: "new-greeting" }),
+    ]);
+    expect(vi.mocked(repository.putMessage).mock.calls.map(([message]) => message)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ conversationId: conversation.id, id: "user-1" }),
+        expect.objectContaining({ conversationId: conversation.id, id: "assistant-1", status: "stopped" }),
+      ]),
+    );
+  });
+
+  it("keeps request history within both the 20-message and 24000-character limits", async () => {
+    const longHistory: ChatMessage[] = Array.from({ length: 20 }, (_, index) => ({
+      conversationId: conversation.id,
+      createdAt: 20 + index,
+      id: `history-${index}`,
+      role: index % 2 === 0 ? "user" : "assistant",
+      status: "complete",
+      text: "界".repeat(4_000),
+    }));
+    const repository = repositoryWith({ listMessages: vi.fn(async () => longHistory) });
+    const stream = vi.fn<StreamChatFunction>(async () => ({ truncated: false }));
+    const { result } = renderHook(() =>
+      useChatController({ id: ids("user-1", "assistant-1"), repository, streamChat: stream }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    await act(async () => result.current.send("次"));
+
+    const request = stream.mock.calls[0]?.[0];
+    expect(request?.messages.length).toBeLessThanOrEqual(20);
+    expect(
+      request?.messages.reduce((total, message) => total + [...message.text].length, 0),
+    ).toBeLessThanOrEqual(24_000);
+    expect(request?.messages.at(-1)).toEqual({ role: "user", text: "次" });
+  });
+
+  it("recovers an interrupted persisted assistant as stopped on startup", async () => {
+    const interrupted: ChatMessage = {
+      ...greeting,
+      createdAt: 12,
+      id: "interrupted",
+      status: "streaming",
+      text: "还没说完",
+    };
+    const repository = repositoryWith({
+      listMessages: vi.fn(async () => [greeting, interrupted]),
+    });
+    const { result } = renderHook(() =>
+      useChatController({ repository, streamChat: vi.fn<StreamChatFunction>() }),
+    );
+
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    expect(result.current.messages.at(-1)).toMatchObject({ id: "interrupted", status: "stopped" });
+    expect(repository.putMessage).toHaveBeenCalledWith({ ...interrupted, status: "stopped" });
+  });
+
+  it("uses and synchronizes the selected latest conversation locale on startup", async () => {
+    const japaneseConversation = { ...conversation, locale: "ja-JP" as const };
+    const repository = repositoryWith({
+      getLocale: vi.fn(async () => "zh-CN" as const),
+      listConversations: vi.fn(async () => [japaneseConversation]),
+    });
+    const { result } = renderHook(() =>
+      useChatController({ repository, streamChat: vi.fn<StreamChatFunction>() }),
+    );
+
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    expect(result.current.locale).toBe("ja-JP");
+    expect(repository.setLocale).toHaveBeenCalledWith("ja-JP");
+  });
+
+  it("does not retry non-retryable request errors", async () => {
+    const stream = vi.fn<StreamChatFunction>(async () => {
+      throw new ChatClientError("INVALID_REQUEST");
+    });
+    const { result } = renderHook(() =>
+      useChatController({
+        id: ids("user-1", "assistant-1", "assistant-2"),
+        repository: repositoryWith(),
+        streamChat: stream,
+      }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+    await act(async () => result.current.send("测试"));
+
+    await act(async () => result.current.retry());
+
+    expect(stream).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves the user text when local image storage fails", async () => {
+    const image: StoredImage = {
+      blob: new Blob(["image"], { type: "image/jpeg" }),
+      conversationId: conversation.id,
+      height: 10,
+      id: "image-1",
+      mimeType: "image/jpeg",
+      width: 10,
+    };
+    const repository = repositoryWith({
+      putImage: vi.fn(async () => {
+        throw new Error("storage full");
+      }),
+    });
+    const stream = vi.fn<StreamChatFunction>();
+    const { result } = renderHook(() =>
+      useChatController({
+        id: ids("user-1", "assistant-1"),
+        repository,
+        streamChat: stream,
+      }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    act(() => result.current.setPendingImage(image));
+    await act(async () => result.current.send("至少保留文字"));
+
+    expect(repository.putMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "user-1", role: "user", text: "至少保留文字" }),
+    );
+    expect(result.current).toMatchObject({ errorCode: "STORAGE_ERROR", phase: "error" });
+    expect(stream).not.toHaveBeenCalled();
   });
 });

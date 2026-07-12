@@ -1,8 +1,8 @@
 import { env } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { sessionCookie, signSession } from "../_shared/session";
-import { collectClientEvents } from "../_shared/stream";
-import { onRequestPost } from "./chat";
+import { sessionCookie, signSession } from "../../functions/_shared/session";
+import { collectClientEvents } from "../../functions/_shared/stream";
+import { onRequestPost } from "../../functions/api/chat";
 
 const origin = "https://yachiyo.test";
 const providerOrigin = "https://api.stepfun.com";
@@ -191,5 +191,45 @@ describe("POST /api/chat", () => {
     );
     expect(events.at(-1)).toEqual({ type: "done", truncated: false });
     expect(providerFetch).not.toHaveBeenCalled();
+  });
+
+  it("keeps the provider deadline active after streaming headers arrive", async () => {
+    vi.useFakeTimers();
+    let upstreamController!: ReadableStreamDefaultController<Uint8Array>;
+    const cancel = vi.fn();
+    let providerSignal: AbortSignal | null = null;
+    providerFetch.mockImplementationOnce(async (input, init) => {
+      const providerRequest = input instanceof Request ? input : new Request(input, init);
+      providerSignal = providerRequest.signal;
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            upstreamController = controller;
+          },
+          cancel,
+        }),
+        { headers: { "content-type": "text/event-stream" } },
+      );
+    });
+
+    const response = await invoke(
+      await chatRequest(
+        { locale: "zh-CN", messages: [{ role: "user", text: "hello" }] },
+        "stream-timeout-session",
+      ),
+    );
+    const eventsPromise = collectClientEvents(response.body!);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    const timedOut = providerSignal!.aborted === true;
+    if (!timedOut) {
+      upstreamController.close();
+    }
+    const events = await eventsPromise;
+    vi.useRealTimers();
+
+    expect(timedOut).toBe(true);
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(events).toEqual([{ type: "error", code: "PROVIDER_STREAM_ERROR" }]);
   });
 });

@@ -300,6 +300,7 @@
   color: var(--text-primary);
   background: transparent;
   line-height: 1.5;
+  field-sizing: content;
 }
 
 .composer textarea::placeholder {
@@ -799,6 +800,46 @@
   color: #153866;
   background: var(--glass-strong);
   font-weight: 700;
+}
+
+.pwa-prompt {
+  position: absolute;
+  z-index: 45;
+  right: 0.9rem;
+  bottom: calc(var(--safe-bottom) + 8.7rem);
+  left: 0.9rem;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  min-height: 3.4rem;
+  padding: 0.65rem 0.75rem;
+  align-items: center;
+  gap: 0.55rem;
+  border: 1px solid var(--glass-border);
+  border-radius: 1.05rem;
+  color: var(--text-primary);
+  background: rgb(16 42 87 / 94%);
+  box-shadow: 0 0.8rem 2.6rem rgb(2 7 21 / 25%);
+  font-size: 0.78rem;
+  backdrop-filter: blur(20px);
+}
+
+.pwa-prompt button {
+  min-height: 2.2rem;
+  padding: 0.35rem 0.65rem;
+  border: 0;
+  border-radius: var(--radius-control);
+  color: #153866;
+  background: var(--glass-strong);
+  font-weight: 700;
+}
+
+.pwa-prompt button[aria-label] {
+  display: grid;
+  width: 2.2rem;
+  padding: 0;
+  color: var(--text-primary);
+  background: var(--glass-soft);
+  place-items: center;
 }
 
 @keyframes typing-pulse {

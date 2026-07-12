@@ -6,7 +6,7 @@ import {
   consumeDailyQuota,
   getAuthAttemptState,
   recordAuthFailure,
-} from "./rate-limit";
+} from "../../functions/_shared/rate-limit";
 
 describe("daily chat quota", () => {
   beforeEach(async () => {

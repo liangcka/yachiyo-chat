@@ -114,4 +114,21 @@ describe("chatReducer", () => {
       phase: "idle",
     });
   });
+
+  it("keeps a transient network request failure retryable while the browser remains online", () => {
+    const streaming = chatReducer(
+      { ...initialChatState, phase: "idle", activeConversation: conversation },
+      { type: "send-started", user, assistant },
+    );
+    const failed = chatReducer(streaming, {
+      errorCode: "NETWORK_ERROR",
+      messageId: assistant.id,
+      type: "failed",
+    });
+
+    expect(failed).toMatchObject({
+      errorCode: "NETWORK_ERROR",
+      phase: "error",
+    });
+  });
 });

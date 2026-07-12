@@ -8,6 +8,8 @@
 
 **Tech Stack:** Node.js 22.12+, npm, React, TypeScript, Vite, Dexie, Lucide React, Vitest 4.1+, Testing Library, fake-indexeddb, Cloudflare Pages Functions, Wrangler, Workers KV, `@cloudflare/vitest-pool-workers`, vite-plugin-pwa/Workbox, Playwright, ESLint.
 
+**Release implementation note:** Wrangler treats TypeScript declarations and tests inside `functions/` as route candidates and cannot bundle a text import outside that directory. The release layout therefore keeps declarations in `types/`, tests in `functions-tests/`, and generates the ignored `functions/_generated/role-prompt.ts` from the canonical root `角色提示词.txt` before builds and Functions tests. The invalid `_redirects` SPA rewrite was also omitted: Pages ignores rewrites when Functions are present and already applies SPA fallback when no top-level `404.html` exists.
+
 ## Global Constraints
 
 - Use Node.js 22.12 or newer; Vite's supported floor is Node.js 20.19 or 22.12.
@@ -42,7 +44,7 @@
 - `index.html` — PWA shell metadata.
 - `public/yachiyo-mark.svg` — code-native moon/star app mark.
 - `public/_headers` — CSP and security headers.
-- `public/_redirects` — SPA fallback.
+- No `public/_redirects` — Pages supplies automatic SPA fallback when no top-level `404.html` exists; Functions make rewrite rules inapplicable.
 
 ### Browser application
 
@@ -60,7 +62,8 @@
 
 ### Pages Functions
 
-- `functions/types.d.ts`, `functions/text-modules.d.ts` — documented manual Env and `.txt` module declarations; `npm run cf:types` can refresh runtime declarations in an ordinary writable checkout.
+- `types/functions.d.ts` — documented manual Env declarations; `npm run cf:types` can refresh runtime declarations in an ordinary writable checkout.
+- `functions/_generated/role-prompt.ts` — ignored build artifact generated from the canonical root prompt before type checks, builds, and Functions tests.
 - `functions/_shared/http.ts` — JSON/SSE responses and sanitized error codes.
 - `functions/_shared/crypto.ts` — SHA-256, constant-time comparison, base64url and HMAC helpers.
 - `functions/_shared/session.ts` — signed HttpOnly device session cookie.
@@ -75,7 +78,7 @@
 ### Tests and documentation
 
 - Colocated `*.test.ts(x)` files — client unit/component tests.
-- `functions/**/*.test.ts` — workerd tests for Pages Functions.
+- `functions-tests/**/*.test.ts` — workerd tests kept outside `functions/` so Wrangler does not expose them as routes.
 - `e2e/yachiyo-chat.spec.ts` — primary user journeys and responsive assertions.
 - `README.md` — local setup, rotated-secret configuration, Cloudflare Pages deployment, KV binding, and verification commands.
 
@@ -1067,7 +1070,7 @@ Run: `npm run test:e2e`
 
 Expected: all Chromium projects pass with no console errors.
 
-Run: `rg -n "STEPFUN_API_KEY=.+|Authorization: Bearer [A-Za-z0-9]|3JUG" . -g '!node_modules' -g '!dist' -g '!.git'`
+Run: interactively collect the revoked key's short prefix, then scan for that prefix and `Authorization: Bearer` without storing the old key or prefix in the repository.
 
 Expected: no matches. Do not place the full previously exposed key into this command or any file.
 

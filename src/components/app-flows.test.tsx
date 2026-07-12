@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { App, type AppRepository, type AppServices, type SessionService } from "../App";
@@ -136,6 +136,7 @@ describe("App flows", () => {
     await user.click(screen.getByRole("button", { name: "日本語" }));
     await waitFor(() => expect(screen.getByPlaceholderText("何でも話してね")).toBeInTheDocument());
     expect(services.repository.locale).toBe("ja-JP");
+    expect(document.documentElement.lang).toBe("ja-JP");
     expect(services.session.authenticate).toHaveBeenCalledWith("correct horse moonlight");
   });
 
@@ -202,6 +203,43 @@ describe("App flows", () => {
         "stopped",
       ),
     );
+  });
+
+  it("stops an active stream before signing out", async () => {
+    const user = userEvent.setup();
+    const events: string[] = [];
+    let streamSignal: AbortSignal | undefined;
+    const stream = vi.fn<StreamChatFunction>(async (_request, options) => {
+      streamSignal = options.signal;
+      options.onDelta("还在慢慢写");
+      return new Promise((_resolve, reject) => {
+        options.signal?.addEventListener(
+          "abort",
+          () => {
+            events.push("stream-aborted");
+            reject(new DOMException("Aborted", "AbortError"));
+          },
+          { once: true },
+        );
+      });
+    });
+    const services = fakeServices({ stream });
+    services.session.signOut = vi.fn(async () => {
+      events.push("session-signed-out");
+    });
+    render(<App services={services} />);
+    const composer = await screen.findByPlaceholderText("什么都可以告诉我");
+    await user.type(composer, "写到一半");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+    expect(await screen.findByText("还在慢慢写")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "菜单" }));
+    await user.click(screen.getByRole("button", { name: "退出访问" }));
+
+    await waitFor(() => expect(services.session.signOut).toHaveBeenCalledOnce());
+    expect(streamSignal?.aborted).toBe(true);
+    expect(events).toEqual(["stream-aborted", "session-signed-out"]);
+    expect(await screen.findByLabelText("访问码")).toBeVisible();
   });
 
   it("previews, removes, and sends a processed camera image", async () => {
@@ -284,5 +322,82 @@ describe("App flows", () => {
     expect(await screen.findByLabelText("访问码")).toBeVisible();
     expect(repository.messages.some(({ text }) => text === "第一条")).toBe(true);
     expect(repository.messages.some(({ text }) => text === "第二条")).toBe(true);
+  });
+
+  it("does not offer an AI retry when saving a message fails", async () => {
+    const user = userEvent.setup();
+    const services = fakeServices();
+    render(<App services={services} />);
+    const composer = await screen.findByPlaceholderText("什么都可以告诉我");
+    vi.spyOn(services.repository, "putMessage").mockRejectedValue(new Error("storage unavailable"));
+
+    await user.type(composer, "请记住这句话");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    expect((await screen.findAllByText("本地空间不足，请先清理历史记录。")).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "重试" })).not.toBeInTheDocument();
+  });
+
+  it("offers an AI retry after a recoverable provider failure", async () => {
+    const user = userEvent.setup();
+    const stream = vi.fn<StreamChatFunction>().mockRejectedValue(new ChatClientError("PROVIDER_ERROR"));
+    render(<App services={fakeServices({ stream })} />);
+    const composer = await screen.findByPlaceholderText("什么都可以告诉我");
+
+    await user.type(composer, "再试着回答一次");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    expect(await screen.findByRole("button", { name: "重试" })).toBeVisible();
+  });
+
+  it("does not offer an AI retry for an invalid generation request", async () => {
+    const user = userEvent.setup();
+    const stream = vi.fn<StreamChatFunction>().mockRejectedValue(new ChatClientError("INVALID_REQUEST"));
+    render(<App services={fakeServices({ stream })} />);
+    const composer = await screen.findByPlaceholderText("什么都可以告诉我");
+
+    await user.type(composer, "无法处理的请求");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    expect((await screen.findAllByText("暂时连接不上，再试一次吧。")).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "重试" })).not.toBeInTheDocument();
+  });
+
+  it("does not offer an AI retry when the conversation limit is reached", async () => {
+    const user = userEvent.setup();
+    const services = fakeServices();
+    render(<App services={services} />);
+    await screen.findByPlaceholderText("什么都可以告诉我");
+    vi.spyOn(services.repository, "createConversation").mockRejectedValue(
+      new Error("conversation limit reached"),
+    );
+
+    await user.click(screen.getByRole("button", { name: "菜单" }));
+    await user.click(screen.getByRole("button", { name: "新建对话" }));
+
+    expect((await screen.findAllByText("本地最多保留 30 段对话，请先删除一段。")).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "重试" })).not.toBeInTheDocument();
+  });
+
+  it("keeps local history readable but disables network actions while offline", async () => {
+    let online = false;
+    Object.defineProperty(navigator, "onLine", {
+      configurable: true,
+      get: () => online,
+    });
+    const services = fakeServices();
+    render(<App services={services} />);
+
+    const composer = await screen.findByPlaceholderText("什么都可以告诉我");
+    expect(screen.getByText(/彩叶~今天也辛苦啦/)).toBeVisible();
+    expect(composer).toBeDisabled();
+    expect(screen.getByRole("button", { name: "拍摄" })).toBeDisabled();
+    expect(screen.getByText("当前离线，可查看本地记录")).toBeVisible();
+
+    act(() => {
+      online = true;
+      window.dispatchEvent(new Event("online"));
+    });
+    await waitFor(() => expect(composer).toBeEnabled());
   });
 });

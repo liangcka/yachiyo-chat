@@ -73,7 +73,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
           ...message,
           status: "complete",
         })),
-        phase: "idle",
+        phase: state.phase === "offline" ? "offline" : "idle",
       };
     case "stopped":
       return {
@@ -82,7 +82,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
           ...message,
           status: "stopped",
         })),
-        phase: "idle",
+        phase: state.phase === "offline" ? "offline" : "idle",
       };
     case "failed":
       return {
@@ -92,13 +92,14 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
           ...message,
           status: "failed",
         })),
-        phase: action.errorCode === "NETWORK_ERROR" ? "offline" : "error",
+        phase: "error",
       };
     case "connectivity-changed":
       if (!action.online) return { ...state, phase: "offline" };
-      return state.phase === "offline"
-        ? { ...state, errorCode: undefined, phase: "idle" }
-        : state;
+      if (state.phase !== "offline") return state;
+      return state.errorCode === undefined
+        ? { ...state, phase: "idle" }
+        : { ...state, phase: "error" };
     case "conversation-selected":
       return {
         activeConversation: action.conversation,

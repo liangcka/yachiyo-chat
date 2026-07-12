@@ -14,6 +14,8 @@ import { YachiyoDatabase } from "./data/db";
 import type { Conversation, Locale, StoredImage } from "./domain/chat";
 import { processImage, type ImageProcessingErrorCode, type ProcessedImage } from "./features/capture/image-processor";
 import { copyFor, type UiCopy } from "./i18n/messages";
+import { UpdatePrompt } from "./pwa/UpdatePrompt";
+import { useOnlineStatus } from "./pwa/use-online-status";
 import { streamChat } from "./services/chat-client";
 import { SessionClient } from "./services/session-client";
 
@@ -71,14 +73,27 @@ function controllerErrorMessage(code: string, copy: UiCopy): string {
   return copy.genericFailure;
 }
 
+function isRetryableGenerationError(code: string | undefined): boolean {
+  return (
+    code === "PROVIDER_ERROR" ||
+    code === "SERVICE_UNAVAILABLE" ||
+    code === "NETWORK_ERROR" ||
+    code === "STREAM_ERROR"
+  );
+}
+
 export function App({ services }: AppProps) {
   const activeServices = services ?? productionServices;
   const controller = useChatController({
     repository: activeServices.repository,
     streamChat: activeServices.streamChat,
   });
+  const { isOnline } = useOnlineStatus();
+  const setControllerOnline = controller.setOnline;
   const copy = copyFor(controller.locale);
-  const [authentication, setAuthentication] = useState<AuthenticationState>("checking");
+  const [authentication, setAuthentication] = useState<AuthenticationState>(() =>
+    navigator.onLine ? "checking" : "authenticated",
+  );
   const [composerValue, setComposerValue] = useState("");
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -89,12 +104,26 @@ export function App({ services }: AppProps) {
   const handledErrorRef = useRef<string | undefined>(undefined);
   const toastSequenceRef = useRef(0);
 
+  useEffect(() => {
+    const previousLanguage = document.documentElement.lang;
+    document.documentElement.lang = controller.locale;
+    return () => {
+      document.documentElement.lang = previousLanguage;
+    };
+  }, [controller.locale]);
+
   const showToast = useCallback((message: string, tone: ToastState["tone"] = "info") => {
     setToast({ id: ++toastSequenceRef.current, message, tone });
   }, []);
   const showSessionFailure = useEffectEvent(() => showToast(copy.genericFailure, "error"));
 
   useEffect(() => {
+    if (!isOnline) {
+      const timeout = setTimeout(() => {
+        setAuthentication((current) => (current === "checking" ? "authenticated" : current));
+      }, 0);
+      return () => clearTimeout(timeout);
+    }
     const abortController = new AbortController();
     let cancelled = false;
     void activeServices.session
@@ -112,7 +141,12 @@ export function App({ services }: AppProps) {
       cancelled = true;
       abortController.abort();
     };
-  }, [activeServices, showToast]);
+  }, [activeServices, isOnline, showToast]);
+
+  useEffect(() => {
+    const timeout = setTimeout(() => setControllerOnline(isOnline), 0);
+    return () => clearTimeout(timeout);
+  }, [isOnline, setControllerOnline]);
 
   useEffect(() => {
     if (toast === undefined) return;
@@ -245,6 +279,7 @@ export function App({ services }: AppProps) {
   };
 
   const handleSignOut = async () => {
+    await controller.stop();
     await activeServices.session.signOut();
     setAuthentication("unauthenticated");
   };
@@ -259,7 +294,7 @@ export function App({ services }: AppProps) {
     ) : (
       <>
         <TopControls
-          captureDisabled={controller.phase === "streaming" || controller.phase === "offline"}
+          captureDisabled={!isOnline || controller.phase === "streaming" || controller.phase === "offline"}
           copy={copy}
           onCaptureError={(code) => showToast(imageErrorMessage(code, copy), "error")}
           onImage={handleImage}
@@ -271,15 +306,17 @@ export function App({ services }: AppProps) {
         />
         <ConversationView imageUrls={imageUrls} locale={controller.locale} messages={controller.messages} />
         <div className="chat-bottom">
-          {controller.phase === "offline" ? <p className="status-banner">{copy.offline}</p> : null}
+          {!isOnline || controller.phase === "offline" ? <p className="status-banner">{copy.offline}</p> : null}
           {controller.phase === "error" &&
           controller.errorCode !== "DAILY_QUOTA_EXCEEDED" &&
           controller.errorCode !== "SESSION_REQUIRED" ? (
             <div className="status-banner status-banner--error">
               <span>{controllerErrorMessage(controller.errorCode ?? "", copy)}</span>
-              <button onClick={() => void controller.retry()} type="button">
-                {copy.retry}
-              </button>
+              {isRetryableGenerationError(controller.errorCode) ? (
+                <button onClick={() => void controller.retry()} type="button">
+                  {copy.retry}
+                </button>
+              ) : null}
             </div>
           ) : null}
           <ControlDock
@@ -300,7 +337,7 @@ export function App({ services }: AppProps) {
             onSend={handleSend}
             onStop={controller.stop}
             pendingImageDataUrl={pendingImageDataUrl}
-            phase={controller.phase}
+            phase={isOnline ? controller.phase : "offline"}
             value={composerValue}
           />
         </div>
@@ -347,6 +384,7 @@ export function App({ services }: AppProps) {
           authenticatedContent
         )}
         <ToastRegion message={toast?.message} tone={toast?.tone} />
+        <UpdatePrompt copy={copy} />
       </div>
     </main>
   );

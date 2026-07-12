@@ -113,4 +113,22 @@ describe("processImage", () => {
     const decoded = await vi.mocked(runtime.decode).mock.results[0]?.value;
     expect(decoded?.dispose).toHaveBeenCalledOnce();
   });
+
+  it("rejects unsafe decoded dimensions before allocating an encoding canvas", async () => {
+    const runtime = runtimeWith();
+    const dispose = vi.fn();
+    runtime.decode = vi.fn(async () => ({
+      dispose,
+      height: 10_000,
+      source: {} as CanvasImageSource,
+      width: 10_000,
+    }));
+
+    await expect(
+      processImage(new File(["jpeg"], "huge-pixels.jpg", { type: "image/jpeg" }), runtime),
+    ).rejects.toMatchObject({ code: "IMAGE_TOO_LARGE" });
+
+    expect(runtime.encode).not.toHaveBeenCalled();
+    expect(dispose).toHaveBeenCalledOnce();
+  });
 });

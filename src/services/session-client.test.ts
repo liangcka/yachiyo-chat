@@ -28,6 +28,16 @@ describe("SessionClient", () => {
     });
   });
 
+  it("invokes browser fetch without rebinding its receiver", async () => {
+    const bindingSensitiveFetch = vi.fn(function (this: unknown) {
+      if (this !== undefined) throw new TypeError("Illegal invocation");
+      return Promise.resolve(jsonResponse({ authenticated: false }));
+    }) as unknown as typeof fetch;
+    const bindingSafeClient = new SessionClient(bindingSensitiveFetch);
+
+    await expect(bindingSafeClient.check()).resolves.toBe(false);
+  });
+
   it("authenticates without retaining or logging the access code", async () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
     const secret = "correct horse moonlight";

@@ -7,10 +7,13 @@ export type ClientStreamEvent =
 
 interface ProxyOptions {
   abort?: () => void;
+  clientSignal?: AbortSignal;
+  onFinalize?: () => void;
   signal?: AbortSignal;
 }
 
 const maximumOutputCharacters = 200;
+const maximumProviderRecordBytes = 64 * 1_024;
 const encoder = new TextEncoder();
 
 function takeUnicodePrefix(
@@ -113,6 +116,15 @@ export function proxyStepFunStream(upstream: Response, options: ProxyOptions = {
   const reader = upstream.body.getReader();
   let abortCalled = false;
   let closed = false;
+  let finalized = false;
+  let removeSignalListeners = () => undefined;
+
+  const finalize = () => {
+    if (finalized) return;
+    finalized = true;
+    removeSignalListeners();
+    options.onFinalize?.();
+  };
 
   const abortUpstream = () => {
     if (!abortCalled) {
@@ -130,6 +142,7 @@ export function proxyStepFunStream(upstream: Response, options: ProxyOptions = {
       const close = () => {
         if (!closed) {
           closed = true;
+          finalize();
           controller.close();
         }
       };
@@ -150,12 +163,9 @@ export function proxyStepFunStream(upstream: Response, options: ProxyOptions = {
           encodeClientEvent({ type: "error", code: "PROVIDER_STREAM_ERROR" }),
         );
         abortUpstream();
-        try {
-          await reader.cancel();
-        } catch {
-          // The provider may already have closed a failed stream.
-        }
+        const cancellation = reader.cancel().catch(() => undefined);
         close();
+        await cancellation;
       };
 
       const handleData = async (data: string): Promise<boolean> => {
@@ -197,6 +207,9 @@ export function proxyStepFunStream(upstream: Response, options: ProxyOptions = {
           }
 
           const record = buffer.slice(0, separator.index);
+          if (encoder.encode(record).byteLength > maximumProviderRecordBytes) {
+            throw new TypeError("Provider record exceeds the byte limit");
+          }
           buffer = buffer.slice(separator.index + separator[0].length);
           const data = recordData(record);
           if (data !== null && !(await handleData(data))) {
@@ -205,6 +218,9 @@ export function proxyStepFunStream(upstream: Response, options: ProxyOptions = {
         }
 
         if (flush && buffer.trim().length > 0) {
+          if (encoder.encode(buffer).byteLength > maximumProviderRecordBytes) {
+            throw new TypeError("Provider record exceeds the byte limit");
+          }
           const data = recordData(buffer);
           buffer = "";
           if (data !== null && !(await handleData(data))) {
@@ -214,7 +230,7 @@ export function proxyStepFunStream(upstream: Response, options: ProxyOptions = {
         return true;
       };
 
-      const onAbort = () => {
+      const onClientAbort = () => {
         if (closed) {
           return;
         }
@@ -222,12 +238,24 @@ export function proxyStepFunStream(upstream: Response, options: ProxyOptions = {
         void reader.cancel().catch(() => undefined);
         close();
       };
-      options.signal?.addEventListener("abort", onAbort, { once: true });
+      const onDeadline = () => {
+        void fail();
+      };
+      options.clientSignal?.addEventListener("abort", onClientAbort, { once: true });
+      options.signal?.addEventListener("abort", onDeadline, { once: true });
+      removeSignalListeners = () => {
+        options.clientSignal?.removeEventListener("abort", onClientAbort);
+        options.signal?.removeEventListener("abort", onDeadline);
+      };
 
       void (async () => {
         try {
           if (options.signal?.aborted) {
-            onAbort();
+            await fail();
+            return;
+          }
+          if (options.clientSignal?.aborted) {
+            onClientAbort();
             return;
           }
 
@@ -241,24 +269,34 @@ export function proxyStepFunStream(upstream: Response, options: ProxyOptions = {
               return;
             }
 
+            if (value.byteLength > maximumProviderRecordBytes) {
+              await fail();
+              return;
+            }
             buffer += decoder.decode(value, { stream: true });
             if (!(await consumeRecords(false))) {
               return;
             }
+            if (encoder.encode(buffer).byteLength > maximumProviderRecordBytes) {
+              await fail();
+              return;
+            }
           }
         } catch {
-          if (!options.signal?.aborted) {
+          if (!options.clientSignal?.aborted) {
             await fail();
           }
-        } finally {
-          options.signal?.removeEventListener("abort", onAbort);
         }
       })();
     },
     async cancel() {
       closed = true;
       abortUpstream();
-      await reader.cancel();
+      try {
+        await reader.cancel();
+      } finally {
+        finalize();
+      }
     },
   });
 

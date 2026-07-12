@@ -47,6 +47,8 @@ const allowedTypes = new Set<StoredImageMimeType>([
 const maximumSourceBytes = 15 * 1024 * 1024;
 const maximumOutputBytes = 2 * 1024 * 1024;
 const maximumLongEdge = 1600;
+const maximumDecodedDimension = 32_768;
+const maximumDecodedPixels = 40_000_000;
 const qualities = [0.82, 0.74, 0.66, 0.58, 0.5] as const;
 const maximumDimensionPasses = 12;
 
@@ -172,6 +174,13 @@ export async function processImage(
   }
 
   try {
+    if (
+      decoded.width > maximumDecodedDimension ||
+      decoded.height > maximumDecodedDimension ||
+      decoded.width * decoded.height > maximumDecodedPixels
+    ) {
+      throw new ImageProcessingError("IMAGE_TOO_LARGE");
+    }
     let { width, height } = calculateTargetSize(decoded.width, decoded.height);
     const requestedMime: StoredImageMimeType =
       file.type === "image/jpeg" ? "image/jpeg" : "image/webp";

@@ -24,6 +24,7 @@ import {
   sessionFromRequest,
   signSession,
 } from "../_shared/session";
+import { readJsonBodyWithLimit } from "../_shared/validation";
 
 interface SessionContext {
   request: Request;
@@ -61,18 +62,8 @@ async function parseAccessCode(request: Request): Promise<string | null> {
     return null;
   }
 
-  const declaredLength = Number(request.headers.get("content-length"));
-  if (Number.isFinite(declaredLength) && declaredLength > maximumBodyLength) {
-    return null;
-  }
-
-  const body = await request.text();
-  if (body.length === 0 || body.length > maximumBodyLength) {
-    return null;
-  }
-
   try {
-    const parsed: unknown = JSON.parse(body);
+    const parsed = await readJsonBodyWithLimit(request, maximumBodyLength);
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
       return null;
     }
