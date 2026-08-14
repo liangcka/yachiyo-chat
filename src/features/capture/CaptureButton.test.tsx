@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { StrictMode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { copyFor } from "../../i18n/messages";
 import { CaptureButton } from "./CaptureButton";
@@ -14,23 +15,32 @@ const processed: ProcessedImage = {
 };
 
 describe("CaptureButton", () => {
-  it("uses a real localized button and an environment camera input", () => {
-    render(
+  it("uses a real localized button to open an environment camera input", async () => {
+    const user = userEvent.setup();
+    const { container } = render(
       <CaptureButton copy={copyFor("ja-JP")} onError={vi.fn()} onImage={vi.fn()} />,
     );
 
-    expect(screen.getByRole("button", { name: "撮影" })).toBeEnabled();
-    const input = screen.getByLabelText("撮影");
+    const button = screen.getByRole("button", { name: "撮影" });
+    expect(button).toBeEnabled();
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(input).not.toBeNull();
     expect(input).toHaveAttribute("type", "file");
     expect(input).toHaveAttribute("accept", "image/*");
     expect(input).toHaveAttribute("capture", "environment");
+    expect(input).toHaveAttribute("aria-hidden", "true");
+    expect(input).toHaveAttribute("tabindex", "-1");
+
+    const openFilePicker = vi.spyOn(input!, "click").mockImplementation(() => undefined);
+    await user.click(button);
+    expect(openFilePicker).toHaveBeenCalledOnce();
   });
 
   it("processes one selected image and resets the input for same-file reselection", async () => {
     const user = userEvent.setup();
     const onImage = vi.fn();
     const process = vi.fn(async () => processed);
-    render(
+    const { container } = render(
       <CaptureButton
         copy={copyFor("zh-CN")}
         onError={vi.fn()}
@@ -38,7 +48,7 @@ describe("CaptureButton", () => {
         process={process}
       />,
     );
-    const input = screen.getByLabelText("拍摄") as HTMLInputElement;
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
     const file = new File(["jpeg"], "photo.jpg", { type: "image/jpeg" });
 
     await user.upload(input, file);
@@ -57,7 +67,7 @@ describe("CaptureButton", () => {
         }),
     );
     const onError = vi.fn();
-    render(
+    const { container } = render(
       <CaptureButton
         copy={copyFor("zh-CN")}
         onError={onError}
@@ -65,20 +75,54 @@ describe("CaptureButton", () => {
         process={process}
       />,
     );
-    const input = screen.getByLabelText("拍摄") as HTMLInputElement;
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
 
     fireEvent.change(input, {
       target: { files: [new File(["jpeg"], "photo.jpg", { type: "image/jpeg" })] },
     });
-    expect(screen.getByRole("button", { name: "正在处理图片…" })).toBeDisabled();
+    const processingButton = screen.getByRole("button", { name: "正在处理图片…" });
+    expect(processingButton).toBeDisabled();
+    expect(processingButton).toHaveAttribute("aria-busy", "true");
 
     rejectProcessing?.(new ImageProcessingError("IMAGE_TOO_LARGE"));
     await waitFor(() => expect(onError).toHaveBeenCalledWith("IMAGE_TOO_LARGE"));
+    const readyButton = screen.getByRole("button", { name: "拍摄" });
+    expect(readyButton).toBeEnabled();
+    expect(readyButton).toHaveAttribute("aria-busy", "false");
+  });
+
+  it("completes delayed processing when mounted in StrictMode", async () => {
+    let resolveProcessing: ((image: ProcessedImage) => void) | undefined;
+    const process = vi.fn(
+      () =>
+        new Promise<ProcessedImage>((resolve) => {
+          resolveProcessing = resolve;
+        }),
+    );
+    const onImage = vi.fn();
+    const { container } = render(
+      <StrictMode>
+        <CaptureButton
+          copy={copyFor("zh-CN")}
+          onError={vi.fn()}
+          onImage={onImage}
+          process={process}
+        />
+      </StrictMode>,
+    );
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+
+    fireEvent.change(input, {
+      target: { files: [new File(["jpeg"], "photo.jpg", { type: "image/jpeg" })] },
+    });
+    resolveProcessing?.(processed);
+
+    await waitFor(() => expect(onImage).toHaveBeenCalledWith(processed));
     expect(screen.getByRole("button", { name: "拍摄" })).toBeEnabled();
   });
 
   it("respects an externally disabled state", () => {
-    render(
+    const { container } = render(
       <CaptureButton
         copy={copyFor("zh-CN")}
         disabled
@@ -88,6 +132,6 @@ describe("CaptureButton", () => {
     );
 
     expect(screen.getByRole("button", { name: "拍摄" })).toBeDisabled();
-    expect(screen.getByLabelText("拍摄")).toBeDisabled();
+    expect(container.querySelector<HTMLInputElement>('input[type="file"]')).toBeDisabled();
   });
 });

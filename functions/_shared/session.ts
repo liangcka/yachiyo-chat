@@ -9,6 +9,8 @@ import {
 export interface SessionPayload {
   sid: string;
   exp: number;
+  /** 本设备持久化标识,用于按设备统计每日额度;旧 token 无此字段时回退到 sid */
+  deviceId?: string;
 }
 
 export const SESSION_COOKIE = "yachiyo_session";
@@ -24,13 +26,26 @@ function isSessionPayload(value: unknown): value is SessionPayload {
   }
 
   const candidate = value as Record<string, unknown>;
+  if (
+    typeof candidate.sid !== "string" ||
+    candidate.sid.length === 0 ||
+    candidate.sid.length > 128 ||
+    typeof candidate.exp !== "number" ||
+    !Number.isSafeInteger(candidate.exp) ||
+    candidate.exp <= 0
+  ) {
+    return false;
+  }
+
+  if (candidate.deviceId === undefined) {
+    return true;
+  }
+
   return (
-    typeof candidate.sid === "string" &&
-    candidate.sid.length > 0 &&
-    candidate.sid.length <= 128 &&
-    typeof candidate.exp === "number" &&
-    Number.isSafeInteger(candidate.exp) &&
-    candidate.exp > 0
+    typeof candidate.deviceId === "string" &&
+    candidate.deviceId.length >= 1 &&
+    candidate.deviceId.length <= 128 &&
+    /^[A-Za-z0-9_-]+$/u.test(candidate.deviceId)
   );
 }
 
@@ -43,7 +58,13 @@ export async function signSession(
   }
 
   const encodedPayload = base64UrlEncode(
-    utf8Bytes(JSON.stringify({ sid: payload.sid, exp: payload.exp })),
+    utf8Bytes(
+      JSON.stringify({
+        sid: payload.sid,
+        exp: payload.exp,
+        ...(payload.deviceId === undefined ? {} : { deviceId: payload.deviceId }),
+      }),
+    ),
   );
   const signature = await hmacSha256(secret, encodedPayload);
   return `${encodedPayload}.${base64UrlEncode(signature)}`;
@@ -77,7 +98,11 @@ export async function verifySession(
       return null;
     }
 
-    return { sid: parsed.sid, exp: parsed.exp };
+    return {
+      sid: parsed.sid,
+      exp: parsed.exp,
+      ...(parsed.deviceId === undefined ? {} : { deviceId: parsed.deviceId }),
+    };
   } catch {
     return null;
   }

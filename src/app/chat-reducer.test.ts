@@ -131,4 +131,24 @@ describe("chatReducer", () => {
       phase: "error",
     });
   });
+
+  it("handles compress-started and context-compressed without destroying messages", () => {
+    const idleState = {
+      ...initialChatState,
+      activeConversation: conversation,
+      messages: [user],
+      phase: "idle" as const,
+    };
+    const compressing = chatReducer(idleState, { type: "compress-started" });
+    expect(compressing.phase).toBe("compressing");
+    expect(compressing.messages).toEqual([user]);
+
+    const compressed = chatReducer(compressing, {
+      type: "context-compressed",
+      summary: "用户今天有点累",
+    });
+    expect(compressed.phase).toBe("idle");
+    expect(compressed.messages).toEqual([user]);
+    expect(compressed.activeConversation?.summary).toBe("用户今天有点累");
+  });
 });

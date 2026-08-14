@@ -10,6 +10,7 @@ interface ProxyOptions {
   clientSignal?: AbortSignal;
   onFinalize?: () => void;
   signal?: AbortSignal;
+  maxCharacters?: number;
 }
 
 const maximumOutputCharacters = 200;
@@ -108,7 +109,11 @@ function extractDeltaContent(data: string): string | null {
   return content;
 }
 
-export function proxyStepFunStream(upstream: Response, options: ProxyOptions = {}): Response {
+export function proxyStepFunStream(
+  upstream: Response,
+  options: ProxyOptions = {},
+  extractor: (data: string) => string | null = extractDeltaContent,
+): Response {
   if (upstream.body === null) {
     return responseFromEvents([{ type: "error", code: "PROVIDER_STREAM_ERROR" }]);
   }
@@ -174,12 +179,13 @@ export function proxyStepFunStream(upstream: Response, options: ProxyOptions = {
           return false;
         }
 
-        const content = extractDeltaContent(data);
+        const content = extractor(data);
         if (content === null) {
           return true;
         }
 
-        const remaining = maximumOutputCharacters - emittedCharacters;
+        const characterLimit = options.maxCharacters ?? maximumOutputCharacters;
+        const remaining = characterLimit - emittedCharacters;
         const accepted = takeUnicodePrefix(content, remaining);
         if (accepted.characters > 0) {
           emittedCharacters += accepted.characters;
@@ -303,11 +309,17 @@ export function proxyStepFunStream(upstream: Response, options: ProxyOptions = {
   return new Response(body, { headers: streamHeaders() });
 }
 
-export function mockChatResponse(locale: ChatLocale): Response {
+export const proxyProviderStream = proxyStepFunStream;
+
+export function mockChatResponse(locale: ChatLocale, mode?: string): Response {
   const text =
-    locale === "ja-JP"
-      ? "彩葉〜今日もお疲れさま！（笑顔で温かいパンケーキを差し出す）"
-      : "彩叶~今天也辛苦啦！（笑着递上热乎乎的松饼）";
+    mode === "summary"
+      ? locale === "ja-JP"
+        ? "これまでの会話：ユーザーと八千代の交流。重要な話題と約束が共有されています。"
+        : "前情摘要：用户与八千代进行了日常交流，确认了相互的约定与近期话题。"
+      : locale === "ja-JP"
+        ? "彩葉〜今日もお疲れさま！（笑顔で温かいパンケーキを差し出す）"
+        : "彩叶~今天也辛苦啦！（笑着递上热乎乎的松饼）";
   const characters = [...text];
   const midpoint = Math.ceil(characters.length / 2);
   return responseFromEvents([

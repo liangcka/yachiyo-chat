@@ -18,9 +18,10 @@ async function chatRequest(
   body: unknown,
   sessionId: string,
   runtimeEnv: Env = env,
+  deviceId = "device-abc123",
 ): Promise<Request> {
   const token = await signSession(
-    { sid: sessionId, exp: Date.now() + 60_000 },
+    { sid: sessionId, exp: Date.now() + 60_000, deviceId },
     runtimeEnv.SESSION_SIGNING_SECRET,
   );
   const cookie = sessionCookie(token).split(";", 1)[0];
@@ -157,14 +158,16 @@ describe("POST /api/chat", () => {
   });
 
   it("rejects a consumed daily quota before contacting StepFun", async () => {
-    const sessionId = "quota-session";
+    const deviceId = "device-abc123";
     const date = new Date().toISOString().slice(0, 10);
-    await env.RATE_LIMIT_KV.put(`quota:${date}:${sessionId}`, env.DAILY_REQUEST_LIMIT);
+    await env.RATE_LIMIT_KV.put(`quota:${date}:${deviceId}`, env.DAILY_REQUEST_LIMIT);
 
     const response = await invoke(
       await chatRequest(
         { locale: "zh-CN", messages: [{ role: "user", text: "再聊一句" }] },
-        sessionId,
+        "quota-session",
+        env,
+        deviceId,
       ),
     );
 
@@ -191,6 +194,43 @@ describe("POST /api/chat", () => {
     );
     expect(events.at(-1)).toEqual({ type: "done", truncated: false });
     expect(providerFetch).not.toHaveBeenCalled();
+  });
+
+  it("uses an explicit Step Plan key instead of the canned mock response", async () => {
+    const mockEnv: Env = { ...env, APP_MODE: "mock" };
+    const apiKey = "sk-step-plan-abcdefghijklmnopqrstuvwxyz012345";
+    let upstreamRequest: Request | undefined;
+    providerFetch.mockImplementationOnce(async (input, init) => {
+      upstreamRequest = input instanceof Request ? input : new Request(input, init);
+      return new Response(providerSse("这是 Step Plan 的真实流式回答"), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    });
+
+    const response = await invoke(
+      await chatRequest(
+        {
+          locale: "zh-CN",
+          messages: [{ role: "user", text: "这次不要固定回复" }],
+          provider: "stepfun",
+          apiKey,
+          model: "step-3.7-flash",
+        },
+        "mock-step-plan-session",
+        mockEnv,
+      ),
+      mockEnv,
+    );
+    const events = await collectClientEvents(response.body!);
+
+    expect(upstreamRequest?.url).toBe(providerUrl);
+    expect(upstreamRequest?.headers.get("authorization")).toBe(`Bearer ${apiKey}`);
+    expect(events).toEqual([
+      { type: "delta", text: "这是 Step Plan 的真实流式回答" },
+      { type: "done", truncated: false },
+    ]);
+    expect(providerFetch).toHaveBeenCalledOnce();
   });
 
   it("keeps the provider deadline active after streaming headers arrive", async () => {

@@ -1,4 +1,5 @@
 import type { Locale } from "../domain/chat";
+import type { ProviderId } from "../domain/llm";
 
 export interface StreamChatMessage {
   role: "user" | "assistant";
@@ -9,6 +10,11 @@ export interface StreamChatMessage {
 export interface StreamChatRequest {
   locale: Locale;
   messages: StreamChatMessage[];
+  mode?: "chat" | "summary";
+  /** 用户自带 Key 路径：三者必须同时存在，否则走服务端 fallback */
+  provider?: ProviderId;
+  apiKey?: string;
+  model?: string;
 }
 
 export interface StreamChatResult {

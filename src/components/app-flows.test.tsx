@@ -2,10 +2,12 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { App, type AppRepository, type AppServices, type SessionService } from "../App";
+import { YachiyoDatabase } from "../data/db";
 import type { ChatMessage, Conversation, Locale, StoredImage } from "../domain/chat";
 import type { ProcessedImage } from "../features/capture/image-processor";
 import type { StreamChatFunction } from "../app/use-chat-controller";
 import { ChatClientError } from "../services/chat-client";
+import { LlmSettingsService } from "../services/llm-settings";
 import { SessionClientError } from "../services/session-client";
 
 class MemoryRepository implements AppRepository {
@@ -40,6 +42,15 @@ class MemoryRepository implements AppRepository {
     if (conversation !== undefined) conversation.title = title.trim();
   }
 
+  async updateConversationSummary(id: string, summary: string, now = Date.now()): Promise<void> {
+    const conversation = await this.getConversation(id);
+    if (conversation !== undefined) {
+      conversation.summary = summary;
+      conversation.lastCompressedAt = now;
+      conversation.updatedAt = now;
+    }
+  }
+
   async deleteConversation(id: string): Promise<void> {
     this.conversations = this.conversations.filter((conversation) => conversation.id !== id);
     this.messages = this.messages.filter((message) => message.conversationId !== id);
@@ -56,6 +67,13 @@ class MemoryRepository implements AppRepository {
     this.messages = [...this.messages.filter(({ id }) => id !== message.id), { ...message }];
     const conversation = await this.getConversation(message.conversationId);
     if (conversation !== undefined) conversation.updatedAt = Math.max(conversation.updatedAt, message.createdAt);
+  }
+
+  async replaceMessages(conversationId: string, messages: ChatMessage[]): Promise<void> {
+    this.messages = this.messages.filter((message) => message.conversationId !== conversationId);
+    this.messages.push(...messages);
+    const conversation = await this.getConversation(conversationId);
+    if (conversation !== undefined) conversation.updatedAt = Date.now();
   }
 
   async putImage(image: StoredImage): Promise<void> {
@@ -98,6 +116,7 @@ const processedImage: ProcessedImage = {
 function fakeServices(options: {
   authenticated?: boolean;
   authenticateError?: SessionClientError;
+  llmSettings?: LlmSettingsService;
   repository?: MemoryRepository;
   stream?: StreamChatFunction;
 } = {}): AppServices & { repository: MemoryRepository; session: SessionService } {
@@ -118,6 +137,7 @@ function fakeServices(options: {
         streamOptions.onDelta("先休息一下吧~（轻轻握住你的手）");
         return { truncated: false };
       }),
+    ...(options.llmSettings === undefined ? {} : { llmSettings: options.llmSettings }),
   };
 }
 
@@ -175,6 +195,71 @@ describe("App flows", () => {
         expect.objectContaining({ role: "assistant", status: "complete", text: "先休息一下吧~（轻轻握住你的手）" }),
       ]),
     );
+  });
+
+  it("restores the active LLM config before the first message after reload", async () => {
+    const user = userEvent.setup();
+    const db = new YachiyoDatabase(`yachiyo-app-llm-${crypto.randomUUID()}`);
+    const llmSettings = new LlmSettingsService(db);
+    const apiKey = "sk-step-plan-abcdefghijklmnopqrstuvwxyz012345";
+    await llmSettings.saveProvider("stepfun", apiKey, "step-3.7-flash");
+    const stream = vi.fn<StreamChatFunction>(async (_request, options) => {
+      options.onDelta("这是模型返回的动态回答");
+      return { truncated: false };
+    });
+    const view = render(<App services={fakeServices({ llmSettings, stream })} />);
+
+    try {
+      const composer = await screen.findByPlaceholderText("什么都可以告诉我");
+      await user.type(composer, "这次不要固定回复");
+      await user.click(screen.getByRole("button", { name: "发送" }));
+
+      await waitFor(() => expect(stream).toHaveBeenCalledOnce());
+      expect(stream.mock.calls[0]?.[0]).toMatchObject({
+        apiKey,
+        model: "step-3.7-flash",
+        provider: "stepfun",
+      });
+    } finally {
+      view.unmount();
+      db.close();
+      await db.delete();
+    }
+  });
+
+  it("restores the active LLM config after signing in to an expired session", async () => {
+    const user = userEvent.setup();
+    const db = new YachiyoDatabase(`yachiyo-app-llm-login-${crypto.randomUUID()}`);
+    const llmSettings = new LlmSettingsService(db);
+    const apiKey = "sk-step-plan-abcdefghijklmnopqrstuvwxyz012345";
+    await llmSettings.saveProvider("stepfun", apiKey, "step-3.7-flash");
+    const stream = vi.fn<StreamChatFunction>(async (_request, options) => {
+      options.onDelta("这是模型返回的动态回答");
+      return { truncated: false };
+    });
+    const services = fakeServices({ authenticated: false, llmSettings, stream });
+    const view = render(<App services={services} />);
+
+    try {
+      const accessCode = await screen.findByLabelText("访问码");
+      await user.type(accessCode, "correct horse moonlight");
+      await user.click(screen.getByRole("button", { name: "进入" }));
+
+      const composer = await screen.findByPlaceholderText("什么都可以告诉我");
+      await user.type(composer, "登录后也不要固定回复");
+      await user.click(screen.getByRole("button", { name: "发送" }));
+
+      await waitFor(() => expect(stream).toHaveBeenCalledOnce());
+      expect(stream.mock.calls[0]?.[0]).toMatchObject({
+        apiKey,
+        model: "step-3.7-flash",
+        provider: "stepfun",
+      });
+    } finally {
+      view.unmount();
+      db.close();
+      await db.delete();
+    }
   });
 
   it("stops an active stream while retaining its partial response", async () => {
@@ -249,8 +334,9 @@ describe("App flows", () => {
       return { truncated: false };
     });
     const services = fakeServices({ stream });
-    render(<App services={services} />);
-    const input = (await screen.findByLabelText("拍摄")) as HTMLInputElement;
+    const { container } = render(<App services={services} />);
+    await screen.findByRole("button", { name: "拍摄" });
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
     const file = new File(["jpeg"], "photo.jpg", { type: "image/jpeg" });
 
     await user.upload(input, file);
@@ -300,7 +386,7 @@ describe("App flows", () => {
     await user.click(screen.getByRole("button", { name: "清除本地数据" }));
     await user.click(screen.getByRole("button", { name: "确定" }));
     await waitFor(() => expect(services.repository.conversations).toHaveLength(1));
-    expect(services.repository.messages).toHaveLength(1);
+    expect(services.repository.messages).toHaveLength(0);
   });
 
   it("shows quota feedback and returns to the gate on session expiry without deleting history", async () => {
@@ -389,7 +475,6 @@ describe("App flows", () => {
     render(<App services={services} />);
 
     const composer = await screen.findByPlaceholderText("什么都可以告诉我");
-    expect(screen.getByText(/彩叶~今天也辛苦啦/)).toBeVisible();
     expect(composer).toBeDisabled();
     expect(screen.getByRole("button", { name: "拍摄" })).toBeDisabled();
     expect(screen.getByText("当前离线，可查看本地记录")).toBeVisible();

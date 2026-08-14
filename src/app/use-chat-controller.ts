@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import type { ChatMessage, Conversation, Locale, StoredImage } from "../domain/chat";
-import { copyFor } from "../i18n/messages";
+import type { ActiveLlmConfig } from "../domain/llm";
+
 import {
   ChatClientError,
   streamChat as streamChatRequest,
@@ -22,6 +23,8 @@ export interface ChatRepository {
   getConversation(id: string): Promise<Conversation | undefined>;
   listMessages(conversationId: string): Promise<ChatMessage[]>;
   putMessage(message: ChatMessage): Promise<void>;
+  updateConversationSummary(id: string, summary: string, now?: number): Promise<void>;
+  replaceMessages(conversationId: string, messages: ChatMessage[]): Promise<void>;
   putImage(image: StoredImage): Promise<void>;
   getImage(id: string): Promise<StoredImage | undefined>;
   setLocale(locale: Locale): Promise<void>;
@@ -37,6 +40,7 @@ export type StreamChatFunction = (
 export interface ChatControllerOptions {
   repository: ChatRepository;
   streamChat?: StreamChatFunction;
+  activeLlmConfig?: ActiveLlmConfig;
   now?: () => number;
   id?: () => string;
 }
@@ -45,6 +49,7 @@ export interface ChatController extends ChatState {
   send(text: string): Promise<void>;
   retry(): Promise<void>;
   stop(): Promise<void>;
+  compressConversation(manual?: boolean): Promise<boolean>;
   newConversation(): Promise<void>;
   selectConversation(id: string): Promise<void>;
   setLocale(locale: Locale): Promise<void>;
@@ -114,12 +119,16 @@ function truncateUnicode(value: string, maximum: number): string {
   return result;
 }
 
-function requestHistory(messages: ChatMessage[]): Array<{ message: ChatMessage; text: string }> {
+function requestHistory(
+  messages: ChatMessage[],
+  reserveCharacters = 0,
+  maxMessages = maximumRequestMessages,
+): Array<{ message: ChatMessage; text: string }> {
   const eligible = messages.filter(isHistoryMessage);
   const selected: Array<{ message: ChatMessage; text: string }> = [];
-  let totalCharacters = 0;
+  let totalCharacters = reserveCharacters;
 
-  for (let index = eligible.length - 1; index >= 0 && selected.length < maximumRequestMessages; index -= 1) {
+  for (let index = eligible.length - 1; index >= 0 && selected.length < maxMessages; index -= 1) {
     const message = eligible[index];
     if (message === undefined) continue;
     const text = truncateUnicode(message.text, maximumRequestMessageCharacters);
@@ -141,6 +150,10 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     repository: options.repository,
     streamChat: options.streamChat ?? streamChatRequest,
   });
+  const activeLlmConfigRef = useRef<ActiveLlmConfig | undefined>(options.activeLlmConfig);
+  useEffect(() => {
+    activeLlmConfigRef.current = options.activeLlmConfig;
+  }, [options.activeLlmConfig]);
   const [state, dispatch] = useReducer(chatReducer, initialChatState);
   const stateRef = useRef<ChatState>(initialChatState);
   const activeRef = useRef<ActiveRun | undefined>(undefined);
@@ -176,18 +189,9 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         locale,
         nextTimestamp(),
       );
-      const greeting: ChatMessage = {
-        conversationId: conversation.id,
-        createdAt: nextTimestamp(),
-        id: servicesRef.current.id(),
-        role: "assistant",
-        status: "complete",
-        text: copyFor(locale).firstGreeting,
-      };
-      await queueMessage(greeting);
-      return { conversation, locale, messages: [greeting] };
+      return { conversation, locale, messages: [] };
     },
-    [nextTimestamp, queueMessage],
+    [nextTimestamp],
   );
 
   useEffect(() => {
@@ -255,10 +259,35 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
   }, [createConversation, emit, queueMessage]);
 
   const makeRequestMessages = useCallback(
-    async (messages: ChatMessage[], pendingImage?: StoredImage): Promise<StreamChatMessage[]> => {
-      const history = requestHistory(messages);
+    async (
+      messages: ChatMessage[],
+      pendingImage?: StoredImage,
+      reserveCharacters = 0,
+      overrideSummary?: string,
+    ): Promise<StreamChatMessage[]> => {
+      const activeSummary = overrideSummary ?? stateRef.current.activeConversation?.summary;
+      const hasSummary = typeof activeSummary === "string" && activeSummary.trim().length > 0;
+
+      const summaryUserText = hasSummary
+        ? stateRef.current.locale === "ja-JP"
+          ? `【これまでの会話の記憶・背景】\n${activeSummary.trim()}`
+          : `【前情提要 / 历史背景记忆】\n${activeSummary.trim()}`
+        : "";
+      const summaryAssistantText = hasSummary
+        ? stateRef.current.locale === "ja-JP"
+          ? "（これまでの経緯と記憶を把握しました。会話を続けます）"
+          : "（已记住我们之前的对话与经历，继续交流~）"
+        : "";
+
+      const summaryChars = hasSummary
+        ? [...summaryUserText].length + [...summaryAssistantText].length
+        : 0;
+
+      const maxHistoryMessages = hasSummary ? maximumRequestMessages - 2 : maximumRequestMessages;
+      const history = requestHistory(messages, reserveCharacters + summaryChars, maxHistoryMessages);
       const lastIndex = history.length - 1;
-      return Promise.all(
+
+      const chatMessages = await Promise.all(
         history.map(async ({ message, text }, index) => {
           const requestMessage: StreamChatMessage = {
             role: message.role,
@@ -274,6 +303,16 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
           return requestMessage;
         }),
       );
+
+      if (hasSummary) {
+        return [
+          { role: "user", text: summaryUserText },
+          { role: "assistant", text: summaryAssistantText },
+          ...chatMessages,
+        ];
+      }
+
+      return chatMessages;
     },
     [],
   );
@@ -283,13 +322,19 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       run: ActiveRun,
       status: "complete" | "failed" | "stopped",
       errorCode?: string,
+      truncated?: boolean,
     ): Promise<void> => {
       if (run.finishing !== undefined) return run.finishing;
       run.finishing = (async () => {
         if (activeRef.current?.token !== run.token) return;
         activeRef.current = undefined;
         if (run.timer !== undefined) clearTimeout(run.timer);
-        const message: ChatMessage = { ...run.assistant, status, text: run.text };
+        const message: ChatMessage = {
+          ...run.assistant,
+          status,
+          text: run.text,
+          ...(truncated === true ? { truncated: true } : {}),
+        };
         if (mountedRef.current) {
           if (status === "complete") emit({ messageId: run.assistant.id, type: "completed" });
           else if (status === "stopped") emit({ messageId: run.assistant.id, type: "stopped" });
@@ -370,8 +415,15 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
 
       try {
         const requestMessages = await makeRequestMessages(history, pendingImage);
-        await servicesRef.current.streamChat(
-          { locale: stateRef.current.locale, messages: requestMessages },
+        const activeConfig = activeLlmConfigRef.current;
+        const result = await servicesRef.current.streamChat(
+          {
+            locale: stateRef.current.locale,
+            messages: requestMessages,
+            ...(activeConfig !== undefined
+              ? { provider: activeConfig.provider, apiKey: activeConfig.apiKey, model: activeConfig.model }
+              : {}),
+          },
           {
             onDelta(text) {
               if (activeRef.current?.token !== run.token || text.length === 0) return;
@@ -382,7 +434,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
             signal: run.controller.signal,
           },
         );
-        await finishRun(run, "complete");
+        await finishRun(run, "complete", undefined, result.truncated);
       } catch (error) {
         if (activeRef.current?.token !== run.token) return;
         const code =
@@ -398,6 +450,117 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     [emit, finishRun, makeRequestMessages, nextTimestamp, queueMessage],
   );
 
+  const compressConversation = useCallback(
+    async (): Promise<boolean> => {
+      const snapshot = stateRef.current;
+      if (
+        sendingRef.current ||
+        snapshot.activeConversation === undefined ||
+        snapshot.phase === "loading" ||
+        snapshot.phase === "streaming" ||
+        snapshot.phase === "compressing" ||
+        snapshot.phase === "offline"
+      ) {
+        return false;
+      }
+
+      const eligibleMessages = snapshot.messages.filter(isHistoryMessage);
+      if (eligibleMessages.length <= 1 && !snapshot.activeConversation.summary) {
+        return false;
+      }
+
+      sendingRef.current = true;
+      emit({ type: "compress-started" });
+
+      try {
+        const conversationId = snapshot.activeConversation.id;
+        const summaryPrompt =
+          snapshot.locale === "ja-JP"
+            ? "以上の会話履歴から重要な情報・設定・約束を要約し、記憶として整理してください。要約のみを出力してください。"
+            : "请总结提炼以上对话中的重要事实、用户偏好、约定与核心要点，整理为对话记忆。请直接输出摘要。";
+
+        const existingSummary = snapshot.activeConversation.summary?.trim();
+        const hasExistingSummary = Boolean(existingSummary && existingSummary.length > 0);
+
+        const priorSummaryUser = hasExistingSummary
+          ? snapshot.locale === "ja-JP"
+            ? `【既存の記憶要約】\n${existingSummary}`
+            : `【已有记忆摘要】\n${existingSummary}`
+          : "";
+        const priorSummaryAssistant = hasExistingSummary
+          ? snapshot.locale === "ja-JP"
+            ? "（既存の要約を確認しました）"
+            : "（已知悉既有摘要）"
+          : "";
+
+        const reservedChars =
+          [...summaryPrompt].length +
+          [...priorSummaryUser].length +
+          [...priorSummaryAssistant].length;
+
+        // Max history slots = 20 - (hasExistingSummary ? 2 : 0) - 1 (for summaryPrompt)
+        const maxHistorySlots = hasExistingSummary ? 17 : 19;
+        const history = requestHistory(snapshot.messages, reservedChars, maxHistorySlots);
+
+        const requestMessages: StreamChatMessage[] = [];
+        if (hasExistingSummary) {
+          requestMessages.push(
+            { role: "user", text: priorSummaryUser },
+            { role: "assistant", text: priorSummaryAssistant },
+          );
+        }
+
+        for (const { message, text } of history) {
+          requestMessages.push({ role: message.role, text });
+        }
+
+        requestMessages.push({ role: "user", text: summaryPrompt });
+
+        const activeConfig = activeLlmConfigRef.current;
+        let summaryText = "";
+        const controller = new AbortController();
+
+        await servicesRef.current.streamChat(
+          {
+            locale: snapshot.locale,
+            messages: requestMessages,
+            mode: "summary",
+            ...(activeConfig !== undefined
+              ? { provider: activeConfig.provider, apiKey: activeConfig.apiKey, model: activeConfig.model }
+              : {}),
+          },
+          {
+            onDelta(text) {
+              summaryText += text;
+            },
+            signal: controller.signal,
+          },
+        );
+
+        const cleanSummary = summaryText.trim();
+        if (cleanSummary.length > 0) {
+          await servicesRef.current.repository.updateConversationSummary(
+            conversationId,
+            cleanSummary,
+            nextTimestamp(),
+          );
+          if (mountedRef.current && stateRef.current.activeConversation?.id === conversationId) {
+            emit({ type: "context-compressed", summary: cleanSummary });
+            return true;
+          }
+        }
+        if (mountedRef.current) emit({ type: "clear-error" });
+        return false;
+      } catch {
+        if (mountedRef.current) emit({ type: "clear-error" });
+        return false;
+      } finally {
+        sendingRef.current = false;
+      }
+    },
+    [emit, nextTimestamp],
+  );
+
   const send = useCallback(
     async (text: string): Promise<void> => {
       const snapshot = stateRef.current;
@@ -406,6 +569,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         snapshot.activeConversation === undefined ||
         snapshot.phase === "loading" ||
         snapshot.phase === "streaming" ||
+        snapshot.phase === "compressing" ||
         snapshot.phase === "offline"
       ) {
         return;
@@ -413,8 +577,16 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
 
       const normalized = text.trim();
       if (normalized.length === 0 && snapshot.pendingImage === undefined) return;
+
+      const currentMessages = snapshot.messages;
       sendingRef.current = true;
       try {
+        if (currentMessages.length >= maximumRequestMessages) {
+          sendingRef.current = false;
+          await compressConversation();
+          sendingRef.current = true;
+        }
+
         const image =
           snapshot.pendingImage === undefined
             ? undefined
@@ -428,14 +600,14 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
           status: "complete",
           text: normalized,
         };
-        await startAssistant([...snapshot.messages, user], user, image);
+        await startAssistant([...stateRef.current.messages, user], user, image);
       } catch {
         if (mountedRef.current) emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
       } finally {
         sendingRef.current = false;
       }
     },
-    [emit, nextTimestamp, startAssistant],
+    [compressConversation, emit, nextTimestamp, startAssistant],
   );
 
   const retry = useCallback(async (): Promise<void> => {
@@ -540,6 +712,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     retry,
     selectConversation,
     send,
+    compressConversation,
     setLocale,
     setOnline,
     setPendingImage,

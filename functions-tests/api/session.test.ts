@@ -13,7 +13,7 @@ function postRequest(accessCode: string, ip = "203.0.113.10"): Request {
       origin,
       "cf-connecting-ip": ip,
     },
-    body: JSON.stringify({ accessCode }),
+    body: JSON.stringify({ accessCode, deviceId: "test-device-42" }),
   });
 }
 
@@ -177,6 +177,25 @@ describe("session verification", () => {
     expect(
       await verifySession(valid, env.SESSION_SIGNING_SECRET, Date.parse("2026-07-12T00:00:00Z")),
     ).toBeNull();
+  });
+
+  it("embeds the device id in the signed session and keeps legacy tokens valid", async () => {
+    const login = await post("correct horse moonlight", "203.0.113.15");
+    const cookie = login.headers.get("set-cookie")?.split(";", 1)[0] ?? "";
+    const token = cookie.split("=", 2)[1] ?? "";
+
+    const session = await verifySession(token, env.SESSION_SIGNING_SECRET);
+    expect(session?.deviceId).toBe("test-device-42");
+
+    const legacy = await verifySession(
+      await signSession(
+        { sid: "legacy-session", exp: Date.now() + 60_000 },
+        env.SESSION_SIGNING_SECRET,
+      ),
+      env.SESSION_SIGNING_SECRET,
+    );
+    expect(legacy).toMatchObject({ sid: "legacy-session" });
+    expect(legacy?.deviceId).toBeUndefined();
   });
 
   it("clears the device cookie on sign out", async () => {

@@ -1,3 +1,5 @@
+import { getDeviceId } from "./device-id";
+
 export type SessionClientErrorCode =
   | "ACCESS_DENIED"
   | "AUTH_RATE_LIMITED"
@@ -51,9 +53,11 @@ async function problemCode(response: Response): Promise<SessionClientErrorCode> 
 
 export class SessionClient {
   private readonly fetcher: typeof fetch;
+  private readonly deviceId: () => string;
 
-  constructor(fetcher: typeof fetch = globalThis.fetch) {
+  constructor(fetcher: typeof fetch = globalThis.fetch, deviceId: () => string = getDeviceId) {
     this.fetcher = (input, init) => fetcher(input, init);
+    this.deviceId = deviceId;
   }
 
   async check(signal?: AbortSignal): Promise<boolean> {
@@ -74,7 +78,11 @@ export class SessionClient {
   }
 
   async authenticate(accessCode: string, signal?: AbortSignal): Promise<void> {
-    await this.request("POST", JSON.stringify({ accessCode }), signal);
+    await this.request(
+      "POST",
+      JSON.stringify({ accessCode, deviceId: this.deviceId() }),
+      signal,
+    );
   }
 
   async signOut(signal?: AbortSignal): Promise<void> {

@@ -57,7 +57,21 @@ function trustedAddress(request: Request): string {
   return supplied;
 }
 
-async function parseAccessCode(request: Request): Promise<string | null> {
+interface SessionRequest {
+  accessCode: string;
+  deviceId?: string;
+}
+
+function isValidDeviceId(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length >= 1 &&
+    value.length <= 128 &&
+    /^[A-Za-z0-9_-]+$/u.test(value)
+  );
+}
+
+async function parseSessionRequest(request: Request): Promise<SessionRequest | null> {
   if (!isJsonRequest(request)) {
     return null;
   }
@@ -68,14 +82,21 @@ async function parseAccessCode(request: Request): Promise<string | null> {
       return null;
     }
 
-    const accessCode = (parsed as Record<string, unknown>).accessCode;
+    const record = parsed as Record<string, unknown>;
+    const accessCode = record.accessCode;
     if (typeof accessCode !== "string") {
       return null;
     }
 
     const normalized = accessCode.trim();
     const characterLength = [...normalized].length;
-    return characterLength >= 16 && characterLength <= 128 ? normalized : null;
+    if (characterLength < 16 || characterLength > 128) {
+      return null;
+    }
+
+    // 设备标识非法时忽略,不写入 token;额度键随后回退到 sid
+    const deviceId = isValidDeviceId(record.deviceId) ? record.deviceId : undefined;
+    return { accessCode: normalized, deviceId };
   } catch {
     return null;
   }
@@ -116,14 +137,14 @@ export async function onRequestPost(context: SessionContext): Promise<Response> 
       return problemResponse("ORIGIN_NOT_ALLOWED", 403);
     }
 
-    const accessCode = await parseAccessCode(context.request);
-    if (accessCode === null) {
+    const sessionRequest = await parseSessionRequest(context.request);
+    if (sessionRequest === null) {
       return problemResponse("INVALID_REQUEST", 400);
     }
 
     const secret = resolveSessionSigningSecret(context.env);
     const limit = authAttemptLimit(context.env);
-    const matches = await matchesAccessCode(accessCode, context.env);
+    const matches = await matchesAccessCode(sessionRequest.accessCode, context.env);
     if (secret === null || limit === null || matches === null) {
       return problemResponse("CONFIGURATION_ERROR", 503);
     }
@@ -156,6 +177,9 @@ export async function onRequestPost(context: SessionContext): Promise<Response> 
       {
         sid: crypto.randomUUID(),
         exp: issuedAt + SESSION_MAX_AGE_SECONDS * 1_000,
+        ...(sessionRequest.deviceId === undefined
+          ? {}
+          : { deviceId: sessionRequest.deviceId }),
       },
       secret,
     );

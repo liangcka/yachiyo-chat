@@ -29,12 +29,12 @@ export function CaptureButton({
   const mountedRef = useRef(true);
   const [processing, setProcessing] = useState(false);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
       mountedRef.current = false;
-    },
-    [],
-  );
+    };
+  }, []);
 
   const handleChange = async (event: ChangeEvent<HTMLInputElement>) => {
     const input = event.currentTarget;
@@ -58,6 +58,7 @@ export function CaptureButton({
   return (
     <>
       <button
+        aria-busy={processing}
         className={className}
         disabled={unavailable}
         onClick={() => inputRef.current?.click()}
@@ -69,11 +70,12 @@ export function CaptureButton({
       <input
         ref={inputRef}
         accept="image/*"
-        aria-label={copy.capture}
+        aria-hidden="true"
         capture="environment"
         className="visually-hidden"
         disabled={unavailable}
         onChange={(event) => void handleChange(event)}
+        tabIndex={-1}
         type="file"
       />
     </>

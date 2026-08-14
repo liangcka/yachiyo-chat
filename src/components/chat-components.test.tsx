@@ -51,7 +51,12 @@ describe("reference chat components", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "メニュー" }));
+    const menuButton = screen.getByRole("button", { name: "メニュー" });
+    const menuIcon = menuButton.querySelector("svg");
+    expect(menuIcon).not.toBeNull();
+    expect(menuIcon?.querySelectorAll("path, line")).toHaveLength(2);
+
+    fireEvent.click(menuButton);
     expect(onMenu).toHaveBeenCalledOnce();
     expect(screen.getByRole("button", { name: "撮影" })).toBeEnabled();
   });
@@ -84,6 +89,106 @@ describe("reference chat components", () => {
     expect(screen.getByRole("article", { name: "我的消息" })).toHaveClass(
       "message-bubble--user",
     );
+  });
+
+  it("follows streaming updates only while the reader stays near the bottom", () => {
+    const scrollIntoView = vi.mocked(Element.prototype.scrollIntoView);
+    scrollIntoView.mockClear();
+    const firstMessage: ChatMessage = {
+      conversationId: "one",
+      createdAt: 1,
+      id: "assistant-one",
+      role: "assistant",
+      status: "streaming",
+      text: "",
+    };
+    const view = render(<ConversationView locale="zh-CN" messages={[firstMessage]} />);
+    const conversation = view.container.querySelector<HTMLElement>(".conversation-view");
+    expect(conversation).not.toBeNull();
+    Object.defineProperties(conversation, {
+      clientHeight: { configurable: true, value: 400 },
+      scrollHeight: { configurable: true, value: 1_000 },
+      scrollTop: { configurable: true, value: 0, writable: true },
+    });
+
+    expect(scrollIntoView).toHaveBeenLastCalledWith({ behavior: "smooth", block: "end" });
+
+    fireEvent.scroll(conversation!);
+    scrollIntoView.mockClear();
+    view.rerender(
+      <ConversationView
+        locale="zh-CN"
+        messages={[{ ...firstMessage, text: "用户正在向上阅读" }]}
+      />,
+    );
+    expect(scrollIntoView).not.toHaveBeenCalled();
+
+    conversation!.scrollTop = 540;
+    fireEvent.scroll(conversation!);
+    view.rerender(
+      <ConversationView
+        locale="zh-CN"
+        messages={[{ ...firstMessage, text: "回到底部后继续跟随" }]}
+      />,
+    );
+    expect(scrollIntoView).toHaveBeenLastCalledWith({ behavior: "smooth", block: "end" });
+
+    const nextMessage: ChatMessage = {
+      conversationId: "one",
+      createdAt: 2,
+      id: "assistant-two",
+      role: "assistant",
+      status: "streaming",
+      text: "",
+    };
+    conversation!.scrollTop = 0;
+    fireEvent.scroll(conversation!);
+    scrollIntoView.mockClear();
+    view.rerender(
+      <ConversationView locale="zh-CN" messages={[firstMessage, nextMessage]} />,
+    );
+    expect(scrollIntoView).toHaveBeenLastCalledWith({ behavior: "smooth", block: "end" });
+  });
+
+  it("uses instant scrolling for appended messages when reduced motion is requested", () => {
+    const reducedMotionQuery = {
+      matches: true,
+      media: "(prefers-reduced-motion: reduce)",
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(() => false),
+    };
+    vi.mocked(window.matchMedia)
+      .mockReturnValueOnce(reducedMotionQuery)
+      .mockReturnValueOnce(reducedMotionQuery);
+    const scrollIntoView = vi.mocked(Element.prototype.scrollIntoView);
+    scrollIntoView.mockClear();
+    const firstMessage: ChatMessage = {
+      conversationId: "one",
+      createdAt: 1,
+      id: "assistant-one",
+      role: "assistant",
+      status: "complete",
+      text: "少一点动态也很好",
+    };
+    const view = render(<ConversationView locale="zh-CN" messages={[firstMessage]} />);
+    expect(scrollIntoView).toHaveBeenLastCalledWith({ behavior: "auto", block: "end" });
+
+    view.rerender(
+      <ConversationView
+        locale="zh-CN"
+        messages={[
+          firstMessage,
+          { ...firstMessage, createdAt: 2, id: "assistant-two", text: "第二条回复" },
+        ]}
+      />,
+    );
+
+    expect(scrollIntoView).toHaveBeenLastCalledWith({ behavior: "auto", block: "end" });
+    expect(scrollIntoView).toHaveBeenCalledTimes(2);
   });
 
   it("sends on Enter, keeps Shift+Enter, and ignores IME composition", async () => {

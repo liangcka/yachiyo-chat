@@ -1,0 +1,128 @@
+import { buildSystemPrompt } from "../prompt";
+import type { ClientChatRequest, ClientHistoryMessage } from "../validation";
+import type { BuiltProviderRequest, ProviderAdapter, ProviderRequestInput } from "./registry";
+
+const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
+const ALLOWED_MODELS = [
+  "gemini-3.7-flash",
+  "gemini-3.6-flash",
+  "gemini-3.5-flash",
+  "gemini-3.5-flash-lite",
+  "gemini-3.1-pro",
+  "gemini-3.1-flash-lite",
+] as const;
+
+interface GeminiTextPart {
+  text: string;
+}
+
+interface GeminiInlinePart {
+  inlineData: { mimeType: string; data: string };
+}
+
+type GeminiPart = GeminiTextPart | GeminiInlinePart;
+
+interface GeminiContent {
+  role: "user" | "model";
+  parts: GeminiPart[];
+}
+
+function parseImageDataUrl(dataUrl: string): { mimeType: string; data: string } | null {
+  const match = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/]+={0,2})$/u.exec(dataUrl);
+  if (match === null) return null;
+  const ext = match[1];
+  const base64 = match[2];
+  if (ext === undefined || base64 === undefined) return null;
+  const mimeType = ext === "jpeg" ? "image/jpeg" : `image/${ext}`;
+  return { mimeType, data: base64 };
+}
+
+function mapHistoryMessage(
+  message: ClientHistoryMessage,
+  locale: ClientChatRequest["locale"],
+): GeminiContent {
+  const role: GeminiContent["role"] = message.role === "assistant" ? "model" : "user";
+  if (message.imageDataUrl === undefined) {
+    return { role, parts: [{ text: message.text }] };
+  }
+  const image = parseImageDataUrl(message.imageDataUrl);
+  if (image === null) {
+    return { role, parts: [{ text: message.text }] };
+  }
+  const text =
+    message.text.length > 0
+      ? message.text
+      : locale === "ja-JP"
+        ? "この画像を見てください。"
+        : "请看看这张图片。";
+  return {
+    role,
+    parts: [{ text }, { inlineData: image }],
+  };
+}
+
+export function buildGeminiBody(request: ClientChatRequest): unknown {
+  return {
+    contents: request.messages.map((message) => mapHistoryMessage(message, request.locale)),
+    systemInstruction: { parts: [{ text: buildSystemPrompt(request.locale, request.mode) }] },
+    generationConfig: { maxOutputTokens: request.mode === "summary" ? 1024 : 2048 },
+  };
+}
+
+export function extractGeminiDeltaText(data: string): string | null {
+  if (data === "[DONE]") return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(data);
+  } catch {
+    throw new TypeError("Invalid Gemini SSE data");
+  }
+  if (typeof parsed !== "object" || parsed === null) {
+    throw new TypeError("Invalid Gemini SSE data");
+  }
+  const value = parsed as Record<string, unknown>;
+  const candidates = value.candidates;
+  if (!Array.isArray(candidates) || candidates.length === 0) return null;
+  const first = candidates[0];
+  if (typeof first !== "object" || first === null) {
+    throw new TypeError("Invalid Gemini SSE data");
+  }
+  const content = (first as Record<string, unknown>).content;
+  if (typeof content !== "object" || content === null) return null;
+  const parts = (content as Record<string, unknown>).parts;
+  if (!Array.isArray(parts) || parts.length === 0) return null;
+  const text = parts
+    .map((part): string => {
+      if (typeof part !== "object" || part === null) return "";
+      const value = (part as Record<string, unknown>).text;
+      return typeof value === "string" ? value : "";
+    })
+    .join("");
+  if (text.length === 0) return null;
+  return text;
+}
+
+export function buildGeminiAdapter(): ProviderAdapter {
+  return {
+    id: "gemini",
+    isOpenAICompat: false,
+    supportsImage: true,
+    imageModels: [...ALLOWED_MODELS],
+    defaultModel: "gemini-3.7-flash",
+    allowedModels: ALLOWED_MODELS,
+    buildRequest(input: ProviderRequestInput): BuiltProviderRequest {
+      const body = buildGeminiBody(input.request);
+      const url = `${GEMINI_BASE}/models/${encodeURIComponent(input.model)}:streamGenerateContent?alt=sse`;
+      return {
+        url,
+        headers: {
+          accept: "text/event-stream",
+          "content-type": "application/json",
+          "x-goog-api-key": input.apiKey,
+        },
+        body: JSON.stringify(body),
+      };
+    },
+    extractDeltaText: extractGeminiDeltaText,
+  };
+}

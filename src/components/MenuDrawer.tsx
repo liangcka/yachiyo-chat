@@ -1,5 +1,6 @@
-import { History, Languages, LogOut, MessageSquarePlus, Trash2, X } from "lucide-react";
+import { Archive, Cpu, History, Languages, LogOut, MessageSquarePlus, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useClosing } from "../app/use-closing";
 import type { Locale } from "../domain/chat";
 import type { UiCopy } from "../i18n/messages";
 
@@ -11,8 +12,10 @@ export interface MenuDrawerProps {
   onClose: () => void;
   onHistory: () => void;
   onLocale: (locale: Locale) => Promise<void>;
+  onLlmSettings: () => void;
   onNewChat: () => Promise<void>;
   onSignOut: () => Promise<void>;
+  onCompress: () => void;
 }
 
 export function MenuDrawer({
@@ -22,14 +25,18 @@ export function MenuDrawer({
   onClose,
   onHistory,
   onLocale,
+  onLlmSettings,
   onNewChat,
   onSignOut,
+  onCompress,
   open,
 }: MenuDrawerProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const [confirmingClear, setConfirmingClear] = useState(false);
+
+  const { render, closing } = useClosing(open, 300);
 
   useEffect(() => {
     if (!open) return;
@@ -38,7 +45,7 @@ export function MenuDrawer({
     return () => returnFocusRef.current?.focus();
   }, [open]);
 
-  if (!open) return null;
+  if (!render) return null;
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDialogElement>) => {
     if (event.key === "Escape") {
@@ -65,7 +72,7 @@ export function MenuDrawer({
   };
 
   return (
-    <div className="overlay">
+    <div className={`overlay ${closing ? "overlay--closing" : ""}`}>
       <button
         aria-label={`${copy.closeMenu} ·`}
         className="overlay__backdrop"
@@ -78,7 +85,7 @@ export function MenuDrawer({
         open
         aria-label={copy.menu}
         aria-modal="true"
-        className="drawer"
+        className={`drawer ${closing ? "drawer--closing" : ""}`}
         onKeyDown={handleKeyDown}
       >
         <header className="drawer__header">
@@ -105,6 +112,26 @@ export function MenuDrawer({
           <button onClick={onHistory} type="button">
             <History aria-hidden="true" size={21} />
             <span>{copy.history}</span>
+          </button>
+          <button
+            onClick={() => {
+              onClose();
+              onCompress();
+            }}
+            type="button"
+          >
+            <Archive aria-hidden="true" size={21} />
+            <span>{copy.compressContext}</span>
+          </button>
+          <button
+            onClick={() => {
+              onClose();
+              onLlmSettings();
+            }}
+            type="button"
+          >
+            <Cpu aria-hidden="true" size={21} />
+            <span>{copy.llmSettingsEntry}</span>
           </button>
         </nav>
 

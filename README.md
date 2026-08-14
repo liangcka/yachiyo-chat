@@ -1,6 +1,6 @@
 # Yachiyo Chat
 
-Yachiyo Chat 是一个手机优先的 Cloudflare Pages PWA：以深蓝星空和磨砂玻璃 UI 提供月见八千代角色聊天、拍照识图、中日双语、本地历史、停止生成与离线只读。浏览器只访问同源 `/api/*`；StepFun 凭据和角色提示词只进入 Pages Functions 构建。
+Yachiyo Chat 是一个手机优先的 Cloudflare Pages PWA：以深蓝星空和磨砂玻璃 UI 提供月见八千代角色聊天、拍照识图、中日双语、本地历史、停止生成与离线只读。浏览器只访问同源 `/api/*`；服务端备用 StepFun 凭据只存在于 Pages Functions，用户在 LLM 设置中填写的 Key 只保存在当前浏览器并随同源聊天请求临时转发。
 
 ## 本地运行
 
@@ -11,7 +11,7 @@ npm install
 npm run dev:mock
 ```
 
-打开 Wrangler 输出的本地地址，使用仅限 mock 模式的访问码：`yachiyo-local-access`。Mock 模式不需要真实 StepFun Key，也不会调用 StepFun。
+打开 Wrangler 输出的本地地址，使用仅限 mock 模式的访问码：`yachiyo-local-access`。未在 LLM 设置中激活个人 Key 时，Mock 模式只返回固定示例且不会调用模型；激活个人 Key 后会调用所选厂商并产生对应用量。StepFun 选项使用 Step Plan 专用 API，请填写 Step Plan Key。
 
 常用验证命令：
 

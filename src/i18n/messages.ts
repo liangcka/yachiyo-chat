@@ -48,6 +48,32 @@ export interface UiCopy {
   readonly imageTooLarge: string;
   readonly storageFull: string;
   readonly conversationLimit: string;
+  readonly truncated: string;
+  readonly llmSettings: string;
+  readonly llmSettingsEntry: string;
+  readonly llmActive: string;
+  readonly llmUsingDefault: string;
+  readonly llmProvider: string;
+  readonly llmDomestic: string;
+  readonly llmInternational: string;
+  readonly llmApiKey: string;
+  readonly llmModel: string;
+  readonly llmApiKeyHint: (hint: string) => string;
+  readonly llmNoImageSupport: string;
+  readonly llmShowKey: string;
+  readonly llmHideKey: string;
+  readonly llmSave: string;
+  readonly llmClear: string;
+  readonly llmActivate: string;
+  readonly llmKeyInvalid: string;
+  readonly llmSaved: string;
+  readonly llmCleared: string;
+  readonly compressContext: string;
+  readonly compressSuccess: string;
+  readonly noNeedToCompress: string;
+  readonly compressFailed: string;
+  readonly compressingContext: string;
+  readonly memoryLabel: string;
 }
 
 const chinese = Object.freeze({
@@ -98,6 +124,32 @@ const chinese = Object.freeze({
   imageTooLarge: "图片太大，请换一张试试。",
   storageFull: "本地空间不足，请先清理历史记录。",
   conversationLimit: "本地最多保留 30 段对话，请先删除一段。",
+  truncated: "回复太长，已截断显示。",
+  llmSettings: "LLM 设置",
+  llmSettingsEntry: "LLM 设置",
+  llmActive: "当前使用",
+  llmUsingDefault: "未配置，使用默认服务",
+  llmProvider: "厂商",
+  llmDomestic: "国内",
+  llmInternational: "国际",
+  llmApiKey: "API Key",
+  llmModel: "模型",
+  llmApiKeyHint: (hint) => hint,
+  llmNoImageSupport: "该厂商暂不支持图片输入",
+  llmShowKey: "显示",
+  llmHideKey: "隐藏",
+  llmSave: "保存",
+  llmClear: "清除配置",
+  llmActivate: "设为当前",
+  llmKeyInvalid: "API Key 格式不正确，请检查后重试。",
+  llmSaved: "配置已保存",
+  llmCleared: "配置已清除",
+  compressContext: "压缩上下文",
+  compressSuccess: "上下文已成功压缩并保存至记忆",
+  noNeedToCompress: "当前对话较短，暂无需压缩",
+  compressFailed: "压缩上下文失败，请稍后重试",
+  compressingContext: "正在压缩上下文…",
+  memoryLabel: "对话记忆",
 } satisfies UiCopy);
 
 const japanese = Object.freeze({
@@ -148,6 +200,32 @@ const japanese = Object.freeze({
   imageTooLarge: "画像が大きすぎます。別の画像を試してください。",
   storageFull: "端末の空き容量が足りません。履歴を整理してください。",
   conversationLimit: "会話は端末に30件まで保存できます。先に1件削除してください。",
+  truncated: "返答が長すぎたため、途中まで表示しています。",
+  llmSettings: "LLM 設定",
+  llmSettingsEntry: "LLM 設定",
+  llmActive: "現在使用中",
+  llmUsingDefault: "未設定、デフォルトを使用",
+  llmProvider: "プロバイダ",
+  llmDomestic: "国内",
+  llmInternational: "国際",
+  llmApiKey: "API Key",
+  llmModel: "モデル",
+  llmApiKeyHint: (hint) => hint,
+  llmNoImageSupport: "このプロバイダは画像入力に対応していません",
+  llmShowKey: "表示",
+  llmHideKey: "非表示",
+  llmSave: "保存",
+  llmClear: "設定を削除",
+  llmActivate: "現在の設定にする",
+  llmKeyInvalid: "API Key の形式が正しくありません。確認してください。",
+  llmSaved: "設定を保存しました",
+  llmCleared: "設定を削除しました",
+  compressContext: "コンテキストを圧縮",
+  compressSuccess: "コンテキストを圧縮して記憶に保存しました",
+  noNeedToCompress: "会話が短いため、まだ圧縮の必要はありません",
+  compressFailed: "コンテキストの圧縮に失敗しました。後でもう一度お試しください",
+  compressingContext: "コンテキストを圧縮中…",
+  memoryLabel: "会話の記憶",
 } satisfies UiCopy);
 
 const dictionaries: Readonly<Record<Locale, UiCopy>> = Object.freeze({

@@ -55,6 +55,10 @@ export class ConversationRepository {
     await this.db.conversations.update(id, { title: requireTitle(title) });
   }
 
+  async updateConversationSummary(id: string, summary: string, now = Date.now()): Promise<void> {
+    await this.db.conversations.update(id, { summary, lastCompressedAt: now, updatedAt: now });
+  }
+
   async deleteConversation(id: string): Promise<void> {
     await this.db.transaction(
       "rw",
@@ -89,6 +93,17 @@ export class ConversationRepository {
     });
   }
 
+  async replaceMessages(conversationId: string, messages: ChatMessage[]): Promise<void> {
+    await this.db.transaction("rw", [this.db.conversations, this.db.messages], async () => {
+      await this.db.messages.where("conversationId").equals(conversationId).delete();
+      await this.db.messages.bulkPut(messages);
+      const conversation = await this.db.conversations.get(conversationId);
+      if (conversation) {
+        await this.db.conversations.update(conversationId, { updatedAt: Date.now() });
+      }
+    });
+  }
+
   async putImage(image: StoredImage): Promise<void> {
     if (!(await this.db.conversations.get(image.conversationId))) {
       throw new Error("Cannot store an image for a missing conversation.");
@@ -109,7 +124,8 @@ export class ConversationRepository {
   }
 
   async getLocale(): Promise<Locale> {
-    return (await this.db.settings.get("locale"))?.value ?? "zh-CN";
+    const record = await this.db.settings.get("locale");
+    return record !== undefined && record.key === "locale" ? record.value : "zh-CN";
   }
 
   async clearAll(): Promise<void> {

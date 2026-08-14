@@ -1,16 +1,17 @@
 import Dexie, { type Table } from "dexie";
 import type { ChatMessage, Conversation, Locale, StoredImage } from "../domain/chat";
+import type { LlmSettingsRecord, ProviderId } from "../domain/llm";
 
-export interface AppSetting {
-  key: "locale";
-  value: Locale;
-}
+export type AppSetting =
+  | { key: "locale"; value: Locale }
+  | { key: "activeProvider"; value: ProviderId };
 
 export class YachiyoDatabase extends Dexie {
   conversations!: Table<Conversation, string>;
   messages!: Table<ChatMessage, string>;
   images!: Table<StoredImage, string>;
   settings!: Table<AppSetting, string>;
+  llmSettings!: Table<LlmSettingsRecord, ProviderId>;
 
   constructor(name = "yachiyo-chat") {
     super(name);
@@ -20,6 +21,14 @@ export class YachiyoDatabase extends Dexie {
       messages: "id, conversationId, createdAt, [conversationId+createdAt]",
       images: "id, conversationId",
       settings: "key",
+    });
+
+    this.version(2).stores({
+      conversations: "id, updatedAt, locale",
+      messages: "id, conversationId, createdAt, [conversationId+createdAt]",
+      images: "id, conversationId",
+      settings: "key",
+      llmSettings: "provider",
     });
   }
 }

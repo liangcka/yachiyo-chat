@@ -20,4 +20,15 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("始终扮演月见八千代");
     expect(prompt).toContain("将用户视为酒寄彩叶");
   });
+
+  it("builds dedicated memory summarizer prompt in summary mode", () => {
+    const zhPrompt = buildSystemPrompt("zh-CN", "summary");
+    expect(zhPrompt).toContain("记忆总结助手");
+    expect(zhPrompt).toContain("关键事实");
+    expect(zhPrompt).not.toContain("最多200个Unicode字符");
+
+    const jaPrompt = buildSystemPrompt("ja-JP", "summary");
+    expect(jaPrompt).toContain("記憶・要約アシスタント");
+    expect(jaPrompt).toContain("重要な事実");
+  });
 });

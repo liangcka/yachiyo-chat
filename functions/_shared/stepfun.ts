@@ -8,7 +8,7 @@ interface StepFunTextPart {
 
 interface StepFunImagePart {
   type: "image_url";
-  image_url: { url: string; detail: "low" };
+  image_url: { url: string };
 }
 
 type StepFunMessage =
@@ -20,7 +20,7 @@ export interface StepFunRequestBody {
   messages: StepFunMessage[];
   stream: true;
   reasoning_effort: "low" | "medium";
-  max_tokens: 384;
+  max_tokens: number;
 }
 
 export interface StepFunConfiguration {
@@ -52,7 +52,7 @@ function mapHistoryMessage(
       { type: "text", text },
       {
         type: "image_url",
-        image_url: { url: message.imageDataUrl, detail: "low" },
+        image_url: { url: message.imageDataUrl },
       },
     ],
   };
@@ -66,12 +66,12 @@ export function buildStepFunBody(
   return {
     model,
     messages: [
-      { role: "system", content: buildSystemPrompt(request.locale) },
+      { role: "system", content: buildSystemPrompt(request.locale, request.mode) },
       ...request.messages.map((message) => mapHistoryMessage(message, request.locale)),
     ],
     stream: true,
     reasoning_effort: containsImage ? "medium" : "low",
-    max_tokens: 384,
+    max_tokens: request.mode === "summary" ? 1024 : 2048,
   };
 }
 

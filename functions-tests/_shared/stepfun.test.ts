@@ -18,7 +18,7 @@ describe("buildStepFunBody", () => {
       model: "step-3.7-flash",
       stream: true,
       reasoning_effort: "low",
-      max_tokens: 384,
+      max_tokens: 2048,
     });
     expect(body.messages[0]).toMatchObject({
       role: "system",
@@ -44,7 +44,7 @@ describe("buildStepFunBody", () => {
       role: "user",
       content: [
         { type: "text", text: "これは何？" },
-        { type: "image_url", image_url: { url: imageDataUrl, detail: "low" } },
+        { type: "image_url", image_url: { url: imageDataUrl } },
       ],
     });
   });

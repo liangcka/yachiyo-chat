@@ -43,8 +43,10 @@ function repositoryWith(
     listMessages: vi.fn(async () => [greeting]),
     putImage: vi.fn(async () => undefined),
     putMessage: vi.fn(async () => undefined),
+    updateConversationSummary: vi.fn(async () => undefined),
     setConversationLocale: vi.fn(async () => undefined),
     setLocale: vi.fn(async () => undefined),
+    replaceMessages: vi.fn(async () => undefined),
     ...overrides,
   };
 }
@@ -65,7 +67,7 @@ function deferred<T = void>() {
 }
 
 describe("useChatController", () => {
-  it("creates and persists a localized greeting when history is empty", async () => {
+  it("creates a new conversation when history is empty", async () => {
     const created = { ...conversation, id: "new-conversation" };
     const repository = repositoryWith({
       createConversation: vi.fn(async () => created),
@@ -84,16 +86,7 @@ describe("useChatController", () => {
 
     await waitFor(() => expect(result.current.phase).toBe("idle"));
     expect(result.current.activeConversation).toEqual(created);
-    expect(result.current.messages).toEqual([
-      expect.objectContaining({
-        conversationId: created.id,
-        id: "first-greeting",
-        role: "assistant",
-        status: "complete",
-        text: copyFor("zh-CN").firstGreeting,
-      }),
-    ]);
-    expect(repository.putMessage).toHaveBeenCalledWith(result.current.messages[0]);
+    expect(result.current.messages).toEqual([]);
   });
 
   it("persists the user before streaming and completes the assistant message", async () => {
@@ -324,9 +317,7 @@ describe("useChatController", () => {
 
     expect(stream).not.toHaveBeenCalled();
     expect(result.current.activeConversation?.id).toBe(nextConversation.id);
-    expect(result.current.messages).toEqual([
-      expect.objectContaining({ conversationId: nextConversation.id, id: "new-greeting" }),
-    ]);
+    expect(result.current.messages).toEqual([]);
     expect(vi.mocked(repository.putMessage).mock.calls.map(([message]) => message)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ conversationId: conversation.id, id: "user-1" }),
@@ -353,12 +344,76 @@ describe("useChatController", () => {
 
     await act(async () => result.current.send("次"));
 
-    const request = stream.mock.calls[0]?.[0];
-    expect(request?.messages.length).toBeLessThanOrEqual(20);
+    const compressionRequest = stream.mock.calls[0]?.[0];
+    expect(compressionRequest?.mode).toBe("summary");
+    expect(compressionRequest?.messages.length).toBeLessThanOrEqual(20);
     expect(
-      request?.messages.reduce((total, message) => total + [...message.text].length, 0),
+      compressionRequest?.messages.reduce((total, message) => total + [...message.text].length, 0),
     ).toBeLessThanOrEqual(24_000);
-    expect(request?.messages.at(-1)).toEqual({ role: "user", text: "次" });
+    expect(compressionRequest?.messages.at(-1)?.role).toBe("user");
+
+    const chatRequest = stream.mock.calls[1]?.[0];
+    expect(chatRequest?.messages.length).toBeLessThanOrEqual(20);
+    expect(
+      chatRequest?.messages.reduce((total, message) => total + [...message.text].length, 0),
+    ).toBeLessThanOrEqual(24_000);
+    expect(chatRequest?.messages.at(-1)).toEqual({ role: "user", text: "次" });
+  });
+
+  it("compresses context non-destructively and injects memory on subsequent turns", async () => {
+    const messages: ChatMessage[] = [
+      { conversationId: conversation.id, createdAt: 1, id: "u1", role: "user", text: "我喜欢草莓大福", status: "complete" },
+      { conversationId: conversation.id, createdAt: 2, id: "a1", role: "assistant", text: "记住了~", status: "complete" },
+      { conversationId: conversation.id, createdAt: 3, id: "u2", role: "user", text: "明天去涉谷逛街", status: "complete" },
+      { conversationId: conversation.id, createdAt: 4, id: "a2", role: "assistant", text: "好呀！", status: "complete" },
+    ];
+    const repository = repositoryWith({ listMessages: vi.fn(async () => messages) });
+    const stream = vi.fn<StreamChatFunction>()
+      .mockImplementationOnce(async (_request, options) => {
+        options.onDelta("用户喜欢草莓大福，两人约定明天去涉谷。");
+        return { truncated: false };
+      })
+      .mockImplementationOnce(async (_request, options) => {
+        options.onDelta("涉谷见~");
+        return { truncated: false };
+      });
+
+    const { result } = renderHook(() =>
+      useChatController({ id: ids("user-new", "assistant-new"), repository, streamChat: stream }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    let compressSuccess = false;
+    await act(async () => {
+      compressSuccess = await result.current.compressConversation();
+    });
+
+    expect(compressSuccess).toBe(true);
+    // Messages must NOT be destroyed!
+    expect(result.current.messages).toHaveLength(4);
+    expect(result.current.activeConversation?.summary).toBe("用户喜欢草莓大福，两人约定明天去涉谷。");
+    expect(repository.updateConversationSummary).toHaveBeenCalledWith(
+      conversation.id,
+      "用户喜欢草莓大福，两人约定明天去涉谷。",
+      expect.any(Number),
+    );
+
+    // Now send another message, verify summary is injected in request turns
+    await act(async () => result.current.send("天气怎么样？"));
+
+    const chatRequest = stream.mock.calls[1]?.[0];
+    expect(chatRequest?.messages[0]).toEqual({
+      role: "user",
+      text: expect.stringContaining("用户喜欢草莓大福，两人约定明天去涉谷。"),
+    });
+    expect(chatRequest?.messages[1]).toEqual({
+      role: "assistant",
+      text: "（已记住我们之前的对话与经历，继续交流~）",
+    });
+    expect(chatRequest?.messages.at(-1)).toEqual({
+      role: "user",
+      text: "天气怎么样？",
+    });
   });
 
   it("recovers an interrupted persisted assistant as stopped on startup", async () => {

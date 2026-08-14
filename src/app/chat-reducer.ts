@@ -1,6 +1,6 @@
 import type { ChatMessage, Conversation, Locale, StoredImage } from "../domain/chat";
 
-export type ChatPhase = "loading" | "idle" | "streaming" | "offline" | "error";
+export type ChatPhase = "loading" | "idle" | "streaming" | "offline" | "error" | "compressing";
 
 export interface ChatState {
   phase: ChatPhase;
@@ -23,7 +23,9 @@ export type ChatAction =
   | { type: "conversation-selected"; conversation: Conversation; messages: ChatMessage[] }
   | { type: "locale-changed"; locale: Locale }
   | { type: "pending-image-changed"; image?: StoredImage }
-  | { type: "clear-error" };
+  | { type: "clear-error" }
+  | { type: "compress-started" }
+  | { type: "context-compressed"; summary: string };
 
 export const initialChatState: ChatState = {
   locale: "zh-CN",
@@ -122,5 +124,16 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       return { ...state, pendingImage: action.image };
     case "clear-error":
       return { ...state, errorCode: undefined, phase: state.phase === "error" ? "idle" : state.phase };
+    case "compress-started":
+      return { ...state, phase: "compressing", errorCode: undefined };
+    case "context-compressed":
+      return {
+        ...state,
+        activeConversation:
+          state.activeConversation === undefined
+            ? undefined
+            : { ...state.activeConversation, summary: action.summary },
+        phase: "idle",
+      };
   }
 }

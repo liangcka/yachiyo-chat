@@ -6,9 +6,30 @@ export interface ClientHistoryMessage {
   imageDataUrl?: string;
 }
 
+export type ProviderId = "stepfun" | "deepseek" | "glm" | "openai" | "claude" | "gemini";
+
+export const PROVIDER_IDS: readonly ProviderId[] = [
+  "stepfun",
+  "deepseek",
+  "glm",
+  "openai",
+  "claude",
+  "gemini",
+];
+
+export function isProviderId(value: unknown): value is ProviderId {
+  return typeof value === "string" && (PROVIDER_IDS as readonly string[]).includes(value);
+}
+
+export type RequestMode = "chat" | "summary";
+
 export interface ClientChatRequest {
   locale: ChatLocale;
   messages: ClientHistoryMessage[];
+  mode?: RequestMode;
+  provider?: ProviderId;
+  apiKey?: string;
+  model?: string;
 }
 
 export class ChatValidationError extends Error {
@@ -27,7 +48,7 @@ const maximumMessageCharacters = 4_000;
 const maximumTotalCharacters = 24_000;
 const maximumImageBytes = 2 * 1_024 * 1_024;
 const maximumEncodedImageLength = Math.ceil(maximumImageBytes / 3) * 4;
-const allowedTopLevelKeys = new Set(["locale", "messages"]);
+const allowedTopLevelKeys = new Set(["locale", "messages", "mode", "provider", "apiKey", "model"]);
 const allowedMessageKeys = new Set(["role", "text", "imageDataUrl"]);
 
 function invalid(): never {
@@ -166,7 +187,45 @@ export function validateChatRequest(value: unknown): ClientChatRequest {
     return invalid();
   }
 
-  return { locale: value.locale, messages };
+  if (value.mode !== undefined && value.mode !== "chat" && value.mode !== "summary") {
+    return invalid();
+  }
+
+  const mode = value.mode as RequestMode | undefined;
+
+  const hasProvider = value.provider !== undefined;
+  const hasApiKey = value.apiKey !== undefined;
+  const hasModel = value.model !== undefined;
+  if (hasProvider !== hasApiKey || hasProvider !== hasModel) {
+    return invalid();
+  }
+
+  if (!hasProvider) {
+    return { locale: value.locale, messages, ...(mode !== undefined ? { mode } : {}) };
+  }
+
+  if (!isProviderId(value.provider)) {
+    return invalid();
+  }
+  if (
+    typeof value.apiKey !== "string" ||
+    value.apiKey.trim().length < 20 ||
+    value.apiKey.length > 512
+  ) {
+    return invalid();
+  }
+  if (typeof value.model !== "string" || value.model.length === 0 || value.model.length > 64) {
+    return invalid();
+  }
+
+  return {
+    locale: value.locale,
+    messages,
+    ...(mode !== undefined ? { mode } : {}),
+    provider: value.provider,
+    apiKey: value.apiKey,
+    model: value.model,
+  };
 }
 
 export async function readJsonBodyWithLimit(

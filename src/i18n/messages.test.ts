@@ -13,8 +13,10 @@ describe("copyFor", () => {
     const japanese = copyFor("ja-JP");
 
     expect(Object.keys(chinese).sort()).toEqual(Object.keys(japanese).sort());
-    expect(Object.values(chinese).every((value) => value.trim().length > 0)).toBe(true);
-    expect(Object.values(japanese).every((value) => value.trim().length > 0)).toBe(true);
+    const isNonEmptyString = (value: unknown) =>
+      typeof value === "string" && value.trim().length > 0;
+    expect(Object.values(chinese).every((value) => isNonEmptyString(value) || typeof value === "function")).toBe(true);
+    expect(Object.values(japanese).every((value) => isNonEmptyString(value) || typeof value === "function")).toBe(true);
     expect(Object.isFrozen(chinese)).toBe(true);
     expect(Object.isFrozen(japanese)).toBe(true);
   });

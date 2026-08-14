@@ -1,4 +1,4 @@
-import { Menu } from "lucide-react";
+import { Equal } from "lucide-react";
 import type { UiCopy } from "../i18n/messages";
 import {
   CaptureButton,
@@ -30,7 +30,7 @@ export function TopControls({
         onClick={onMenu}
         type="button"
       >
-        <Menu aria-hidden="true" size={31} strokeWidth={1.8} />
+        <Equal aria-hidden="true" size={31} strokeWidth={1.8} />
       </button>
       <CaptureButton
         className="capture-pill"

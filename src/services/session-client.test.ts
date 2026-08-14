@@ -14,7 +14,7 @@ describe("SessionClient", () => {
 
   beforeEach(() => {
     serverFetch = vi.fn<typeof fetch>();
-    client = new SessionClient(serverFetch);
+    client = new SessionClient(serverFetch, () => "test-device-123");
   });
 
   it("checks the same-origin session with credentials", async () => {
@@ -47,13 +47,15 @@ describe("SessionClient", () => {
 
     const [, init] = serverFetch.mock.calls[0] ?? [];
     expect(serverFetch).toHaveBeenCalledWith("/api/session", {
-      body: JSON.stringify({ accessCode: secret }),
+      body: JSON.stringify({ accessCode: secret, deviceId: "test-device-123" }),
       credentials: "same-origin",
       headers: { "content-type": "application/json" },
       method: "POST",
       signal: undefined,
     });
-    expect(init?.body).toBe(JSON.stringify({ accessCode: secret }));
+    expect(init?.body).toBe(
+      JSON.stringify({ accessCode: secret, deviceId: "test-device-123" }),
+    );
     expect(log).not.toHaveBeenCalled();
     log.mockRestore();
   });

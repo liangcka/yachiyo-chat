@@ -1,0 +1,168 @@
+@keyframes motion-typing-pulse {
+  0%,
+  70%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0) scale(0.82);
+  }
+  35% {
+    opacity: 1;
+    transform: translateY(-2px) scale(1.12);
+  }
+}
+
+@keyframes motion-nebula-drift {
+  from { opacity: 0.78; transform: translate3d(-0.35rem, 0.2rem, 0) scale(1); }
+  to { opacity: 1; transform: translate3d(0.4rem, -0.35rem, 0) scale(1.018); }
+}
+
+@keyframes motion-starfield-reveal {
+  from { opacity: 0; transform: scale(1.018); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes motion-gate-enter {
+  from { opacity: 0; transform: translateY(calc(-50% + 0.9rem)) scale(0.975); }
+  to { opacity: 1; transform: translateY(-50%) scale(1); }
+}
+
+@keyframes motion-mark-awaken {
+  0% { opacity: 0; transform: translateY(0.4rem) scale(0.78) rotate(-7deg); }
+  65% { opacity: 1; transform: translateY(0) scale(1.05) rotate(1deg); }
+  100% { opacity: 1; transform: translateY(0) scale(1) rotate(0); }
+}
+
+@keyframes motion-drop-in {
+  from { opacity: 0; transform: translateY(-0.65rem); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes motion-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes motion-message-in-left {
+  from { opacity: 0; transform: translateX(-0.55rem) scale(0.985); }
+  to { opacity: 1; transform: translateX(0) scale(1); }
+}
+
+@keyframes motion-message-in-right {
+  from { opacity: 0; transform: translateX(0.55rem) scale(0.985); }
+  to { opacity: 1; transform: translateX(0) scale(1); }
+}
+
+@keyframes motion-rise {
+  from { opacity: 0; transform: translateY(var(--motion-distance-sm)); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes motion-drawer-in {
+  from { opacity: 0; transform: translateX(calc(-1 * var(--motion-distance-panel))); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes motion-sheet-in {
+  from { opacity: 0; transform: translateY(var(--motion-distance-panel)) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes motion-preview-in {
+  from { opacity: 0; transform: translateY(0.65rem) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes motion-image-reveal {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes motion-error-nudge {
+  0% { opacity: 0; transform: translateX(0); }
+  38% { opacity: 1; transform: translateX(-0.18rem); }
+  68% { transform: translateX(0.12rem); }
+  100% { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes motion-status-settle {
+  from { opacity: 0.74; transform: scale(0.985); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes motion-stop-state {
+  from { opacity: 0.62; }
+  to { opacity: 1; }
+}
+
+@keyframes motion-camera-processing {
+  0%, 100% { opacity: 0.62; }
+  50% { opacity: 1; }
+}
+
+@keyframes motion-processing-label {
+  0%, 100% { opacity: 0.66; }
+  50% { opacity: 1; }
+}
+
+@keyframes motion-toast-in {
+  from { opacity: 0; transform: translateY(-0.55rem) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes motion-toast-error-in {
+  0% { opacity: 0; transform: translateY(-0.45rem) translateX(0); }
+  55% { opacity: 1; transform: translateY(0) translateX(-0.12rem); }
+  78% { transform: translateX(0.08rem); }
+  100% { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes motion-status-in {
+  from { opacity: 0; transform: translateY(0.4rem); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes motion-status-error-in {
+  0% { opacity: 0; transform: translateY(0.35rem) scale(0.985); }
+  70% { opacity: 1; transform: translateY(0) scale(1.01); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes motion-prompt-in {
+  from { opacity: 0; transform: translateY(0.6rem) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes motion-icon-arrive {
+  from { opacity: 0; transform: rotate(-18deg) scale(0.72); }
+  to { opacity: 1; transform: rotate(0) scale(1); }
+}
+
+@keyframes motion-panel-content {
+  from { opacity: 0; transform: translateY(0.45rem); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes motion-toggle-selected {
+  from { opacity: 0.68; }
+  to { opacity: 1; }
+}
+
+@keyframes motion-confirm-in {
+  from { opacity: 0; transform: translateY(0.35rem) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes motion-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes motion-drawer-out {
+  from { opacity: 1; transform: translateX(0); }
+  to { opacity: 0; transform: translateX(calc(-1 * var(--motion-distance-panel))); }
+}
+
+@keyframes motion-sheet-out {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(var(--motion-distance-panel)) scale(0.985); }
+}

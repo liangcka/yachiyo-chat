@@ -1,4 +1,4 @@
-import { KeyRound, Sparkles } from "lucide-react";
+import { Eye, EyeOff, KeyRound, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { UiCopy } from "../i18n/messages";
 import { SessionClientError, type SessionClientErrorCode } from "../services/session-client";
@@ -18,6 +18,7 @@ export function AccessGate({ copy, onAuthenticate }: AccessGateProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [accessCode, setAccessCode] = useState("");
   const [errorCode, setErrorCode] = useState<SessionClientErrorCode>();
+  const [showCode, setShowCode] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => inputRef.current?.focus(), []);
@@ -60,9 +61,22 @@ export function AccessGate({ copy, onAuthenticate }: AccessGateProps) {
             maxLength={128}
             onChange={(event) => setAccessCode(event.currentTarget.value)}
             spellCheck="false"
-            type="password"
+            type={showCode ? "text" : "password"}
             value={accessCode}
           />
+          <button
+            aria-label={showCode ? copy.llmHideKey : copy.llmShowKey}
+            className="access-gate__toggle"
+            onClick={() => setShowCode((prev) => !prev)}
+            tabIndex={-1}
+            type="button"
+          >
+            {showCode ? (
+              <EyeOff aria-hidden="true" size={18} />
+            ) : (
+              <Eye aria-hidden="true" size={18} />
+            )}
+          </button>
         </div>
         <button disabled={submitting || accessCode.trim().length < 16} type="submit">
           {submitting ? copy.verifying : copy.enter}

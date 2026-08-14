@@ -36,6 +36,18 @@ describe("ConversationRepository", () => {
     expect(await repository.getConversation(conversation.id)).toMatchObject({ title: "夏夜" });
   });
 
+  it("updates conversation summary and timestamp", async () => {
+    const conversation = await repository.createConversation("zh-CN", 10);
+
+    await repository.updateConversationSummary(conversation.id, "用户喜欢喝咖啡", 25);
+
+    expect(await repository.getConversation(conversation.id)).toMatchObject({
+      summary: "用户喜欢喝咖啡",
+      lastCompressedAt: 25,
+      updatedAt: 25,
+    });
+  });
+
   it("stores messages in chronological order and updates conversation activity", async () => {
     const conversation = await repository.createConversation("zh-CN", 10);
     const later: ChatMessage = {

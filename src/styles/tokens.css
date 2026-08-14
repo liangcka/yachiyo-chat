@@ -16,4 +16,22 @@
   --app-width: 26.875rem;
   --safe-bottom: max(0.75rem, env(safe-area-inset-bottom));
   --safe-top: max(1rem, env(safe-area-inset-top));
+  --motion-duration-press: 80ms;
+  --motion-duration-fast: 120ms;
+  --motion-duration-base: 200ms;
+  --motion-duration-slow: 350ms;
+  --motion-duration-panel: 300ms;
+  --motion-duration-reveal: 500ms;
+  --motion-duration-scene: 750ms;
+  --motion-duration-loop: 1.2s;
+  --motion-duration-ambient: 18s;
+  --motion-ease-standard: cubic-bezier(0.32, 0.72, 0, 1);
+  --motion-ease-enter: cubic-bezier(0.25, 1, 0.5, 1);
+  --motion-ease-emphasized: cubic-bezier(0.17, 0.89, 0.24, 1.15);
+  --motion-ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --motion-ease-ambient: ease-in-out;
+  --motion-distance-sm: 0.45rem;
+  --motion-distance-panel: 1.125rem;
+  --motion-scale-pressed: 0.97;
+  --motion-stagger-step: 45ms;
 }

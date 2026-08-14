@@ -1,5 +1,5 @@
 import { Send, Square, X } from "lucide-react";
-import type { FormEvent, KeyboardEvent } from "react";
+import { useRef, type FormEvent, type KeyboardEvent } from "react";
 import type { ChatPhase } from "../app/chat-reducer";
 import type { UiCopy } from "../i18n/messages";
 
@@ -26,8 +26,9 @@ export function Composer({
   phase,
   value,
 }: ComposerProps) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const streaming = phase === "streaming";
-  const unavailable = disabled || phase === "loading" || phase === "offline";
+  const unavailable = disabled || phase === "loading" || phase === "offline" || phase === "compressing";
   const canSend = value.trim().length > 0 || pendingImageDataUrl !== undefined;
 
   const submit = () => {
@@ -68,18 +69,19 @@ export function Composer({
           </button>
         </div>
       )}
-      <div className="composer__input-wrap">
+      <label className="composer__input-wrap">
         <textarea
+          ref={textareaRef}
           aria-label={copy.inputHint}
           disabled={unavailable || streaming}
           maxLength={4000}
           onChange={(event) => onChange(event.currentTarget.value)}
           onKeyDown={handleKeyDown}
-          placeholder={copy.inputHint}
+          placeholder={phase === "compressing" ? copy.compressingContext : copy.inputHint}
           rows={1}
           value={value}
         />
-      </div>
+      </label>
       <button
         aria-label={streaming ? copy.stop : copy.send}
         className={`composer__action${streaming ? " composer__action--stop" : ""}`}

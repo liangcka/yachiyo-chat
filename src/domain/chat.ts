@@ -8,6 +8,8 @@ export interface Conversation {
   locale: Locale;
   createdAt: number;
   updatedAt: number;
+  summary?: string;
+  lastCompressedAt?: number;
 }
 
 export interface ChatMessage {
@@ -18,6 +20,8 @@ export interface ChatMessage {
   imageId?: string;
   status: MessageStatus;
   createdAt: number;
+  /** 服务端按输出上限截断回复时为 true */
+  truncated?: boolean;
 }
 
 export type StoredImageMimeType = "image/jpeg" | "image/png" | "image/webp";

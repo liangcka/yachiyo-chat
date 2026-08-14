@@ -1,5 +1,6 @@
 import { Check, Pencil, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { useClosing } from "../app/use-closing";
 import type { Conversation } from "../domain/chat";
 import type { UiCopy } from "../i18n/messages";
 
@@ -30,16 +31,18 @@ export function HistoryPanel({
   const [editingId, setEditingId] = useState<string>();
   const [title, setTitle] = useState("");
 
+  const { render, closing } = useClosing(open, 300);
+
   useEffect(() => {
     if (open) closeRef.current?.focus();
   }, [open]);
   useEffect(() => editInputRef.current?.focus(), [editingId]);
 
-  if (!open) return null;
+  if (!render) return null;
 
   return (
-    <div className="overlay overlay--history">
-      <section aria-label={copy.history} aria-modal="true" className="history-panel" role="dialog">
+    <div className={`overlay overlay--history ${closing ? "overlay--closing" : ""}`}>
+      <section aria-label={copy.history} aria-modal="true" className={`history-panel ${closing ? "history-panel--closing" : ""}`} role="dialog">
         <header>
           <h1>{copy.history}</h1>
           <button ref={closeRef} aria-label={copy.closeMenu} onClick={onClose} type="button">

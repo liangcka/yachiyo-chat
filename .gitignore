@@ -4,6 +4,9 @@ node_modules/
 dist/
 coverage/
 .wrangler/
+.wrangler-home/
+.wrangler-local/
+.agents/
 functions/_generated/
 
 .dev.vars
