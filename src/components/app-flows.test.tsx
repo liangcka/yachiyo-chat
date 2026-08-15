@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { App, type AppRepository, type AppServices, type SessionService } from "../App";
@@ -484,5 +484,67 @@ describe("App flows", () => {
       window.dispatchEvent(new Event("online"));
     });
     await waitFor(() => expect(composer).toBeEnabled());
+  });
+
+  it("recalls the latest user message and restores its text into the composer", async () => {
+    const user = userEvent.setup();
+    const stream = vi.fn<StreamChatFunction>(async (_req, options) => {
+      options.onDelta("AI的回复");
+      return { truncated: false };
+    });
+    render(<App services={fakeServices({ stream })} />);
+    const composer = await screen.findByPlaceholderText("什么都可以告诉我");
+
+    await user.type(composer, "这是一条要撤回的消息");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    await screen.findByText("AI的回复");
+    expect(screen.getByText("这是一条要撤回的消息")).toBeInTheDocument();
+
+    const userBubble = screen.getByRole("article", { name: "我的消息" });
+    fireEvent.contextMenu(userBubble);
+
+    const recallBtn = screen.getByRole("menuitem", { name: "撤回" });
+    await user.click(recallBtn);
+
+    const log = screen.getByRole("log");
+    await waitFor(() => {
+      expect(within(log).queryByText("这是一条要撤回的消息")).not.toBeInTheDocument();
+      expect(within(log).queryByText("AI的回复")).not.toBeInTheDocument();
+    });
+
+    expect(composer).toHaveValue("这是一条要撤回的消息");
+    expect((await screen.findAllByText("已撤回最新一条消息")).length).toBeGreaterThan(0);
+
+    // Send a second message right away without refreshing
+    await user.clear(composer);
+    await user.type(composer, "第二条消息");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    await screen.findByText("AI的回复");
+    expect(screen.getByText("第二条消息")).toBeInTheDocument();
+
+    // Test regenerating from the ASSISTANT reply bubble
+    const assistantBubble = screen.getByRole("article", { name: "八千代的回复" });
+    fireEvent.contextMenu(assistantBubble);
+
+    const regenerateBtn = screen.getByRole("menuitem", { name: "重新生成" });
+    await user.click(regenerateBtn);
+
+    await waitFor(() => {
+      expect(stream).toHaveBeenCalledTimes(3);
+    });
+
+    // Now recall from the user bubble
+    const latestUserBubble = screen.getByRole("article", { name: "我的消息" });
+    fireEvent.contextMenu(latestUserBubble);
+
+    const recallBtn2 = screen.getByRole("menuitem", { name: "撤回" });
+    await user.click(recallBtn2);
+
+    await waitFor(() => {
+      expect(within(log).queryByText("第二条消息")).not.toBeInTheDocument();
+    });
+    expect(composer).toHaveValue("第二条消息");
   });
 });

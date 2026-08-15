@@ -17,6 +17,7 @@ import { PROVIDER_METADATA, type ActiveLlmConfig, type ProviderId } from "./doma
 import { processImage, type ImageProcessingErrorCode, type ProcessedImage } from "./features/capture/image-processor";
 import { copyFor, type UiCopy } from "./i18n/messages";
 import { UpdatePrompt } from "./pwa/UpdatePrompt";
+import { usePwaUpdate } from "./pwa/use-pwa-update";
 import { useOnlineStatus } from "./pwa/use-online-status";
 import { streamChat } from "./services/chat-client";
 import { LlmSettingsService } from "./services/llm-settings";
@@ -92,6 +93,7 @@ export function App({ services }: AppProps) {
   const activeServices = services ?? productionServices;
   const llmService = activeServices.llmSettings ?? productionLlmService;
   const { isOnline } = useOnlineStatus();
+  const pwa = usePwaUpdate();
   const [authentication, setAuthentication] = useState<AuthenticationState>(() =>
     navigator.onLine ? "checking" : "authenticated",
   );
@@ -370,6 +372,37 @@ export function App({ services }: AppProps) {
     setPendingImageDataUrl(undefined);
   };
 
+  const handleRecall = useCallback(async () => {
+    const recalled = await controller.recall();
+    if (recalled) {
+      if (recalled.text !== undefined) {
+        setComposerValue(recalled.text);
+      }
+      if (recalled.imageId) {
+        const image = await activeServices.repository.getImage(recalled.imageId);
+        if (image) {
+          controller.setPendingImage(image);
+          if (typeof URL.createObjectURL === "function") {
+            const url = URL.createObjectURL(image.blob);
+            blobUrlsRef.current.set(image.id, url);
+            setImageUrls(new Map(blobUrlsRef.current));
+            setPendingImageDataUrl(url);
+          }
+        }
+      }
+      showToast(copy.recallSuccess, "info");
+      await refreshHistory();
+    }
+  }, [activeServices, controller, copy.recallSuccess, refreshHistory, showToast]);
+
+  const handleRegenerate = useCallback(
+    async (messageId?: string) => {
+      await controller.regenerate(messageId);
+      await refreshHistory();
+    },
+    [controller, refreshHistory],
+  );
+
   const handleLocale = async (locale: Locale) => {
     await controller.setLocale(locale);
     setMenuOpen(false);
@@ -451,9 +484,24 @@ export function App({ services }: AppProps) {
           key={controller.activeConversation?.id}
           locale={controller.locale}
           messages={controller.messages}
+          onRecall={handleRecall}
+          onRegenerate={
+            !isOnline || controller.phase === "streaming" || controller.phase === "compressing" || controller.phase === "offline"
+              ? undefined
+              : handleRegenerate
+          }
+          onToast={showToast}
           summary={controller.activeConversation?.summary}
         />
         <div className="chat-bottom">
+          <UpdatePrompt
+            copy={copy}
+            needRefresh={pwa.needRefresh}
+            offlineReady={pwa.offlineReady}
+            onConfirmOfflineReady={() => pwa.setOfflineReady(false)}
+            onDismissUpdate={() => pwa.setNeedRefresh(false)}
+            onUpdate={() => void pwa.updateServiceWorker(true)}
+          />
           {!isOnline || controller.phase === "offline" ? <p className="status-banner">{copy.offline}</p> : null}
           {controller.phase === "error" &&
           controller.errorCode !== "DAILY_QUOTA_EXCEEDED" &&
@@ -553,7 +601,19 @@ export function App({ services }: AppProps) {
             <span />
           </div>
         ) : authentication === "unauthenticated" ? (
-          <AccessGate copy={copy} onAuthenticate={handleAuthenticate} />
+          <>
+            <AccessGate copy={copy} onAuthenticate={handleAuthenticate} />
+            <div className="access-gate__prompt">
+              <UpdatePrompt
+                copy={copy}
+                needRefresh={pwa.needRefresh}
+                offlineReady={pwa.offlineReady}
+                onConfirmOfflineReady={() => pwa.setOfflineReady(false)}
+                onDismissUpdate={() => pwa.setNeedRefresh(false)}
+                onUpdate={() => void pwa.updateServiceWorker(true)}
+              />
+            </div>
+          </>
         ) : (
           authenticatedContent
         )}
@@ -562,7 +622,6 @@ export function App({ services }: AppProps) {
           message={toast?.message}
           tone={toast?.tone}
         />
-        <UpdatePrompt copy={copy} />
       </div>
     </main>
   );

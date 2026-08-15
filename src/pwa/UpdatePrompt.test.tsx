@@ -44,4 +44,13 @@ describe("UpdatePrompt", () => {
     fireEvent.click(screen.getByRole("button", { name: "今すぐ更新" }));
     expect(serviceWorker.update).toHaveBeenCalledWith(true);
   });
+
+  it("dismisses update prompt when cancel button is clicked", () => {
+    serviceWorker.needRefresh = true;
+    render(<UpdatePrompt copy={copyFor("zh-CN")} />);
+
+    expect(screen.getByText("新版本已经准备好了。")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    expect(serviceWorker.setNeedRefresh).toHaveBeenCalledWith(false);
+  });
 });

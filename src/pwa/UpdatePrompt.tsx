@@ -1,17 +1,32 @@
 import { RefreshCw, WifiOff, X } from "lucide-react";
-import { useRegisterSW } from "virtual:pwa-register/react";
+import { usePwaUpdate } from "./use-pwa-update";
 import type { UiCopy } from "../i18n/messages";
+
 
 export interface UpdatePromptProps {
   copy: UiCopy;
+  needRefresh?: boolean;
+  offlineReady?: boolean;
+  onConfirmOfflineReady?: () => void;
+  onDismissUpdate?: () => void;
+  onUpdate?: () => void;
 }
 
-export function UpdatePrompt({ copy }: UpdatePromptProps) {
-  const {
-    needRefresh: [needRefresh, setNeedRefresh],
-    offlineReady: [offlineReady, setOfflineReady],
-    updateServiceWorker,
-  } = useRegisterSW();
+export function UpdatePrompt({
+  copy,
+  needRefresh: propNeedRefresh,
+  offlineReady: propOfflineReady,
+  onConfirmOfflineReady,
+  onDismissUpdate,
+  onUpdate,
+}: UpdatePromptProps) {
+  const internal = usePwaUpdate();
+
+  const needRefresh = propNeedRefresh ?? internal.needRefresh;
+  const offlineReady = propOfflineReady ?? internal.offlineReady;
+  const handleConfirmOfflineReady = onConfirmOfflineReady ?? (() => internal.setOfflineReady(false));
+  const handleDismissUpdate = onDismissUpdate ?? (() => internal.setNeedRefresh(false));
+  const handleUpdate = onUpdate ?? (() => void internal.updateServiceWorker(true));
 
   if (!needRefresh && !offlineReady) return null;
 
@@ -24,11 +39,11 @@ export function UpdatePrompt({ copy }: UpdatePromptProps) {
       )}
       <span>{needRefresh ? copy.updateReady : copy.offlineReady}</span>
       {needRefresh ? (
-        <button onClick={() => void updateServiceWorker(true)} type="button">
+        <button onClick={handleUpdate} type="button">
           {copy.updateAction}
         </button>
       ) : (
-        <button aria-label={copy.confirm} onClick={() => setOfflineReady(false)} type="button">
+        <button aria-label={copy.confirm} onClick={handleConfirmOfflineReady} type="button">
           <X aria-hidden="true" size={17} />
         </button>
       )}
@@ -36,7 +51,7 @@ export function UpdatePrompt({ copy }: UpdatePromptProps) {
         <button
           aria-label={copy.cancel}
           className="pwa-prompt__dismiss"
-          onClick={() => setNeedRefresh(false)}
+          onClick={handleDismissUpdate}
           type="button"
         >
           <X aria-hidden="true" size={17} />

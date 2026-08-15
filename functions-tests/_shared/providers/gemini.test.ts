@@ -15,7 +15,7 @@ const textRequest: ClientChatRequest = {
 };
 
 describe("buildGeminiBody", () => {
-  it("maps history to Gemini contents with systemInstruction and generationConfig", () => {
+  it("drops leading model message so history starts with user and sets systemInstruction", () => {
     const body = buildGeminiBody(textRequest) as {
       contents: Array<{ role: string; parts: Array<{ text: string }> }>;
       systemInstruction: { parts: Array<{ text: string }> };
@@ -23,11 +23,32 @@ describe("buildGeminiBody", () => {
     };
 
     expect(body.contents).toEqual([
-      { role: "model", parts: [{ text: "彩叶~" }] },
       { role: "user", parts: [{ text: "今天有点累" }] },
     ]);
     expect(body.systemInstruction.parts[0]?.text).toContain("月见八千代");
     expect(body.generationConfig.maxOutputTokens).toBe(2048);
+  });
+
+  it("merges adjacent same-role messages to enforce strict user/model alternation", () => {
+    const request: ClientChatRequest = {
+      locale: "zh-CN",
+      messages: [
+        { role: "user", text: "前情提要记忆" },
+        { role: "assistant", text: "已记住记忆" },
+        { role: "assistant", text: "彩叶~" },
+        { role: "user", text: "第一句" },
+        { role: "user", text: "第二句" },
+      ],
+    };
+    const body = buildGeminiBody(request) as {
+      contents: Array<{ role: string; parts: Array<{ text: string }> }>;
+    };
+
+    expect(body.contents).toEqual([
+      { role: "user", parts: [{ text: "前情提要记忆" }] },
+      { role: "model", parts: [{ text: "已记住记忆" }, { text: "彩叶~" }] },
+      { role: "user", parts: [{ text: "第一句" }, { text: "第二句" }] },
+    ]);
   });
 
   it("sets 1024 maxOutputTokens and summary prompt for summary mode", () => {
@@ -39,19 +60,24 @@ describe("buildGeminiBody", () => {
     expect(body.generationConfig.maxOutputTokens).toBe(1024);
   });
 
-  it("maps image data URLs into Gemini inlineData parts", () => {
+  it("maps image data URLs into Gemini inlineData parts and merges adjacent user parts", () => {
     const imageDataUrl = "data:image/jpeg;base64,/9j/4AAQ";
     const request: ClientChatRequest = {
       locale: "zh-CN",
-      messages: [{ role: "user", text: "看图", imageDataUrl }],
+      messages: [
+        { role: "user", text: "看图", imageDataUrl },
+        { role: "user", text: "好看吗？" },
+      ],
     };
     const body = buildGeminiBody(request) as {
       contents: Array<{ role: string; parts: Array<Record<string, unknown>> }>;
     };
 
+    expect(body.contents).toHaveLength(1);
     expect(body.contents[0]?.parts).toEqual([
       { text: "看图" },
       { inlineData: { mimeType: "image/jpeg", data: "/9j/4AAQ" } },
+      { text: "好看吗？" },
     ]);
   });
 });

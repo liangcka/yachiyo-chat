@@ -45,10 +45,17 @@ export interface ChatControllerOptions {
   id?: () => string;
 }
 
+export interface RecalledMessageData {
+  text: string;
+  imageId?: string;
+}
+
 export interface ChatController extends ChatState {
   send(text: string): Promise<void>;
   retry(): Promise<void>;
   stop(): Promise<void>;
+  recall(): Promise<RecalledMessageData | undefined>;
+  regenerate(messageId?: string): Promise<void>;
   compressConversation(manual?: boolean): Promise<boolean>;
   newConversation(): Promise<void>;
   selectConversation(id: string): Promise<void>;
@@ -157,6 +164,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
   const [state, dispatch] = useReducer(chatReducer, initialChatState);
   const stateRef = useRef<ChatState>(initialChatState);
   const activeRef = useRef<ActiveRun | undefined>(undefined);
+  const compressControllerRef = useRef<AbortController | undefined>(undefined);
   const initializationRef = useRef<Promise<InitialData> | undefined>(undefined);
   const mountedRef = useRef(false);
   const persistQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -239,6 +247,11 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     return () => {
       ignored = true;
       mountedRef.current = false;
+      const compressController = compressControllerRef.current;
+      if (compressController !== undefined) {
+        compressControllerRef.current = undefined;
+        compressController.abort();
+      }
       const active = activeRef.current;
       if (active !== undefined) {
         activeRef.current = undefined;
@@ -469,6 +482,8 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         return false;
       }
 
+      const controller = new AbortController();
+      compressControllerRef.current = controller;
       sendingRef.current = true;
       emit({ type: "compress-started" });
 
@@ -518,7 +533,6 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
 
         const activeConfig = activeLlmConfigRef.current;
         let summaryText = "";
-        const controller = new AbortController();
 
         await servicesRef.current.streamChat(
           {
@@ -537,6 +551,11 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
           },
         );
 
+        if (controller.signal.aborted) {
+          if (mountedRef.current) emit({ type: "clear-error" });
+          return false;
+        }
+
         const cleanSummary = summaryText.trim();
         if (cleanSummary.length > 0) {
           await servicesRef.current.repository.updateConversationSummary(
@@ -544,7 +563,11 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
             cleanSummary,
             nextTimestamp(),
           );
-          if (mountedRef.current && stateRef.current.activeConversation?.id === conversationId) {
+          if (
+            mountedRef.current &&
+            stateRef.current.activeConversation?.id === conversationId &&
+            !controller.signal.aborted
+          ) {
             emit({ type: "context-compressed", summary: cleanSummary });
             return true;
           }
@@ -555,6 +578,9 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         if (mountedRef.current) emit({ type: "clear-error" });
         return false;
       } finally {
+        if (compressControllerRef.current === controller) {
+          compressControllerRef.current = undefined;
+        }
         sendingRef.current = false;
       }
     },
@@ -578,6 +604,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       const normalized = text.trim();
       if (normalized.length === 0 && snapshot.pendingImage === undefined) return;
 
+      const targetConversationId = snapshot.activeConversation.id;
       const currentMessages = snapshot.messages;
       sendingRef.current = true;
       try {
@@ -585,14 +612,32 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
           sendingRef.current = false;
           await compressConversation();
           sendingRef.current = true;
+
+          const currentSnapshot = stateRef.current;
+          if (
+            !mountedRef.current ||
+            currentSnapshot.activeConversation?.id !== targetConversationId ||
+            currentSnapshot.phase === "offline"
+          ) {
+            return;
+          }
+        }
+
+        const currentSnapshot = stateRef.current;
+        if (
+          !mountedRef.current ||
+          currentSnapshot.activeConversation?.id !== targetConversationId ||
+          currentSnapshot.phase === "offline"
+        ) {
+          return;
         }
 
         const image =
-          snapshot.pendingImage === undefined
+          currentSnapshot.pendingImage === undefined
             ? undefined
-            : { ...snapshot.pendingImage, conversationId: snapshot.activeConversation.id };
+            : { ...currentSnapshot.pendingImage, conversationId: targetConversationId };
         const user: ChatMessage = {
-          conversationId: snapshot.activeConversation.id,
+          conversationId: targetConversationId,
           createdAt: nextTimestamp(),
           ...(image === undefined ? {} : { imageId: image.id }),
           id: servicesRef.current.id(),
@@ -632,12 +677,155 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
   }, [startAssistant]);
 
   const stop = useCallback(async (): Promise<void> => {
+    const compressController = compressControllerRef.current;
+    if (compressController !== undefined) {
+      compressControllerRef.current = undefined;
+      compressController.abort();
+      if (mountedRef.current) emit({ type: "clear-error" });
+    }
     const run = activeRef.current;
     if (run === undefined) return;
     run.controller.abort();
     await run.preparation.catch(() => undefined);
     await finishRun(run, "stopped");
-  }, [finishRun]);
+  }, [emit, finishRun]);
+
+  const recall = useCallback(async (): Promise<RecalledMessageData | undefined> => {
+    const snapshot = stateRef.current;
+    if (
+      snapshot.activeConversation === undefined ||
+      snapshot.phase === "loading" ||
+      snapshot.phase === "compressing"
+    ) {
+      return undefined;
+    }
+
+    const messages = snapshot.messages;
+    let lastUserIndex = -1;
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (messages[index]?.role === "user") {
+        lastUserIndex = index;
+        break;
+      }
+    }
+
+    if (lastUserIndex === -1) {
+      return undefined;
+    }
+
+    const compressController = compressControllerRef.current;
+    if (compressController !== undefined) {
+      compressControllerRef.current = undefined;
+      compressController.abort();
+      if (mountedRef.current) emit({ type: "clear-error" });
+    }
+
+    const active = activeRef.current;
+    if (active !== undefined) {
+      activeRef.current = undefined;
+      if (active.timer !== undefined) clearTimeout(active.timer);
+      active.controller.abort();
+    }
+
+    const recalledUser = messages[lastUserIndex];
+    if (recalledUser === undefined) return undefined;
+
+    const remainingMessages = messages.slice(0, lastUserIndex);
+    const conversationId = snapshot.activeConversation.id;
+
+    try {
+      const task = persistQueueRef.current.then(() =>
+        servicesRef.current.repository.replaceMessages(conversationId, remainingMessages),
+      );
+      persistQueueRef.current = task.catch(() => undefined);
+      await task;
+
+      if (mountedRef.current) {
+        emit({ messages: remainingMessages, type: "messages-reverted" });
+      }
+
+      return {
+        imageId: recalledUser.imageId,
+        text: recalledUser.text,
+      };
+    } catch {
+      if (mountedRef.current) emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
+      return undefined;
+    }
+  }, [emit]);
+
+  const regenerate = useCallback(
+    async (messageId?: string): Promise<void> => {
+      const snapshot = stateRef.current;
+      if (
+        sendingRef.current ||
+        snapshot.activeConversation === undefined ||
+        snapshot.phase === "loading" ||
+        snapshot.phase === "streaming" ||
+        snapshot.phase === "compressing" ||
+        snapshot.phase === "offline"
+      ) {
+        return;
+      }
+
+      const messages = snapshot.messages;
+      let targetIndex = -1;
+      if (messageId !== undefined) {
+        targetIndex = messages.findIndex(
+          (msg) => msg.id === messageId && msg.role === "assistant",
+        );
+      } else {
+        for (let index = messages.length - 1; index >= 0; index -= 1) {
+          if (messages[index]?.role === "assistant") {
+            targetIndex = index;
+            break;
+          }
+        }
+      }
+
+      if (targetIndex === -1) return;
+
+      const precedingMessages = messages.slice(0, targetIndex);
+      const hasPrecedingUser = precedingMessages.some((msg) => msg.role === "user");
+      if (!hasPrecedingUser) return;
+
+      const compressController = compressControllerRef.current;
+      if (compressController !== undefined) {
+        compressControllerRef.current = undefined;
+        compressController.abort();
+        if (mountedRef.current) emit({ type: "clear-error" });
+      }
+
+      const active = activeRef.current;
+      if (active !== undefined) {
+        activeRef.current = undefined;
+        if (active.timer !== undefined) clearTimeout(active.timer);
+        active.controller.abort();
+      }
+
+      sendingRef.current = true;
+      const conversationId = snapshot.activeConversation.id;
+
+      try {
+        const task = persistQueueRef.current.then(() =>
+          servicesRef.current.repository.replaceMessages(conversationId, precedingMessages),
+        );
+        persistQueueRef.current = task.catch(() => undefined);
+        await task;
+
+        if (mountedRef.current) {
+          emit({ messages: precedingMessages, type: "messages-reverted" });
+        }
+
+        await startAssistant(precedingMessages, undefined);
+      } catch {
+        if (mountedRef.current) emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
+      } finally {
+        sendingRef.current = false;
+      }
+    },
+    [emit, startAssistant],
+  );
 
   const stopAndWait = useCallback(async () => {
     await stop();
@@ -709,6 +897,8 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     ...state,
     clearError,
     newConversation,
+    recall,
+    regenerate,
     retry,
     selectConversation,
     send,

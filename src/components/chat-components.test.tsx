@@ -235,4 +235,138 @@ describe("reference chat components", () => {
     expect(onStop).toHaveBeenCalledOnce();
     expect(screen.getByPlaceholderText("何でも話してね")).toBeDisabled();
   });
+
+  it("opens context menu with recall option on right-click or long-press for the latest user message", () => {
+    const onRecall = vi.fn();
+    const messages: ChatMessage[] = [
+      {
+        conversationId: "one",
+        createdAt: 1,
+        id: "user-1",
+        role: "user",
+        status: "complete",
+        text: "第一条用户消息",
+      },
+      {
+        conversationId: "one",
+        createdAt: 2,
+        id: "assistant-1",
+        role: "assistant",
+        status: "complete",
+        text: "第一条回复",
+      },
+      {
+        conversationId: "one",
+        createdAt: 3,
+        id: "user-2",
+        role: "user",
+        status: "complete",
+        text: "第二条用户消息",
+      },
+      {
+        conversationId: "one",
+        createdAt: 4,
+        id: "assistant-2",
+        role: "assistant",
+        status: "complete",
+        text: "第二条回复",
+      },
+    ];
+
+    render(<ConversationView locale="zh-CN" messages={messages} onRecall={onRecall} />);
+
+    // Before right click, no menu is visible
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "撤回" })).not.toBeInTheDocument();
+
+    const userArticles = screen.getAllByRole("article", { name: "我的消息" });
+    const latestUserBubble = userArticles.at(-1)!;
+
+    // Right-click on latest user message
+    fireEvent.contextMenu(latestUserBubble);
+
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    const recallMenuItem = screen.getByRole("menuitem", { name: "撤回" });
+    expect(recallMenuItem).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "复制" })).toBeInTheDocument();
+
+    fireEvent.click(recallMenuItem);
+    expect(onRecall).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("copies message text to clipboard and calls onToast when copy menuitem is clicked", async () => {
+    const onToast = vi.fn();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, {
+      clipboard: {
+        writeText,
+      },
+    });
+
+    const messages: ChatMessage[] = [
+      {
+        conversationId: "one",
+        createdAt: 1,
+        id: "assistant-1",
+        role: "assistant",
+        status: "complete",
+        text: "这是八千代的回答",
+      },
+    ];
+
+    render(<ConversationView locale="zh-CN" messages={messages} onToast={onToast} />);
+
+    const assistantBubble = screen.getByRole("article", { name: "八千代的回复" });
+    fireEvent.contextMenu(assistantBubble);
+
+    const copyBtn = screen.getByRole("menuitem", { name: "复制" });
+    expect(copyBtn).toBeInTheDocument();
+
+    await userEvent.click(copyBtn);
+
+    expect(writeText).toHaveBeenCalledWith("这是八千代的回答");
+    expect(onToast).toHaveBeenCalledWith("已复制");
+  });
+
+  it("renders regenerate context menu item for the latest assistant message", async () => {
+    const onRegenerate = vi.fn();
+    const messages: ChatMessage[] = [
+      {
+        conversationId: "one",
+        createdAt: 1,
+        id: "user-1",
+        role: "user",
+        status: "complete",
+        text: "你好",
+      },
+      {
+        conversationId: "one",
+        createdAt: 2,
+        id: "assistant-1",
+        role: "assistant",
+        status: "complete",
+        text: "你好呀！",
+      },
+    ];
+
+    render(
+      <ConversationView
+        locale="zh-CN"
+        messages={messages}
+        onRegenerate={onRegenerate}
+      />,
+    );
+
+    // Right-click context menu on assistant bubble
+    const assistantBubble = screen.getByRole("article", { name: "八千代的回复" });
+    fireEvent.contextMenu(assistantBubble);
+
+    const regenerateMenuItem = screen.getByRole("menuitem", { name: "重新生成" });
+    expect(regenerateMenuItem).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "复制" })).toBeInTheDocument();
+
+    fireEvent.click(regenerateMenuItem);
+    expect(onRegenerate).toHaveBeenCalledWith("assistant-1");
+  });
 });

@@ -61,9 +61,36 @@ function mapHistoryMessage(
   };
 }
 
+export function buildGeminiContents(
+  rawMessages: ClientHistoryMessage[],
+  locale: ClientChatRequest["locale"],
+): GeminiContent[] {
+  const mapped = rawMessages.map((message) => mapHistoryMessage(message, locale));
+  const merged: GeminiContent[] = [];
+
+  for (const message of mapped) {
+    if (merged.length === 0) {
+      if (message.role !== "user") {
+        continue;
+      }
+      merged.push({ role: message.role, parts: [...message.parts] });
+      continue;
+    }
+
+    const prev = merged[merged.length - 1]!;
+    if (prev.role === message.role) {
+      prev.parts = [...prev.parts, ...message.parts];
+    } else {
+      merged.push({ role: message.role, parts: [...message.parts] });
+    }
+  }
+
+  return merged;
+}
+
 export function buildGeminiBody(request: ClientChatRequest): unknown {
   return {
-    contents: request.messages.map((message) => mapHistoryMessage(message, request.locale)),
+    contents: buildGeminiContents(request.messages, request.locale),
     systemInstruction: { parts: [{ text: buildSystemPrompt(request.locale, request.mode) }] },
     generationConfig: { maxOutputTokens: request.mode === "summary" ? 1024 : 2048 },
   };

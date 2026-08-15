@@ -151,4 +151,21 @@ describe("chatReducer", () => {
     expect(compressed.messages).toEqual([user]);
     expect(compressed.activeConversation?.summary).toBe("用户今天有点累");
   });
+
+  it("handles messages-reverted to restore message history and clear error/streaming state", () => {
+    const streamingState = {
+      ...initialChatState,
+      activeConversation: conversation,
+      errorCode: "SOME_ERROR",
+      messages: [user, assistant],
+      phase: "streaming" as const,
+    };
+    const reverted = chatReducer(streamingState, {
+      type: "messages-reverted",
+      messages: [],
+    });
+    expect(reverted.phase).toBe("idle");
+    expect(reverted.errorCode).toBeUndefined();
+    expect(reverted.messages).toEqual([]);
+  });
 });

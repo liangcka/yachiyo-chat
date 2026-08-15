@@ -23,23 +23,26 @@ export function TopControls({
   processImage,
 }: TopControlsProps) {
   return (
-    <header className="top-controls">
-      <button
-        aria-label={copy.menu}
-        className="top-controls__menu"
-        onClick={onMenu}
-        type="button"
-      >
-        <Equal aria-hidden="true" size={31} strokeWidth={1.8} />
-      </button>
-      <CaptureButton
-        className="capture-pill"
-        copy={copy}
-        disabled={captureDisabled}
-        onError={onCaptureError}
-        onImage={onImage}
-        process={processImage}
-      />
-    </header>
+    <>
+      <div aria-hidden="true" className="top-header-scrim" />
+      <header className="top-controls">
+        <button
+          aria-label={copy.menu}
+          className="top-controls__menu"
+          onClick={onMenu}
+          type="button"
+        >
+          <Equal aria-hidden="true" size={31} strokeWidth={1.8} />
+        </button>
+        <CaptureButton
+          className="capture-pill"
+          copy={copy}
+          disabled={captureDisabled}
+          onError={onCaptureError}
+          onImage={onImage}
+          process={processImage}
+        />
+      </header>
+    </>
   );
 }

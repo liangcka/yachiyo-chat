@@ -25,7 +25,8 @@ export type ChatAction =
   | { type: "pending-image-changed"; image?: StoredImage }
   | { type: "clear-error" }
   | { type: "compress-started" }
-  | { type: "context-compressed"; summary: string };
+  | { type: "context-compressed"; summary: string }
+  | { type: "messages-reverted"; messages: ChatMessage[] };
 
 export const initialChatState: ChatState = {
   locale: "zh-CN",
@@ -123,7 +124,11 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
     case "pending-image-changed":
       return { ...state, pendingImage: action.image };
     case "clear-error":
-      return { ...state, errorCode: undefined, phase: state.phase === "error" ? "idle" : state.phase };
+      return {
+        ...state,
+        errorCode: undefined,
+        phase: state.phase === "error" || state.phase === "compressing" ? "idle" : state.phase,
+      };
     case "compress-started":
       return { ...state, phase: "compressing", errorCode: undefined };
     case "context-compressed":
@@ -134,6 +139,13 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
             ? undefined
             : { ...state.activeConversation, summary: action.summary },
         phase: "idle",
+      };
+    case "messages-reverted":
+      return {
+        ...state,
+        errorCode: undefined,
+        messages: action.messages,
+        phase: state.phase === "offline" ? "offline" : "idle",
       };
   }
 }

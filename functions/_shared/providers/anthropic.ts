@@ -67,12 +67,56 @@ function mapHistoryMessage(
   };
 }
 
+function toAnthropicBlocks(content: AnthropicContent): Array<AnthropicTextBlock | AnthropicImageBlock> {
+  if (typeof content === "string") {
+    return content.length > 0 ? [{ type: "text", text: content }] : [];
+  }
+  return content;
+}
+
+export function buildAnthropicMessages(
+  rawMessages: ClientHistoryMessage[],
+  locale: ClientChatRequest["locale"],
+): AnthropicMessage[] {
+  const mapped = rawMessages.map((message) => mapHistoryMessage(message, locale));
+  const merged: AnthropicMessage[] = [];
+
+  for (const message of mapped) {
+    if (merged.length === 0) {
+      if (message.role !== "user") {
+        continue;
+      }
+      merged.push({ ...message });
+      continue;
+    }
+
+    const prev = merged[merged.length - 1]!;
+    if (prev.role === message.role) {
+      if (typeof prev.content === "string" && typeof message.content === "string") {
+        if (prev.content.length === 0) {
+          prev.content = message.content;
+        } else if (message.content.length > 0) {
+          prev.content = `${prev.content}\n\n${message.content}`;
+        }
+      } else {
+        const prevBlocks = toAnthropicBlocks(prev.content);
+        const currBlocks = toAnthropicBlocks(message.content);
+        prev.content = [...prevBlocks, ...currBlocks];
+      }
+    } else {
+      merged.push({ ...message });
+    }
+  }
+
+  return merged;
+}
+
 export function buildAnthropicBody(request: ClientChatRequest, model: string): unknown {
   return {
     model,
     max_tokens: request.mode === "summary" ? 1024 : 2048,
     system: buildSystemPrompt(request.locale, request.mode),
-    messages: request.messages.map((message) => mapHistoryMessage(message, request.locale)),
+    messages: buildAnthropicMessages(request.messages, request.locale),
     stream: true,
   };
 }

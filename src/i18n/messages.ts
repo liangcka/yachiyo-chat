@@ -74,6 +74,11 @@ export interface UiCopy {
   readonly compressFailed: string;
   readonly compressingContext: string;
   readonly memoryLabel: string;
+  readonly recall: string;
+  readonly recallSuccess: string;
+  readonly copyText: string;
+  readonly copied: string;
+  readonly regenerate: string;
 }
 
 const chinese = Object.freeze({
@@ -150,6 +155,11 @@ const chinese = Object.freeze({
   compressFailed: "压缩上下文失败，请稍后重试",
   compressingContext: "正在压缩上下文…",
   memoryLabel: "对话记忆",
+  recall: "撤回",
+  recallSuccess: "已撤回最新一条消息",
+  copyText: "复制",
+  copied: "已复制",
+  regenerate: "重新生成",
 } satisfies UiCopy);
 
 const japanese = Object.freeze({
@@ -226,6 +236,11 @@ const japanese = Object.freeze({
   compressFailed: "コンテキストの圧縮に失敗しました。後でもう一度お試しください",
   compressingContext: "コンテキストを圧縮中…",
   memoryLabel: "会話の記憶",
+  recall: "取り消す",
+  recallSuccess: "最新のメッセージを取り消しました",
+  copyText: "コピー",
+  copied: "コピーしました",
+  regenerate: "再生成",
 } satisfies UiCopy);
 
 const dictionaries: Readonly<Record<Locale, UiCopy>> = Object.freeze({

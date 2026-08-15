@@ -2,7 +2,12 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatMessage, Conversation, Locale, StoredImage } from "../domain/chat";
 import { copyFor } from "../i18n/messages";
-import { ChatClientError, type StreamChatOptions, type StreamChatRequest } from "../services/chat-client";
+import {
+  ChatClientError,
+  type StreamChatOptions,
+  type StreamChatRequest,
+  type StreamChatResult,
+} from "../services/chat-client";
 import {
   useChatController,
   type ChatRepository,
@@ -504,5 +509,297 @@ describe("useChatController", () => {
     );
     expect(result.current).toMatchObject({ errorCode: "STORAGE_ERROR", phase: "error" });
     expect(stream).not.toHaveBeenCalled();
+  });
+
+  it("recalls the latest user message and following assistant message, updating repository", async () => {
+    const repository = repositoryWith();
+    const stream = vi.fn<StreamChatFunction>(async (_req, options) => {
+      options.onDelta("回复内容");
+      return { truncated: false };
+    });
+    const { result } = renderHook(() =>
+      useChatController({
+        id: ids("user-1", "assistant-1"),
+        repository,
+        streamChat: stream,
+      }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    await act(async () => result.current.send("想要撤回的消息"));
+    expect(result.current.messages).toHaveLength(3); // greeting, user-1, assistant-1
+
+    let recalledData: unknown;
+    await act(async () => {
+      recalledData = await result.current.recall();
+    });
+
+    expect(recalledData).toEqual({
+      imageId: undefined,
+      text: "想要撤回的消息",
+    });
+    expect(result.current.messages).toEqual([greeting]);
+    expect(repository.replaceMessages).toHaveBeenCalledWith(conversation.id, [greeting]);
+  });
+
+  it("aborts active streaming when recall is called", async () => {
+    const repository = repositoryWith();
+    let aborted = false;
+    const stream = vi.fn<StreamChatFunction>(async (_req, options) => {
+      options.onDelta("正在生成中...");
+      return new Promise((_resolve, reject) => {
+        options.signal?.addEventListener("abort", () => {
+          aborted = true;
+          reject(new DOMException("Aborted", "AbortError"));
+        });
+      });
+    });
+    const { result } = renderHook(() =>
+      useChatController({
+        id: ids("user-1", "assistant-1"),
+        repository,
+        streamChat: stream,
+      }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    let sendPromise: Promise<void> = Promise.resolve();
+    act(() => {
+      sendPromise = result.current.send("流式测试");
+    });
+    await waitFor(() => expect(result.current.messages.at(-1)?.text).toBe("正在生成中..."));
+
+    await act(async () => {
+      await result.current.recall();
+      await sendPromise.catch(() => undefined);
+    });
+
+    expect(aborted).toBe(true);
+    expect(result.current.messages).toEqual([greeting]);
+    expect(result.current.phase).toBe("idle");
+  });
+
+  it("returns undefined and does nothing when there are no user messages to recall", async () => {
+    const repository = repositoryWith();
+    const { result } = renderHook(() =>
+      useChatController({
+        repository,
+        streamChat: vi.fn(),
+      }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    let recalled: unknown;
+    await act(async () => {
+      recalled = await result.current.recall();
+    });
+
+    expect(recalled).toBeUndefined();
+    expect(repository.replaceMessages).not.toHaveBeenCalled();
+  });
+
+  it("regenerates the latest assistant response based on preceding history", async () => {
+    const repository = repositoryWith();
+    let callCount = 0;
+    const stream = vi.fn<StreamChatFunction>(async (_req, options) => {
+      callCount += 1;
+      options.onDelta(callCount === 1 ? "第一遍回复" : "重新生成后的回复");
+      return { truncated: false };
+    });
+    const { result } = renderHook(() =>
+      useChatController({
+        id: ids("user-1", "assistant-1", "assistant-2"),
+        repository,
+        streamChat: stream,
+      }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    await act(async () => result.current.send("你好"));
+    expect(result.current.messages).toHaveLength(3); // greeting, user-1, assistant-1
+    expect(result.current.messages[2]?.text).toBe("第一遍回复");
+
+    await act(async () => result.current.regenerate());
+    expect(result.current.messages).toHaveLength(3); // greeting, user-1, assistant-2
+    expect(result.current.messages[2]?.text).toBe("重新生成后的回复");
+    expect(result.current.messages[2]?.id).toBe("assistant-2");
+    expect(stream).toHaveBeenCalledTimes(2);
+  });
+
+  it("includes image data url when regenerating assistant response for an image user message", async () => {
+    const image: StoredImage = {
+      blob: new Blob(["image-content"], { type: "image/jpeg" }),
+      conversationId: conversation.id,
+      height: 10,
+      id: "image-1",
+      mimeType: "image/jpeg",
+      width: 10,
+    };
+    let storedImage: StoredImage | undefined;
+    const repository = repositoryWith({
+      getImage: vi.fn(async (id: string) => (id === "image-1" ? storedImage : undefined)),
+      putImage: vi.fn(async (img: StoredImage) => {
+        storedImage = img;
+      }),
+    });
+    const stream = vi.fn<StreamChatFunction>(async (_req, options) => {
+      options.onDelta("回复");
+      return { truncated: false };
+    });
+    const { result } = renderHook(() =>
+      useChatController({
+        id: ids("user-1", "assistant-1", "assistant-2"),
+        repository,
+        streamChat: stream,
+      }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    act(() => result.current.setPendingImage(image));
+    await act(async () => result.current.send("看图"));
+
+    expect(stream).toHaveBeenCalledTimes(1);
+    expect(stream.mock.calls[0]?.[0].messages.at(-1)?.imageDataUrl).toBeDefined();
+
+    await act(async () => result.current.regenerate());
+
+    expect(stream).toHaveBeenCalledTimes(2);
+    expect(stream.mock.calls[1]?.[0].messages.at(-1)?.imageDataUrl).toBeDefined();
+  });
+
+
+  it("regenerates a specific assistant message by messageId and trims following messages", async () => {
+    const repository = repositoryWith();
+    let callCount = 0;
+    const stream = vi.fn<StreamChatFunction>(async (_req, options) => {
+      callCount += 1;
+      options.onDelta(`回复 #${callCount}`);
+      return { truncated: false };
+    });
+    const { result } = renderHook(() =>
+      useChatController({
+        id: ids("user-1", "assistant-1", "user-2", "assistant-2", "assistant-3"),
+        repository,
+        streamChat: stream,
+      }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    await act(async () => result.current.send("问题一"));
+    await act(async () => result.current.send("问题二"));
+    expect(result.current.messages).toHaveLength(5); // greeting, user-1, assistant-1, user-2, assistant-2
+
+    // Regenerate from assistant-1
+    await act(async () => result.current.regenerate("assistant-1"));
+    expect(result.current.messages).toHaveLength(3); // greeting, user-1, assistant-3
+    expect(result.current.messages[2]?.id).toBe("assistant-3");
+    expect(result.current.messages[2]?.text).toBe("回复 #3");
+    expect(repository.replaceMessages).toHaveBeenCalledWith(conversation.id, [
+      greeting,
+      expect.objectContaining({ id: "user-1" }),
+    ]);
+  });
+
+  it("aborts active compression when stop is called and returns to idle", async () => {
+    const messages: ChatMessage[] = Array.from({ length: 20 }, (_, index) => ({
+      conversationId: conversation.id,
+      createdAt: 20 + index,
+      id: `history-${index}`,
+      role: index % 2 === 0 ? "user" : "assistant",
+      status: "complete",
+      text: `消息 ${index}`,
+    }));
+    const repository = repositoryWith({ listMessages: vi.fn(async () => messages) });
+    let compressionSignal: AbortSignal | undefined;
+    const stream = vi.fn<StreamChatFunction>(async (request, options) => {
+      if (request.mode === "summary") {
+        compressionSignal = options.signal;
+        options.onDelta("压缩中...");
+        return new Promise((_resolve, reject) => {
+          options.signal?.addEventListener("abort", () => {
+            reject(new DOMException("Aborted", "AbortError"));
+          });
+        });
+      }
+      return { truncated: false };
+    });
+
+    const { result } = renderHook(() =>
+      useChatController({
+        repository,
+        streamChat: stream,
+      }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    let compressPromise: Promise<boolean> = Promise.resolve(false);
+    act(() => {
+      compressPromise = result.current.compressConversation();
+    });
+    await waitFor(() => expect(result.current.phase).toBe("compressing"));
+    expect(compressionSignal).toBeDefined();
+
+    await act(async () => {
+      await result.current.stop();
+      await compressPromise;
+    });
+
+    expect(compressionSignal?.aborted).toBe(true);
+    expect(result.current.phase).toBe("idle");
+    expect(repository.updateConversationSummary).not.toHaveBeenCalled();
+  });
+
+  it("terminates send without writing to new conversation if conversation is switched during compression", async () => {
+    const messages: ChatMessage[] = Array.from({ length: 20 }, (_, index) => ({
+      conversationId: conversation.id,
+      createdAt: 20 + index,
+      id: `history-${index}`,
+      role: index % 2 === 0 ? "user" : "assistant",
+      status: "complete",
+      text: `消息 ${index}`,
+    }));
+    const nextConversation = { ...conversation, id: "conversation-2", title: "新的对话 2" };
+    const repository = repositoryWith({
+      createConversation: vi.fn(async () => nextConversation),
+      listMessages: vi.fn(async () => messages),
+    });
+
+    const compressionDeferred = deferred<StreamChatResult>();
+    const stream = vi.fn<StreamChatFunction>(async (request, options) => {
+      if (request.mode === "summary") {
+        options.signal?.addEventListener("abort", () => {
+          compressionDeferred.reject(new DOMException("Aborted", "AbortError"));
+        });
+        return compressionDeferred.promise;
+      }
+      return { truncated: false };
+    });
+
+    const { result } = renderHook(() =>
+      useChatController({
+        id: ids("user-new", "assistant-new"),
+        repository,
+        streamChat: stream,
+      }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    let sendPromise: Promise<void> = Promise.resolve();
+    act(() => {
+      sendPromise = result.current.send("新发送的消息");
+    });
+    await waitFor(() => expect(result.current.phase).toBe("compressing"));
+
+    // User creates a new conversation while compression is in flight
+    await act(async () => {
+      await result.current.newConversation();
+      await sendPromise.catch(() => undefined);
+    });
+
+    expect(result.current.activeConversation?.id).toBe(nextConversation.id);
+    expect(result.current.messages).toEqual([]);
+    // Ensure the message wasn't saved into the new conversation
+    const putCalls = vi.mocked(repository.putMessage).mock.calls.map(([msg]) => msg);
+    expect(putCalls.filter((m) => m.conversationId === nextConversation.id)).toHaveLength(0);
   });
 });
