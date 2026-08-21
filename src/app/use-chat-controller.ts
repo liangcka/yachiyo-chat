@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
-import type { ChatMessage, Conversation, Locale, StoredImage } from "../domain/chat";
+import type { ChatMessage, ChatSource, Conversation, Locale, StoredImage } from "../domain/chat";
 import type { ActiveLlmConfig } from "../domain/llm";
+import type { SkillDefinition } from "../skills";
 
 import {
   ChatClientError,
@@ -41,6 +42,12 @@ export interface ChatControllerOptions {
   repository: ChatRepository;
   streamChat?: StreamChatFunction;
   activeLlmConfig?: ActiveLlmConfig;
+  /** 已启用的技能，内容将作为技能指令注入每次请求 */
+  activeSkills?: readonly SkillDefinition[];
+  /** 联网搜索开关，开启后普通聊天请求携带 webSearch: true（summary 压缩不携带） */
+  webSearchEnabled?: boolean;
+  /** 智能搜索开关，开启后普通聊天请求携带 smartSearch: true（需联网搜索同时开启） */
+  webSearchSmart?: boolean;
   now?: () => number;
   id?: () => string;
 }
@@ -84,6 +91,8 @@ interface ActiveRun {
   finishing?: Promise<void>;
   preparation: Promise<void>;
   text: string;
+  /** 联网搜索返回的参考来源（sources 事件先于 delta 到达），随消息持久化 */
+  sources?: ReadonlyArray<ChatSource>;
   timer?: ReturnType<typeof setTimeout>;
   token: number;
 }
@@ -161,6 +170,18 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
   useEffect(() => {
     activeLlmConfigRef.current = options.activeLlmConfig;
   }, [options.activeLlmConfig]);
+  const activeSkillsRef = useRef<readonly SkillDefinition[] | undefined>(options.activeSkills);
+  useEffect(() => {
+    activeSkillsRef.current = options.activeSkills;
+  }, [options.activeSkills]);
+  const webSearchEnabledRef = useRef<boolean>(options.webSearchEnabled ?? false);
+  useEffect(() => {
+    webSearchEnabledRef.current = options.webSearchEnabled ?? false;
+  }, [options.webSearchEnabled]);
+  const webSearchSmartRef = useRef<boolean>(options.webSearchSmart ?? false);
+  useEffect(() => {
+    webSearchSmartRef.current = options.webSearchSmart ?? false;
+  }, [options.webSearchSmart]);
   const [state, dispatch] = useReducer(chatReducer, initialChatState);
   const stateRef = useRef<ChatState>(initialChatState);
   const activeRef = useRef<ActiveRun | undefined>(undefined);
@@ -278,6 +299,22 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       reserveCharacters = 0,
       overrideSummary?: string,
     ): Promise<StreamChatMessage[]> => {
+      const activeSkills = activeSkillsRef.current ?? [];
+      const hasSkills = activeSkills.length > 0;
+      const skillUserText = hasSkills
+        ? `【技能指令 / Skill Instructions】\n以下技能已激活，回复时必须严格遵守：\n\n${activeSkills
+            .map((skill) => skill.content)
+            .join("\n\n---\n\n")}`
+        : "";
+      const skillAssistantText = hasSkills
+        ? stateRef.current.locale === "ja-JP"
+          ? "（技能指示を確認しました。厳守して実行します）"
+          : "（已收到技能指令，将严格遵守执行）"
+        : "";
+      const skillChars = hasSkills
+        ? [...skillUserText].length + [...skillAssistantText].length
+        : 0;
+
       const activeSummary = overrideSummary ?? stateRef.current.activeConversation?.summary;
       const hasSummary = typeof activeSummary === "string" && activeSummary.trim().length > 0;
 
@@ -296,8 +333,13 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         ? [...summaryUserText].length + [...summaryAssistantText].length
         : 0;
 
-      const maxHistoryMessages = hasSummary ? maximumRequestMessages - 2 : maximumRequestMessages;
-      const history = requestHistory(messages, reserveCharacters + summaryChars, maxHistoryMessages);
+      const reservedPrefixMessages = (hasSkills ? 2 : 0) + (hasSummary ? 2 : 0);
+      const maxHistoryMessages = maximumRequestMessages - reservedPrefixMessages;
+      const history = requestHistory(
+        messages,
+        reserveCharacters + summaryChars + skillChars,
+        maxHistoryMessages,
+      );
       const lastIndex = history.length - 1;
 
       const chatMessages = await Promise.all(
@@ -317,15 +359,21 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         }),
       );
 
+      const prefixMessages: StreamChatMessage[] = [];
+      if (hasSkills) {
+        prefixMessages.push(
+          { role: "user", text: skillUserText },
+          { role: "assistant", text: skillAssistantText },
+        );
+      }
       if (hasSummary) {
-        return [
+        prefixMessages.push(
           { role: "user", text: summaryUserText },
           { role: "assistant", text: summaryAssistantText },
-          ...chatMessages,
-        ];
+        );
       }
 
-      return chatMessages;
+      return [...prefixMessages, ...chatMessages];
     },
     [],
   );
@@ -347,6 +395,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
           status,
           text: run.text,
           ...(truncated === true ? { truncated: true } : {}),
+          ...(run.sources !== undefined ? { sources: run.sources } : {}),
         };
         if (mountedRef.current) {
           if (status === "complete") emit({ messageId: run.assistant.id, type: "completed" });
@@ -422,6 +471,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
             ...run.assistant,
             status: "streaming",
             text: run.text,
+            ...(run.sources !== undefined ? { sources: run.sources } : {}),
           }).catch(() => undefined);
         }, partialPersistenceInterval);
       };
@@ -429,12 +479,18 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       try {
         const requestMessages = await makeRequestMessages(history, pendingImage);
         const activeConfig = activeLlmConfigRef.current;
+        // 流正常结束但零输出（如推理模型思考耗尽 token 预算）视为可重试失败，
+        // 避免空气泡被静默隐藏
         const result = await servicesRef.current.streamChat(
           {
             locale: stateRef.current.locale,
             messages: requestMessages,
             ...(activeConfig !== undefined
               ? { provider: activeConfig.provider, apiKey: activeConfig.apiKey, model: activeConfig.model }
+              : {}),
+            ...(webSearchEnabledRef.current === true ? { webSearch: true } : {}),
+            ...(webSearchEnabledRef.current === true && webSearchSmartRef.current === true
+              ? { smartSearch: true }
               : {}),
           },
           {
@@ -444,10 +500,21 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
               emit({ messageId: run.assistant.id, text, type: "delta" });
               schedulePartialPersistence();
             },
+            onSources(sources) {
+              if (activeRef.current?.token !== run.token || sources.length === 0) return;
+              run.sources = sources;
+              emit({ messageId: run.assistant.id, sources, type: "sources-received" });
+              schedulePartialPersistence();
+            },
             signal: run.controller.signal,
           },
         );
-        await finishRun(run, "complete", undefined, result.truncated);
+        await finishRun(
+          run,
+          run.text.length === 0 ? "failed" : "complete",
+          run.text.length === 0 ? "PROVIDER_ERROR" : undefined,
+          run.text.length === 0 ? undefined : result.truncated,
+        );
       } catch (error) {
         if (activeRef.current?.token !== run.token) return;
         const code =

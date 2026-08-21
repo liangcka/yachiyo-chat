@@ -7,6 +7,7 @@ import { ConversationView } from "./components/ConversationView";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { LlmSettingsPanel, type LlmProviderEntry } from "./components/LlmSettingsPanel";
 import { MenuDrawer } from "./components/MenuDrawer";
+import { SkillsPanel } from "./components/SkillsPanel";
 import { StarfieldCanvas } from "./components/StarfieldCanvas";
 import { ToastRegion } from "./components/ToastRegion";
 import { TopControls } from "./components/TopControls";
@@ -22,6 +23,9 @@ import { useOnlineStatus } from "./pwa/use-online-status";
 import { streamChat } from "./services/chat-client";
 import { LlmSettingsService } from "./services/llm-settings";
 import { SessionClient } from "./services/session-client";
+import { SkillSettingsService } from "./services/skill-settings";
+import { WebSearchSettingsService, defaultWebSearchSettings } from "./services/web-search-settings";
+import { SKILLS } from "./skills";
 
 export interface AppRepository extends ChatRepository {
   renameConversation(id: string, title: string): Promise<void>;
@@ -41,6 +45,8 @@ export interface AppServices {
   streamChat: StreamChatFunction;
   processImage: (file: File) => Promise<ProcessedImage>;
   llmSettings?: LlmSettingsService;
+  skillSettings?: SkillSettingsService;
+  webSearchSettings?: WebSearchSettingsService;
 }
 
 export interface AppProps {
@@ -49,12 +55,16 @@ export interface AppProps {
 
 const productionDatabase = new YachiyoDatabase();
 const productionLlmService = new LlmSettingsService(productionDatabase);
+const productionSkillService = new SkillSettingsService(productionDatabase);
+const productionWebSearchService = new WebSearchSettingsService(productionDatabase);
 const productionServices: AppServices = {
   processImage,
   repository: new ConversationRepository(productionDatabase),
   session: new SessionClient(),
   streamChat,
   llmSettings: productionLlmService,
+  skillSettings: productionSkillService,
+  webSearchSettings: productionWebSearchService,
 };
 
 interface ToastState {
@@ -92,6 +102,8 @@ function isRetryableGenerationError(code: string | undefined): boolean {
 export function App({ services }: AppProps) {
   const activeServices = services ?? productionServices;
   const llmService = activeServices.llmSettings ?? productionLlmService;
+  const skillService = activeServices.skillSettings ?? productionSkillService;
+  const webSearchService = activeServices.webSearchSettings ?? productionWebSearchService;
   const { isOnline } = useOnlineStatus();
   const pwa = usePwaUpdate();
   const [authentication, setAuthentication] = useState<AuthenticationState>(() =>
@@ -106,6 +118,11 @@ export function App({ services }: AppProps) {
   const [llmOpen, setLlmOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [pendingImageDataUrl, setPendingImageDataUrl] = useState<string>();
+  const [skillsOpen, setSkillsOpen] = useState(false);
+  const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
+  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  const [webSearchShowSources, setWebSearchShowSources] = useState(true);
+  const [webSearchSmart, setWebSearchSmart] = useState(false);
   const [toast, setToast] = useState<ToastState>();
 
   const activeLlmConfig = useMemo<ActiveLlmConfig | undefined>(() => {
@@ -119,10 +136,18 @@ export function App({ services }: AppProps) {
     };
   }, [llmActiveProvider, llmEntries]);
 
+  const activeSkills = useMemo(
+    () => SKILLS.filter((skill) => activeSkillIds.includes(skill.id)),
+    [activeSkillIds],
+  );
+
   const controller = useChatController({
     repository: activeServices.repository,
     streamChat: activeServices.streamChat,
     activeLlmConfig,
+    activeSkills,
+    webSearchEnabled,
+    webSearchSmart,
   });
   const setControllerOnline = controller.setOnline;
   const copy = copyFor(controller.locale);
@@ -175,6 +200,15 @@ export function App({ services }: AppProps) {
           } catch {
             if (!cancelled) showSessionFailure();
           }
+          setActiveSkillIds(await skillService.getActiveSkillIds().catch(() => []));
+          const webSearch = await webSearchService
+            .getWebSearchSettings()
+            .catch(() => defaultWebSearchSettings);
+          if (!cancelled) {
+            setWebSearchEnabled(webSearch.enabled);
+            setWebSearchShowSources(webSearch.showSources);
+            setWebSearchSmart(webSearch.smart);
+          }
         }
         if (cancelled) return;
         if (llmSettings !== undefined) {
@@ -193,7 +227,7 @@ export function App({ services }: AppProps) {
       cancelled = true;
       abortController.abort();
     };
-  }, [activeServices, isOnline, readLlmSettings]);
+  }, [activeServices, isOnline, readLlmSettings, skillService, webSearchService]);
 
   useEffect(() => {
     const timeout = setTimeout(() => setControllerOnline(isOnline), 0);
@@ -251,6 +285,43 @@ export function App({ services }: AppProps) {
       setLlmActiveProvider(provider);
     },
     [llmService],
+  );
+
+  const handleSkillToggle = useCallback(
+    async (id: string, next: boolean) => {
+      setActiveSkillIds((current) => {
+        const updated = next
+          ? [...new Set([...current, id])]
+          : current.filter((skillId) => skillId !== id);
+        void skillService.setActiveSkillIds(updated).catch(() => undefined);
+        return updated;
+      });
+    },
+    [skillService],
+  );
+
+  const handleWebSearchEnabledChange = useCallback(
+    (next: boolean) => {
+      setWebSearchEnabled(next);
+      void webSearchService.setEnabled(next).catch(() => undefined);
+    },
+    [webSearchService],
+  );
+
+  const handleWebSearchShowSourcesChange = useCallback(
+    (next: boolean) => {
+      setWebSearchShowSources(next);
+      void webSearchService.setShowSources(next).catch(() => undefined);
+    },
+    [webSearchService],
+  );
+
+  const handleWebSearchSmartChange = useCallback(
+    (next: boolean) => {
+      setWebSearchSmart(next);
+      void webSearchService.setSmart(next).catch(() => undefined);
+    },
+    [webSearchService],
   );
 
   useEffect(() => {
@@ -339,6 +410,13 @@ export function App({ services }: AppProps) {
       const llmSettings = await readLlmSettings();
       setLlmEntries(llmSettings.entries);
       setLlmActiveProvider(llmSettings.active);
+      setActiveSkillIds(await skillService.getActiveSkillIds());
+      const webSearch = await webSearchService
+        .getWebSearchSettings()
+        .catch(() => defaultWebSearchSettings);
+      setWebSearchEnabled(webSearch.enabled);
+      setWebSearchShowSources(webSearch.showSources);
+      setWebSearchSmart(webSearch.smart);
     } catch {
       showToast(copy.genericFailure, "error");
     }
@@ -441,6 +519,12 @@ export function App({ services }: AppProps) {
     await activeServices.repository.clearAll();
     await activeServices.repository.setLocale(controller.locale);
     await llmService.clearAll();
+    setActiveSkillIds([]);
+    await skillService.clear();
+    setWebSearchEnabled(false);
+    setWebSearchShowSources(true);
+    setWebSearchSmart(false);
+    await webSearchService.clear().catch(() => undefined);
     setLlmEntries([]);
     setLlmActiveProvider(undefined);
     await controller.newConversation();
@@ -491,6 +575,7 @@ export function App({ services }: AppProps) {
               : handleRegenerate
           }
           onToast={showToast}
+          showSources={webSearchShowSources}
           summary={controller.activeConversation?.summary}
         />
         <div className="chat-bottom">
@@ -555,16 +640,14 @@ export function App({ services }: AppProps) {
               showToast(copy.compressFailed, "error");
             }
           }}
-          onHistory={() => {
-            setMenuOpen(false);
-            setHistoryOpen(true);
-          }}
+          onHistory={() => setHistoryOpen(true)}
           onLocale={handleLocale}
           onLlmSettings={() => {
             void openLlmSettings();
           }}
           onNewChat={handleNewChat}
           onSignOut={handleSignOut}
+          onSkills={() => setSkillsOpen(true)}
           open={menuOpen}
         />
         <HistoryPanel
@@ -586,6 +669,20 @@ export function App({ services }: AppProps) {
           onClose={() => setLlmOpen(false)}
           onSave={handleLlmSave}
           open={llmOpen}
+        />
+        <SkillsPanel
+          activeIds={activeSkillIds}
+          copy={copy}
+          onClose={() => setSkillsOpen(false)}
+          onToggle={(id, next) => void handleSkillToggle(id, next)}
+          onWebSearchEnabledChange={handleWebSearchEnabledChange}
+          onWebSearchShowSourcesChange={handleWebSearchShowSourcesChange}
+          onWebSearchSmartChange={handleWebSearchSmartChange}
+          open={skillsOpen}
+          skills={SKILLS}
+          webSearchEnabled={webSearchEnabled}
+          webSearchShowSources={webSearchShowSources}
+          webSearchSmart={webSearchSmart}
         />
       </>
     );

@@ -9,6 +9,7 @@ import type { StreamChatFunction } from "../app/use-chat-controller";
 import { ChatClientError } from "../services/chat-client";
 import { LlmSettingsService } from "../services/llm-settings";
 import { SessionClientError } from "../services/session-client";
+import { WebSearchSettingsService } from "../services/web-search-settings";
 
 class MemoryRepository implements AppRepository {
   conversations: Conversation[] = [];
@@ -119,6 +120,7 @@ function fakeServices(options: {
   llmSettings?: LlmSettingsService;
   repository?: MemoryRepository;
   stream?: StreamChatFunction;
+  webSearchSettings?: WebSearchSettingsService;
 } = {}): AppServices & { repository: MemoryRepository; session: SessionService } {
   const session: SessionService = {
     authenticate: vi.fn(async () => {
@@ -138,6 +140,9 @@ function fakeServices(options: {
         return { truncated: false };
       }),
     ...(options.llmSettings === undefined ? {} : { llmSettings: options.llmSettings }),
+    ...(options.webSearchSettings === undefined
+      ? {}
+      : { webSearchSettings: options.webSearchSettings }),
   };
 }
 
@@ -195,6 +200,89 @@ describe("App flows", () => {
         expect.objectContaining({ role: "assistant", status: "complete", text: "先休息一下吧~（轻轻握住你的手）" }),
       ]),
     );
+  });
+
+  it("toggles web search, sends webSearch requests, and renders or hides source links", async () => {
+    const user = userEvent.setup();
+    const db = new YachiyoDatabase(`yachiyo-app-web-search-${crypto.randomUUID()}`);
+    const webSearchSettings = new WebSearchSettingsService(db);
+    const sources = [
+      { title: "必应搜索结果一", url: "https://www.bing.com/" },
+      { title: "必应搜索结果二", url: "https://cn.bing.com/" },
+    ];
+    const stream = vi.fn<StreamChatFunction>(async (request, options) => {
+      if (request.webSearch === true) options.onSources?.(sources);
+      options.onDelta("基于搜索的回复");
+      return { truncated: false };
+    });
+    const services = fakeServices({ stream, webSearchSettings });
+    const view = render(<App services={services} />);
+
+    try {
+      const composer = await screen.findByPlaceholderText("什么都可以告诉我");
+
+      // 默认关闭：请求不携带 webSearch，也不渲染来源
+      await user.type(composer, "今天上海天气");
+      await user.click(screen.getByRole("button", { name: "发送" }));
+      await waitFor(() => expect(stream).toHaveBeenCalledOnce());
+      expect(stream.mock.calls[0]?.[0].webSearch).toBeUndefined();
+      expect(screen.queryByLabelText("参考来源")).not.toBeInTheDocument();
+
+      // 菜单 → 技能 → 开启联网搜索
+      await user.click(screen.getByRole("button", { name: "菜单" }));
+      await user.click(screen.getByRole("button", { name: "技能" }));
+      await waitFor(() =>
+        expect(screen.queryByRole("button", { name: "新建对话" })).not.toBeInTheDocument(),
+      );
+      await user.click(screen.getByRole("button", { name: "切换技能启用状态: 联网搜索" }));
+      await user.click(screen.getByRole("button", { name: "关闭菜单" }));
+      await waitFor(() =>
+        expect(
+          screen.queryByRole("button", { name: "切换技能启用状态: 联网搜索" }),
+        ).not.toBeInTheDocument(),
+      );
+
+      // 开启后：请求携带 webSearch: true，回复下方渲染参考来源链接
+      await user.type(composer, "明天呢");
+      await user.click(screen.getByRole("button", { name: "发送" }));
+      await waitFor(() => expect(stream).toHaveBeenCalledTimes(2));
+      expect(stream.mock.calls[1]?.[0].webSearch).toBe(true);
+
+      const sourcesRegion = await screen.findByLabelText("参考来源");
+      const firstLink = within(sourcesRegion).getByRole("link", { name: "必应搜索结果一" });
+      expect(firstLink).toHaveAttribute("href", "https://www.bing.com/");
+      expect(firstLink).toHaveAttribute("target", "_blank");
+      expect(firstLink).toHaveAttribute("rel", "noopener noreferrer");
+      expect(
+        within(sourcesRegion).getByRole("link", { name: "必应搜索结果二" }),
+      ).toHaveAttribute("href", "https://cn.bing.com/");
+
+      // 消息数据中的 sources 随消息持久化保留
+      expect(
+        services.repository.messages.find((message) => message.sources !== undefined)?.sources,
+      ).toEqual(sources);
+
+      // 关闭"显示引用来源"后不再渲染来源列表
+      await user.click(screen.getByRole("button", { name: "菜单" }));
+      await user.click(screen.getByRole("button", { name: "技能" }));
+      await waitFor(() =>
+        expect(screen.queryByRole("button", { name: "新建对话" })).not.toBeInTheDocument(),
+      );
+      await user.click(screen.getByRole("button", { name: "切换技能启用状态: 显示引用来源" }));
+      await user.click(screen.getByRole("button", { name: "关闭菜单" }));
+      await waitFor(() => expect(screen.queryByLabelText("参考来源")).not.toBeInTheDocument());
+
+      // 持久化的开关状态已更新
+      expect(await webSearchSettings.getWebSearchSettings()).toEqual({
+        enabled: true,
+        showSources: false,
+        smart: false,
+      });
+    } finally {
+      view.unmount();
+      db.close();
+      await db.delete();
+    }
   });
 
   it("restores the active LLM config before the first message after reload", async () => {

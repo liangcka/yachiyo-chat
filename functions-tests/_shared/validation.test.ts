@@ -38,6 +38,66 @@ describe("validateChatRequest", () => {
     ).toThrow(ChatValidationError);
   });
 
+  it("accepts an optional boolean webSearch flag on both return paths", () => {
+    expect(
+      validateChatRequest({ ...(validRequest() as object), webSearch: true }),
+    ).toMatchObject({ webSearch: true });
+    expect(
+      validateChatRequest({ ...(validRequest() as object), webSearch: false }),
+    ).toMatchObject({ webSearch: false });
+    expect(validateChatRequest(validRequest())).not.toHaveProperty("webSearch");
+
+    expect(
+      validateChatRequest({
+        ...(validRequest() as object),
+        provider: "openai",
+        apiKey: "sk-" + "a".repeat(40),
+        model: "gpt-5.6-luna",
+        webSearch: true,
+      }),
+    ).toMatchObject({ webSearch: true });
+  });
+
+  it("rejects a non-boolean webSearch and the server-only searchResults field", () => {
+    expect(() =>
+      validateChatRequest({ ...(validRequest() as object), webSearch: "yes" }),
+    ).toThrow(ChatValidationError);
+    expect(() =>
+      validateChatRequest({ ...(validRequest() as object), webSearch: 1 }),
+    ).toThrow(ChatValidationError);
+    expect(() =>
+      validateChatRequest({
+        ...(validRequest() as object),
+        searchResults: [{ title: "t", url: "https://example.com/", snippet: "s" }],
+      }),
+    ).toThrow(ChatValidationError);
+  });
+
+  it("accepts an optional boolean smartSearch flag on both return paths", () => {
+    expect(
+      validateChatRequest({ ...(validRequest() as object), smartSearch: true }),
+    ).toMatchObject({ smartSearch: true });
+    expect(validateChatRequest(validRequest())).not.toHaveProperty("smartSearch");
+
+    expect(
+      validateChatRequest({
+        ...(validRequest() as object),
+        provider: "openai",
+        apiKey: "sk-" + "a".repeat(40),
+        model: "gpt-5.6-luna",
+        webSearch: true,
+        smartSearch: true,
+      }),
+    ).toMatchObject({ smartSearch: true });
+
+    expect(() =>
+      validateChatRequest({ ...(validRequest() as object), smartSearch: "on" }),
+    ).toThrow(ChatValidationError);
+    expect(() =>
+      validateChatRequest({ ...(validRequest() as object), smartSearch: 1 }),
+    ).toThrow(ChatValidationError);
+  });
+
   it("enforces message, per-message, and total Unicode bounds", () => {
     expect(() =>
       validateChatRequest({

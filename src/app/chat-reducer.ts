@@ -1,4 +1,4 @@
-import type { ChatMessage, Conversation, Locale, StoredImage } from "../domain/chat";
+import type { ChatMessage, ChatSource, Conversation, Locale, StoredImage } from "../domain/chat";
 
 export type ChatPhase = "loading" | "idle" | "streaming" | "offline" | "error" | "compressing";
 
@@ -16,6 +16,7 @@ export type ChatAction =
   | { type: "load-failed"; errorCode: string }
   | { type: "send-started"; user?: ChatMessage; assistant: ChatMessage }
   | { type: "delta"; messageId: string; text: string }
+  | { type: "sources-received"; messageId: string; sources: ReadonlyArray<ChatSource> }
   | { type: "completed"; messageId: string }
   | { type: "stopped"; messageId: string }
   | { type: "failed"; messageId: string; errorCode: string }
@@ -67,6 +68,15 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         messages: updateMessage(state.messages, action.messageId, (message) => ({
           ...message,
           text: message.text + action.text,
+        })),
+      };
+    case "sources-received":
+      if (!state.messages.some((message) => message.id === action.messageId)) return state;
+      return {
+        ...state,
+        messages: updateMessage(state.messages, action.messageId, (message) => ({
+          ...message,
+          sources: action.sources,
         })),
       };
     case "completed":

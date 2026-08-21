@@ -51,7 +51,46 @@ describe("chatReducer", () => {
     expect(completed.messages).toEqual([user, { ...assistant, text: "好~", status: "complete" }]);
   });
 
-  it("keeps partial text when generation is stopped", () => {
+  it("attaches sources to the streaming assistant message and ignores unknown ids", () => {
+    const streaming = chatReducer(
+      { ...initialChatState, phase: "idle", activeConversation: conversation },
+      { type: "send-started", user, assistant },
+    );
+    const sources = [
+      { title: "必应搜索结果一", url: "https://www.bing.com/" },
+      { title: "必应搜索结果二", url: "https://cn.bing.com/" },
+    ];
+    const withSources = chatReducer(streaming, {
+      type: "sources-received",
+      messageId: assistant.id,
+      sources,
+    });
+    const withText = chatReducer(withSources, {
+      type: "delta",
+      messageId: assistant.id,
+      text: "基于搜索的回复",
+    });
+    const completed = chatReducer(withText, {
+      type: "completed",
+      messageId: assistant.id,
+    });
+
+    expect(completed.messages.at(-1)).toMatchObject({
+      status: "complete",
+      sources,
+      text: "基于搜索的回复",
+    });
+
+    // messageId 不存在时原样忽略，不影响任何消息
+    const ignored = chatReducer(completed, {
+      type: "sources-received",
+      messageId: "missing-message",
+      sources,
+    });
+    expect(ignored).toBe(completed);
+  });
+
+  it("keeps partial text when generation is stopped", async () => {
     const streaming = chatReducer(
       { ...initialChatState, phase: "idle", activeConversation: conversation },
       { type: "send-started", user, assistant },

@@ -79,6 +79,21 @@ export interface UiCopy {
   readonly copyText: string;
   readonly copied: string;
   readonly regenerate: string;
+  readonly skillsEntry: string;
+  readonly skillsTitle: string;
+  readonly skillsDescription: string;
+  readonly skillEnable: string;
+  readonly skillDisable: string;
+  readonly skillToggleLabel: string;
+  readonly skillViewContent: string;
+  readonly skillHideContent: string;
+  readonly webSearchTitle: string;
+  readonly webSearchDescription: string;
+  readonly webSearchShowSources: string;
+  readonly webSearchShowSourcesDescription: string;
+  readonly webSearchSmart: string;
+  readonly webSearchSmartDescription: string;
+  readonly sourcesLabel: string;
 }
 
 const chinese = Object.freeze({
@@ -160,6 +175,21 @@ const chinese = Object.freeze({
   copyText: "复制",
   copied: "已复制",
   regenerate: "重新生成",
+  skillsEntry: "技能",
+  skillsTitle: "技能",
+  skillsDescription: "供对话调用的文本处理技能，启用后自动生效",
+  skillEnable: "启用",
+  skillDisable: "停用",
+  skillToggleLabel: "切换技能启用状态",
+  skillViewContent: "查看技能说明",
+  skillHideContent: "收起技能说明",
+  webSearchTitle: "联网搜索",
+  webSearchDescription: "发送前先用必应搜索网络资料，回复将基于最新信息",
+  webSearchShowSources: "显示引用来源",
+  webSearchShowSourcesDescription: "在联网回复下方显示参考来源链接",
+  webSearchSmart: "智能搜索",
+  webSearchSmartDescription: "同时检索国际市场近30天结果，提升时效信息的准确性",
+  sourcesLabel: "参考来源",
 } satisfies UiCopy);
 
 const japanese = Object.freeze({
@@ -241,6 +271,21 @@ const japanese = Object.freeze({
   copyText: "コピー",
   copied: "コピーしました",
   regenerate: "再生成",
+  skillsEntry: "スキル",
+  skillsTitle: "スキル",
+  skillsDescription: "会話で使用するテキスト処理スキル。有効にすると自動的に適用されます",
+  skillEnable: "有効にする",
+  skillDisable: "無効にする",
+  skillToggleLabel: "スキルの有効/無効を切り替える",
+  skillViewContent: "スキルの説明を見る",
+  skillHideContent: "スキルの説明を閉じる",
+  webSearchTitle: "ウェブ検索",
+  webSearchDescription: "送信前にBingでウェブ検索し、最新情報をもとに返信します",
+  webSearchShowSources: "引用ソースを表示",
+  webSearchShowSourcesDescription: "ウェブ検索の返信の下に参考ソースへのリンクを表示します",
+  webSearchSmart: "スマート検索",
+  webSearchSmartDescription: "国際市場の直近30日間の結果も同時に検索し、最新情報の正確性を高めます",
+  sourcesLabel: "参考ソース",
 } satisfies UiCopy);
 
 const dictionaries: Readonly<Record<Locale, UiCopy>> = Object.freeze({

@@ -7,6 +7,15 @@ async function enterApp(page: Page): Promise<void> {
   await expect(page.getByPlaceholder("什么都可以告诉我")).toBeVisible();
 }
 
+/** 新会话不再渲染初始问候气泡，布局断言前先发一条消息等 mock 回复出现 */
+async function sendMockMessage(page: Page): Promise<void> {
+  await page.getByPlaceholder("什么都可以告诉我").fill("今天有点累");
+  await page.getByRole("button", { name: "发送" }).click();
+  await expect(page.getByRole("article", { name: "八千代的回复" }).last()).toContainText(
+    "笑着递上热乎乎的松饼",
+  );
+}
+
 async function waitForFiniteAnimations(page: Page): Promise<void> {
   await page.evaluate(async () => {
     const finiteAnimations = document
@@ -39,6 +48,7 @@ test.describe("base chat layout", () => {
 
   test("keeps the latest assistant reply close to the speaker control", async ({ page }) => {
     await enterApp(page);
+    await sendMockMessage(page);
     await waitForFiniteAnimations(page);
 
     const assistantBubble = page.getByRole("article", { name: "八千代的回复" });
@@ -52,6 +62,8 @@ test.describe("base chat layout", () => {
 
 test("keeps the latest reply clear of a multiline composer", async ({ page }) => {
   await enterApp(page);
+  await sendMockMessage(page);
+  await waitForFiniteAnimations(page);
 
   await page.getByPlaceholder("什么都可以告诉我").fill("第一行\n第二行\n第三行\n第四行");
   const gap = await verticalGap(
@@ -64,10 +76,13 @@ test("keeps the latest reply clear of a multiline composer", async ({ page }) =>
 
 test("keeps bottom status banners clear of the latest reply", async ({ context, page }) => {
   await enterApp(page);
+  await sendMockMessage(page);
+  await waitForFiniteAnimations(page);
 
   await context.setOffline(true);
   const statusBanner = page.locator(".status-banner");
   await expect(statusBanner).toBeVisible();
+  await waitForFiniteAnimations(page);
   const gap = await verticalGap(
     page.getByRole("article", { name: "八千代的回复" }),
     statusBanner,
@@ -82,6 +97,8 @@ test("keeps the PWA prompt clear of the latest reply", async ({ page }) => {
 
   const prompt = page.locator(".pwa-prompt");
   await expect(prompt).toBeVisible({ timeout: 10_000 });
+  await sendMockMessage(page);
+  await waitForFiniteAnimations(page);
   const gap = await verticalGap(
     page.getByRole("article", { name: "八千代的回复" }),
     prompt,

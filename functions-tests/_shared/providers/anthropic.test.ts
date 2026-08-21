@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ClientChatRequest } from "../../../functions/_shared/validation";
+import type { EnrichedChatRequest } from "../../../functions/_shared/web-search";
 import {
   buildAnthropicAdapter,
   buildAnthropicBody,
@@ -78,6 +79,23 @@ describe("buildAnthropicBody", () => {
         { type: "text", text: "好看吗？" },
       ],
     });
+  });
+
+  it("injects web search results and the 1000-character rule into the system prompt", () => {
+    const request: EnrichedChatRequest = {
+      ...textRequest,
+      webSearch: true,
+      searchResults: [
+        { title: "上海天气", url: "https://weather.example.cn/", snippet: "今日多云，24至30度。" },
+      ],
+    };
+    const body = buildAnthropicBody(request, "claude-sonnet-5") as { system: string };
+
+    expect(body.system).toContain("<web_search_results>");
+    expect(body.system).toContain("[1] 上海天气（https://weather.example.cn/）");
+    expect(body.system).toContain("今日多云，24至30度。");
+    expect(body.system).toContain("输出最多1000个Unicode字符");
+    expect(body.system).not.toContain("最多200个Unicode字符");
   });
 });
 

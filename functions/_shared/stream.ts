@@ -3,7 +3,8 @@ import type { ChatLocale } from "./validation";
 export type ClientStreamEvent =
   | { type: "delta"; text: string }
   | { type: "done"; truncated: boolean }
-  | { type: "error"; code: "PROVIDER_STREAM_ERROR" };
+  | { type: "error"; code: "PROVIDER_STREAM_ERROR" }
+  | { type: "sources"; sources: ReadonlyArray<{ title: string; url: string }> };
 
 interface ProxyOptions {
   abort?: () => void;
@@ -11,6 +12,8 @@ interface ProxyOptions {
   onFinalize?: () => void;
   signal?: AbortSignal;
   maxCharacters?: number;
+  /** 在读取 upstream 之前先下发的客户端事件（如 sources 搜索来源） */
+  initialEvents?: readonly ClientStreamEvent[];
 }
 
 const maximumOutputCharacters = 200;
@@ -42,6 +45,11 @@ function encodeClientEvent(event: ClientStreamEvent): Uint8Array {
   if (event.type === "done") {
     return encoder.encode(
       `event: done\ndata: ${JSON.stringify({ truncated: event.truncated })}\n\n`,
+    );
+  }
+  if (event.type === "sources") {
+    return encoder.encode(
+      `event: sources\ndata: ${JSON.stringify({ sources: event.sources })}\n\n`,
     );
   }
   return encoder.encode(`event: error\ndata: ${JSON.stringify({ code: event.code })}\n\n`);
@@ -256,6 +264,13 @@ export function proxyStepFunStream(
 
       void (async () => {
         try {
+          for (const event of options.initialEvents ?? []) {
+            if (closed) {
+              return;
+            }
+            controller.enqueue(encodeClientEvent(event));
+          }
+
           if (options.signal?.aborted) {
             await fail();
             return;
@@ -311,7 +326,17 @@ export function proxyStepFunStream(
 
 export const proxyProviderStream = proxyStepFunStream;
 
-export function mockChatResponse(locale: ChatLocale, mode?: string): Response {
+/** mock 模式联网搜索的固定来源载荷，用于 UI / e2e 验证 */
+const mockSearchSources: ReadonlyArray<{ title: string; url: string }> = [
+  { title: "必应搜索结果一", url: "https://www.bing.com/" },
+  { title: "必应搜索结果二", url: "https://cn.bing.com/" },
+];
+
+export function mockChatResponse(
+  locale: ChatLocale,
+  mode?: string,
+  webSearch?: boolean,
+): Response {
   const text =
     mode === "summary"
       ? locale === "ja-JP"
@@ -323,10 +348,26 @@ export function mockChatResponse(locale: ChatLocale, mode?: string): Response {
   const characters = [...text];
   const midpoint = Math.ceil(characters.length / 2);
   return responseFromEvents([
+    ...(webSearch === true
+      ? [{ type: "sources" as const, sources: mockSearchSources }]
+      : []),
     { type: "delta", text: characters.slice(0, midpoint).join("") },
     { type: "delta", text: characters.slice(midpoint).join("") },
     { type: "done", truncated: false },
   ]);
+}
+
+function isSourcesPayload(value: unknown): value is Array<{ title: string; url: string }> {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (item) =>
+        typeof item === "object" &&
+        item !== null &&
+        typeof (item as Record<string, unknown>).title === "string" &&
+        typeof (item as Record<string, unknown>).url === "string",
+    )
+  );
 }
 
 export async function collectClientEvents(
@@ -357,6 +398,11 @@ export async function collectClientEvents(
       events.push({ type: "done", truncated: value.truncated });
     } else if (eventName === "error" && value.code === "PROVIDER_STREAM_ERROR") {
       events.push({ type: "error", code: "PROVIDER_STREAM_ERROR" });
+    } else if (eventName === "sources" && isSourcesPayload(value.sources)) {
+      events.push({
+        type: "sources",
+        sources: value.sources.map(({ title, url }) => ({ title, url })),
+      });
     } else {
       throw new TypeError("Invalid client event");
     }

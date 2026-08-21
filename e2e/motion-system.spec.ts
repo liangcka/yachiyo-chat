@@ -8,6 +8,15 @@ async function enterApp(page: Page): Promise<void> {
   await expect(page.locator(".composer textarea")).toBeVisible();
 }
 
+/** 新会话没有初始问候气泡，断言前先发一条消息等 mock 回复让消息列表出现 */
+async function sendMockMessage(page: Page): Promise<void> {
+  await page.locator(".composer textarea").fill("今天有点累");
+  await page.getByRole("button", { name: "发送" }).click();
+  await expect(page.locator(".message-list__item").last()).toContainText(
+    "笑着递上热乎乎的松饼",
+  );
+}
+
 type MotionStyle = {
   animationDelay: string;
   animationDuration: string;
@@ -95,6 +104,8 @@ test.describe("motion system", () => {
     await page.locator('.access-gate button[type="submit"]').click();
     await expect(page.locator(".composer textarea")).toBeVisible();
 
+    await sendMockMessage(page);
+
     for (const selector of [
       ".top-controls",
       ".message-list__item",
@@ -124,6 +135,7 @@ test.describe("motion system", () => {
   test("collapses decorative motion when reduced motion is requested", async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await enterApp(page);
+    await sendMockMessage(page);
     await page.locator(".top-controls__menu").click();
     await expect(page.locator(".drawer")).toBeVisible();
 

@@ -30,6 +30,9 @@ export interface ClientChatRequest {
   provider?: ProviderId;
   apiKey?: string;
   model?: string;
+  webSearch?: boolean;
+  /** 智能搜索：联网搜索开启时的双市场并行检索（结果更多、带发布日期） */
+  smartSearch?: boolean;
 }
 
 export class ChatValidationError extends Error {
@@ -48,7 +51,16 @@ const maximumMessageCharacters = 4_000;
 const maximumTotalCharacters = 24_000;
 const maximumImageBytes = 2 * 1_024 * 1_024;
 const maximumEncodedImageLength = Math.ceil(maximumImageBytes / 3) * 4;
-const allowedTopLevelKeys = new Set(["locale", "messages", "mode", "provider", "apiKey", "model"]);
+const allowedTopLevelKeys = new Set([
+  "locale",
+  "messages",
+  "mode",
+  "provider",
+  "apiKey",
+  "model",
+  "webSearch",
+  "smartSearch",
+]);
 const allowedMessageKeys = new Set(["role", "text", "imageDataUrl"]);
 
 function invalid(): never {
@@ -193,6 +205,16 @@ export function validateChatRequest(value: unknown): ClientChatRequest {
 
   const mode = value.mode as RequestMode | undefined;
 
+  if (value.webSearch !== undefined && typeof value.webSearch !== "boolean") {
+    return invalid();
+  }
+  const webSearch = value.webSearch as boolean | undefined;
+
+  if (value.smartSearch !== undefined && typeof value.smartSearch !== "boolean") {
+    return invalid();
+  }
+  const smartSearch = value.smartSearch as boolean | undefined;
+
   const hasProvider = value.provider !== undefined;
   const hasApiKey = value.apiKey !== undefined;
   const hasModel = value.model !== undefined;
@@ -201,7 +223,13 @@ export function validateChatRequest(value: unknown): ClientChatRequest {
   }
 
   if (!hasProvider) {
-    return { locale: value.locale, messages, ...(mode !== undefined ? { mode } : {}) };
+    return {
+      locale: value.locale,
+      messages,
+      ...(mode !== undefined ? { mode } : {}),
+      ...(webSearch !== undefined ? { webSearch } : {}),
+      ...(smartSearch !== undefined ? { smartSearch } : {}),
+    };
   }
 
   if (!isProviderId(value.provider)) {
@@ -222,6 +250,8 @@ export function validateChatRequest(value: unknown): ClientChatRequest {
     locale: value.locale,
     messages,
     ...(mode !== undefined ? { mode } : {}),
+    ...(webSearch !== undefined ? { webSearch } : {}),
+    ...(smartSearch !== undefined ? { smartSearch } : {}),
     provider: value.provider,
     apiKey: value.apiKey,
     model: value.model,

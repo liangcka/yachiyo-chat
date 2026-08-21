@@ -1,4 +1,4 @@
-import type { Locale } from "../domain/chat";
+import type { ChatSource, Locale } from "../domain/chat";
 import type { ProviderId } from "../domain/llm";
 
 export interface StreamChatMessage {
@@ -15,6 +15,10 @@ export interface StreamChatRequest {
   provider?: ProviderId;
   apiKey?: string;
   model?: string;
+  /** 开启后服务端先执行联网搜索并下发 sources 事件（仅普通聊天，summary 不携带） */
+  webSearch?: boolean;
+  /** 智能搜索：联网搜索开启时启用双市场并行检索（结果更多、带发布日期） */
+  smartSearch?: boolean;
 }
 
 export interface StreamChatResult {
@@ -43,6 +47,8 @@ export class ChatClientError extends Error {
 
 export interface StreamChatOptions {
   onDelta: (text: string) => void;
+  /** sources 事件（先于首个 delta 到达）合法时回调一次 */
+  onSources?: (sources: ChatSource[]) => void;
   signal?: AbortSignal;
   fetcher?: typeof fetch;
 }
@@ -104,6 +110,20 @@ function objectPayload(data: string | undefined): Record<string, unknown> {
   throw new ChatClientError("STREAM_ERROR");
 }
 
+/** 校验 sources 事件载荷：必须是数组且每项 title/url 均为字符串，否则视为流损坏 */
+function sourcesPayload(payload: Record<string, unknown>): ChatSource[] {
+  const sources = payload.sources;
+  if (!Array.isArray(sources)) throw new ChatClientError("STREAM_ERROR");
+  return sources.map((source): ChatSource => {
+    if (typeof source !== "object" || source === null) throw new ChatClientError("STREAM_ERROR");
+    const { title, url } = source as Record<string, unknown>;
+    if (typeof title !== "string" || typeof url !== "string") {
+      throw new ChatClientError("STREAM_ERROR");
+    }
+    return { title, url };
+  });
+}
+
 export async function streamChat(
   request: StreamChatRequest,
   options: StreamChatOptions,
@@ -144,6 +164,9 @@ export async function streamChat(
       const payload = objectPayload(fields.data);
       if (fields.event === "delta" && typeof payload.text === "string") {
         options.onDelta(payload.text);
+      } else if (fields.event === "sources") {
+        const sources = sourcesPayload(payload);
+        options.onSources?.(sources);
       } else if (fields.event === "done" && typeof payload.truncated === "boolean") {
         finished = { truncated: payload.truncated };
       } else if (fields.event === "error" && payload.code === "PROVIDER_STREAM_ERROR") {

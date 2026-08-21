@@ -1,5 +1,6 @@
 import { buildSystemPrompt } from "../prompt";
 import type { ClientChatRequest, ClientHistoryMessage } from "../validation";
+import type { EnrichedChatRequest } from "../web-search";
 import type { BuiltProviderRequest, ProviderAdapter, ProviderRequestInput } from "./registry";
 
 const ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages";
@@ -111,11 +112,15 @@ export function buildAnthropicMessages(
   return merged;
 }
 
-export function buildAnthropicBody(request: ClientChatRequest, model: string): unknown {
+export function buildAnthropicBody(request: EnrichedChatRequest, model: string): unknown {
   return {
     model,
     max_tokens: request.mode === "summary" ? 1024 : 2048,
-    system: buildSystemPrompt(request.locale, request.mode),
+    system: buildSystemPrompt(request.locale, request.mode, {
+      webSearch: request.webSearch,
+      smartSearch: request.smartSearch,
+      searchResults: request.searchResults,
+    }),
     messages: buildAnthropicMessages(request.messages, request.locale),
     stream: true,
   };

@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { collectClientEvents, proxyStepFunStream } from "../../functions/_shared/stream";
+import {
+  collectClientEvents,
+  mockChatResponse,
+  proxyStepFunStream,
+} from "../../functions/_shared/stream";
 
 const encoder = new TextEncoder();
 
@@ -93,6 +97,23 @@ describe("proxyStepFunStream", () => {
     expect(JSON.stringify(events)).not.toContain("provider-secret-body");
   });
 
+  it("emits initial sources events before any upstream delta", async () => {
+    const response = proxyStepFunStream(upstreamSse(["彩叶~"]), {
+      initialEvents: [
+        { type: "sources", sources: [{ title: "来源甲", url: "https://a.example.com/" }] },
+        { type: "sources", sources: [{ title: "来源乙", url: "https://b.example.com/" }] },
+      ],
+    });
+    const events = await collectClientEvents(response.body!);
+
+    expect(events.slice(0, 2)).toEqual([
+      { type: "sources", sources: [{ title: "来源甲", url: "https://a.example.com/" }] },
+      { type: "sources", sources: [{ title: "来源乙", url: "https://b.example.com/" }] },
+    ]);
+    expect(events[2]).toEqual({ type: "delta", text: "彩叶~" });
+    expect(events.at(-1)).toEqual({ type: "done", truncated: false });
+  });
+
   it("cancels a provider stream that exceeds its total deadline", async () => {
     vi.useFakeTimers();
     const upstream = controlledUpstream();
@@ -136,5 +157,55 @@ describe("proxyStepFunStream", () => {
     expect(upstream.cancel).toHaveBeenCalledOnce();
     expect(events).toEqual([{ type: "error", code: "PROVIDER_STREAM_ERROR" }]);
     expect(JSON.stringify(events)).not.toContain(secret);
+  });
+});
+
+describe("mockChatResponse", () => {
+  it("prepends two fixed sources events when webSearch is enabled", async () => {
+    const events = await collectClientEvents(mockChatResponse("zh-CN", undefined, true).body!);
+
+    expect(events[0]).toEqual({
+      type: "sources",
+      sources: [
+        { title: "必应搜索结果一", url: "https://www.bing.com/" },
+        { title: "必应搜索结果二", url: "https://cn.bing.com/" },
+      ],
+    });
+    expect(events[1]?.type).toBe("delta");
+    expect(events.at(-1)).toEqual({ type: "done", truncated: false });
+  });
+
+  it("keeps the plain mock response without webSearch", async () => {
+    const events = await collectClientEvents(mockChatResponse("zh-CN").body!);
+
+    expect(events.some((event) => event.type === "sources")).toBe(false);
+    expect(events.at(-1)).toEqual({ type: "done", truncated: false });
+  });
+});
+
+describe("collectClientEvents sources parsing", () => {
+  it("round-trips an encoded sources event", async () => {
+    const response = proxyStepFunStream(upstreamSse(["彩叶~"]), {
+      initialEvents: [{ type: "sources", sources: [{ title: "标题", url: "https://x.example/" }] }],
+    });
+    const text = await new Response(response.body!).text();
+
+    expect(text).toContain('event: sources\ndata: {"sources":[{"title":"标题","url":"https://x.example/"}]}');
+    const events = await collectClientEvents(new Response(text).body!);
+    expect(events[0]).toEqual({
+      type: "sources",
+      sources: [{ title: "标题", url: "https://x.example/" }],
+    });
+  });
+
+  it("rejects malformed sources payloads", async () => {
+    const malformed = [
+      'event: sources\ndata: {"sources":{"title":"t","url":"u"}}\n\n',
+      'event: sources\ndata: {"sources":[{"title":1,"url":"https://x.example/"}]}\n\n',
+      'event: sources\ndata: {"sources":[{"title":"t"}]}\n\n',
+      'event: sources\ndata: {}\n\n',
+    ].join("");
+
+    await expect(collectClientEvents(chunkedResponse(malformed).body!)).rejects.toThrow(TypeError);
   });
 });

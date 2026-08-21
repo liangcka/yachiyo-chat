@@ -1,4 +1,5 @@
 import { type ClientChatRequest, type ProviderId, PROVIDER_IDS, isProviderId } from "../validation";
+import type { EnrichedChatRequest } from "../web-search";
 import { buildOpenAICompatAdapter } from "./openai-compat";
 import { buildAnthropicAdapter } from "./anthropic";
 import { buildGeminiAdapter } from "./gemini";
@@ -6,7 +7,7 @@ import { buildGeminiAdapter } from "./gemini";
 export { type ProviderId, PROVIDER_IDS, isProviderId };
 
 export interface ProviderRequestInput {
-  request: ClientChatRequest;
+  request: EnrichedChatRequest;
   apiKey: string;
   model: string;
 }
@@ -39,6 +40,7 @@ const openaiCompatProviders = {
     allowedModels: ["step-3.7-flash", "step-3.5-flash", "step-3.5-flash-2603"],
     supportsImage: true,
     imageModels: ["step-3.7-flash"],
+    reasoningEffort: true,
   },
   deepseek: {
     endpoint: "https://api.deepseek.com/v1/chat/completions",

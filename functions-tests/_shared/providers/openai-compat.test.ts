@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ClientChatRequest } from "../../../functions/_shared/validation";
+import type { EnrichedChatRequest } from "../../../functions/_shared/web-search";
 import {
   buildOpenAICompatAdapter,
   buildOpenAICompatBody,
@@ -21,17 +22,43 @@ describe("buildOpenAICompatBody", () => {
       messages: Array<{ role: string; content: unknown }>;
       stream: boolean;
       max_tokens: number;
+      reasoning_effort?: string;
     };
 
     expect(body.model).toBe("gpt-5.6-luna");
     expect(body.stream).toBe(true);
-    expect(body.max_tokens).toBe(2048);
+    expect(body.max_tokens).toBe(8192);
+    expect(body.reasoning_effort).toBeUndefined();
     expect(body.messages[0]?.role).toBe("system");
     expect(typeof body.messages[0]?.content).toBe("string");
     expect(body.messages.slice(1)).toEqual([
       { role: "assistant", content: "彩叶~" },
       { role: "user", content: "今天有点累" },
     ]);
+  });
+
+  it("sets reasoning_effort low for reasoning-capable providers and lifts it for images", () => {
+    const imageDataUrl = "data:image/webp;base64,UklGRgAAAABXRUJQ";
+    const textBody = buildOpenAICompatBody(textRequest, "step-3.7-flash", true, true) as {
+      reasoning_effort?: string;
+    };
+    expect(textBody.reasoning_effort).toBe("low");
+
+    const imageRequest: ClientChatRequest = {
+      locale: "zh-CN",
+      messages: [{ role: "user", text: "看图", imageDataUrl }],
+    };
+    const imageBody = buildOpenAICompatBody(imageRequest, "step-3.7-flash", true, true) as {
+      reasoning_effort?: string;
+    };
+    expect(imageBody.reasoning_effort).toBe("medium");
+  });
+
+  it("keeps a smaller token budget for summary mode", () => {
+    const body = buildOpenAICompatBody({ ...textRequest, mode: "summary" }, "gpt-5.6-luna", true) as {
+      max_tokens: number;
+    };
+    expect(body.max_tokens).toBe(4096);
   });
 
   it("emits image content parts when the provider supports images", () => {
@@ -63,6 +90,26 @@ describe("buildOpenAICompatBody", () => {
     };
 
     expect(body.messages[1]).toEqual({ role: "user", content: "看图" });
+  });
+
+  it("injects web search results and the 1000-character rule into the system prompt", () => {
+    const request: EnrichedChatRequest = {
+      ...textRequest,
+      webSearch: true,
+      searchResults: [
+        { title: "上海天气", url: "https://weather.example.cn/", snippet: "今日多云，24至30度。" },
+      ],
+    };
+    const body = buildOpenAICompatBody(request, "gpt-5.6-luna", true) as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    const system = body.messages[0]?.content ?? "";
+
+    expect(system).toContain("<web_search_results>");
+    expect(system).toContain("[1] 上海天气（https://weather.example.cn/）");
+    expect(system).toContain("今日多云，24至30度。");
+    expect(system).toContain("输出最多1000个Unicode字符");
+    expect(system).not.toContain("最多200个Unicode字符");
   });
 });
 

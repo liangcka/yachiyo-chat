@@ -1,5 +1,6 @@
 import { buildSystemPrompt } from "../prompt";
 import type { ClientChatRequest, ClientHistoryMessage } from "../validation";
+import type { EnrichedChatRequest } from "../web-search";
 import type { BuiltProviderRequest, ProviderAdapter, ProviderRequestInput } from "./registry";
 
 export interface OpenAICompatConfig {
@@ -8,6 +9,8 @@ export interface OpenAICompatConfig {
   readonly allowedModels: readonly string[];
   readonly supportsImage: boolean;
   readonly imageModels: readonly string[];
+  /** 该 provider 的模型为推理型且支持 OpenAI 风格 reasoning_effort 参数（思考 token 计入 max_tokens，需显式控制） */
+  readonly reasoningEffort?: boolean;
 }
 
 interface OpenAITextPart {
@@ -51,18 +54,29 @@ function mapHistoryMessage(
 }
 
 export function buildOpenAICompatBody(
-  request: ClientChatRequest,
+  request: EnrichedChatRequest,
   model: string,
   supportsImage: boolean,
+  reasoningEffort = false,
 ): unknown {
+  const containsImage = request.messages.some((message) => message.imageDataUrl !== undefined);
   return {
     model,
     messages: [
-      { role: "system", content: buildSystemPrompt(request.locale, request.mode) },
+      {
+        role: "system",
+        content: buildSystemPrompt(request.locale, request.mode, {
+          webSearch: request.webSearch,
+          smartSearch: request.smartSearch,
+          searchResults: request.searchResults,
+        }),
+      },
       ...request.messages.map((message) => mapHistoryMessage(message, request.locale, supportsImage)),
     ],
     stream: true,
-    max_tokens: request.mode === "summary" ? 1024 : 2048,
+    // 推理模型的思考 token 计入 max_tokens 预算，过小会被思考耗尽导致正文为空
+    max_tokens: request.mode === "summary" ? 4096 : 8192,
+    ...(reasoningEffort ? { reasoning_effort: containsImage ? "medium" : "low" } : {}),
   };
 }
 
@@ -105,7 +119,12 @@ export function buildOpenAICompatAdapter(
     defaultModel: config.defaultModel,
     allowedModels: config.allowedModels,
     buildRequest(input: ProviderRequestInput): BuiltProviderRequest {
-      const body = buildOpenAICompatBody(input.request, input.model, config.supportsImage);
+      const body = buildOpenAICompatBody(
+        input.request,
+        input.model,
+        config.supportsImage,
+        config.reasoningEffort === true,
+      );
       return {
         url: config.endpoint,
         headers: {

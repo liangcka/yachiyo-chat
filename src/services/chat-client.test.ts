@@ -109,6 +109,78 @@ describe("streamChat", () => {
     ).rejects.toEqual(expect.objectContaining<Partial<ChatClientError>>({ code: "STREAM_ERROR" }));
   });
 
+  it("delivers a valid sources event before deltas exactly once", async () => {
+    serverFetch.mockResolvedValue(
+      sseResponse(
+        'event: sources\ndata: {"sources":[{"title":"必应搜索结果一","url":"https://www.bing.com/"},{"title":"必应搜索结果二","url":"https://cn.bing.com/"}]}\n\n' +
+          'event: delta\ndata: {"text":"基于搜索的回复"}\n\n' +
+          'event: done\ndata: {"truncated":false}\n\n',
+      ),
+    );
+    const calls: string[] = [];
+    const onSources = vi.fn((sources: Array<{ title: string; url: string }>) => {
+      calls.push("sources");
+      expect(sources).toEqual([
+        { title: "必应搜索结果一", url: "https://www.bing.com/" },
+        { title: "必应搜索结果二", url: "https://cn.bing.com/" },
+      ]);
+    });
+
+    await expect(
+      streamChat(sampleRequest, {
+        fetcher: serverFetch,
+        onDelta: (text) => calls.push(`delta:${text}`),
+        onSources,
+      }),
+    ).resolves.toEqual({ truncated: false });
+
+    expect(onSources).toHaveBeenCalledTimes(1);
+    expect(calls).toEqual(["sources", "delta:基于搜索的回复"]);
+  });
+
+  it.each([
+    'event: sources\ndata: {"sources":{"title":"对象而非数组","url":"https://www.bing.com/"}}\n\n',
+    'event: sources\ndata: {"sources":[{"title":42,"url":"https://www.bing.com/"}]}\n\n',
+    'event: sources\ndata: {"sources":[{"title":"缺少 url"}]}\n\n',
+    'event: sources\ndata: {"sources":[null]}\n\n',
+    'event: sources\ndata: {"other":[]}\n\n',
+  ])("rejects malformed sources payloads (%s)", async (stream) => {
+    serverFetch.mockResolvedValue(sseResponse(stream + 'event: done\ndata: {"truncated":false}\n\n'));
+
+    await expect(
+      streamChat(sampleRequest, { fetcher: serverFetch, onDelta: vi.fn(), onSources: vi.fn() }),
+    ).rejects.toEqual(expect.objectContaining<Partial<ChatClientError>>({ code: "STREAM_ERROR" }));
+  });
+
+  it("validates sources payloads even when no onSources callback is provided", async () => {
+    serverFetch.mockResolvedValue(
+      sseResponse('event: sources\ndata: {"sources":"invalid"}\n\n'),
+    );
+
+    await expect(
+      streamChat(sampleRequest, { fetcher: serverFetch, onDelta: vi.fn() }),
+    ).rejects.toEqual(expect.objectContaining<Partial<ChatClientError>>({ code: "STREAM_ERROR" }));
+  });
+
+  it("forwards webSearch flag in the request body", async () => {
+    serverFetch.mockResolvedValue(
+      sseResponse('event: done\ndata: {"truncated":false}\n\n'),
+    );
+
+    await streamChat(
+      { ...sampleRequest, webSearch: true },
+      { fetcher: serverFetch, onDelta: vi.fn() },
+    );
+
+    expect(serverFetch).toHaveBeenCalledWith("/api/chat", {
+      body: JSON.stringify({ ...sampleRequest, webSearch: true }),
+      credentials: "same-origin",
+      headers: { accept: "text/event-stream", "content-type": "application/json" },
+      method: "POST",
+      signal: undefined,
+    });
+  });
+
   it("distinguishes offline and aborted requests", async () => {
     serverFetch.mockRejectedValueOnce(new TypeError("Failed to fetch"));
     await expect(

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ClientChatRequest } from "../../functions/_shared/validation";
+import type { EnrichedChatRequest } from "../../functions/_shared/web-search";
 import { buildStepFunBody, resolveStepFunConfiguration } from "../../functions/_shared/stepfun";
 
 describe("buildStepFunBody", () => {
@@ -18,7 +19,7 @@ describe("buildStepFunBody", () => {
       model: "step-3.7-flash",
       stream: true,
       reasoning_effort: "low",
-      max_tokens: 2048,
+      max_tokens: 8192,
     });
     expect(body.messages[0]).toMatchObject({
       role: "system",
@@ -47,6 +48,27 @@ describe("buildStepFunBody", () => {
         { type: "image_url", image_url: { url: imageDataUrl } },
       ],
     });
+  });
+
+  it("injects web search results and the 1000-character rule into the system prompt", () => {
+    const request: EnrichedChatRequest = {
+      locale: "zh-CN",
+      webSearch: true,
+      messages: [{ role: "user", text: "今天上海天气" }],
+      searchResults: [
+        { title: "上海天气", url: "https://weather.example.cn/", snippet: "今日多云，24至30度。" },
+      ],
+    };
+
+    const body = buildStepFunBody(request, "step-3.7-flash");
+    const system = body.messages[0];
+
+    expect(system).toMatchObject({ role: "system" });
+    expect(system?.content).toContain("<web_search_results>");
+    expect(system?.content).toContain("[1] 上海天气（https://weather.example.cn/）");
+    expect(system?.content).toContain("今日多云，24至30度。");
+    expect(system?.content).toContain("输出最多1000个Unicode字符");
+    expect(system?.content).not.toContain("最多200个Unicode字符");
   });
 
   it("accepts only the fixed Step Plan endpoint and requested model", () => {

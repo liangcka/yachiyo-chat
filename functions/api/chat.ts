@@ -12,13 +12,24 @@ import {
   requestStepFun,
   resolveStepFunConfiguration,
 } from "../_shared/stepfun";
-import { mockChatResponse, proxyProviderStream, proxyStepFunStream } from "../_shared/stream";
+import {
+  mockChatResponse,
+  proxyProviderStream,
+  proxyStepFunStream,
+  type ClientStreamEvent,
+} from "../_shared/stream";
 import {
   ChatValidationError,
   readJsonBodyWithLimit,
   validateChatRequest,
   type ClientChatRequest,
 } from "../_shared/validation";
+import {
+  buildSearchQuery,
+  searchWeb,
+  type EnrichedChatRequest,
+  type WebSearchResult,
+} from "../_shared/web-search";
 import { getProvider, isAllowedModel, isValidApiKey } from "../_shared/providers/registry";
 
 interface ChatContext {
@@ -37,6 +48,55 @@ function dailyRequestLimit(env: Env): number | null {
 
 function requestContainsImage(request: ClientChatRequest): boolean {
   return request.messages.some((message) => message.imageDataUrl !== undefined);
+}
+
+/**
+ * 联网搜索编排：仅 chat 模式且 webSearch=true 时执行。
+ * smartSearch=true 时启用双市场并行检索（en-US 近 30 天 + locale 市场，合并去重上限 10 条）。
+ * 查询词为空（纯图片等）或搜索失败/空结果时返回 undefined（静默降级为普通对话）。
+ * 搜索内部 8 秒超时，并联动客户端断开信号。
+ */
+async function performWebSearch(
+  context: ChatContext,
+  request: ClientChatRequest,
+): Promise<readonly WebSearchResult[] | undefined> {
+  if (request.webSearch !== true || request.mode === "summary") {
+    return undefined;
+  }
+  const query = buildSearchQuery(request.messages);
+  if (query === null) {
+    return undefined;
+  }
+  const results = await searchWeb(
+    query,
+    request.locale,
+    context.request.signal,
+    request.smartSearch === true,
+  );
+  return results.length > 0 ? results : undefined;
+}
+
+/** 构造注入搜索结果后的服务端内部请求对象 */
+function enrichRequest(
+  request: ClientChatRequest,
+  searchResults: readonly WebSearchResult[] | undefined,
+): EnrichedChatRequest {
+  return searchResults === undefined ? { ...request } : { ...request, searchResults };
+}
+
+/** sources 事件载荷（仅 title/url，不含 snippet） */
+function initialSourcesEvents(
+  searchResults: readonly WebSearchResult[] | undefined,
+): readonly ClientStreamEvent[] | undefined {
+  if (searchResults === undefined || searchResults.length === 0) {
+    return undefined;
+  }
+  return [
+    {
+      type: "sources",
+      sources: searchResults.map(({ title, url }) => ({ title, url })),
+    },
+  ];
 }
 
 interface UpstreamFetchHandle {
@@ -107,7 +167,7 @@ export async function onRequestPost(context: ChatContext): Promise<Response> {
     return handleUserKeyRequest(context, request);
   }
   if (context.env.APP_MODE === "mock") {
-    return mockChatResponse(request.locale, request.mode);
+    return mockChatResponse(request.locale, request.mode, request.webSearch === true);
   }
 
   const limit = dailyRequestLimit(context.env);
@@ -145,8 +205,9 @@ async function handleUserKeyRequest(
   if (requestContainsImage(request) && !provider.imageModels.includes(request.model)) {
     return problemResponse("INVALID_REQUEST", 400);
   }
+  const searchResults = await performWebSearch(context, request);
   const built = provider.buildRequest({
-    request,
+    request: enrichRequest(request, searchResults),
     apiKey: request.apiKey!,
     model: request.model!,
   });
@@ -176,12 +237,13 @@ async function handleUserKeyRequest(
     }
     return problemResponse("PROVIDER_ERROR", 502);
   }
-  const maxCharacters = request.mode === "summary" ? 1000 : 200;
+  const maxCharacters = request.mode === "summary" || request.webSearch === true ? 1000 : 200;
   return proxyProviderStream(
     upstream,
     {
       abort: handle.abort,
       clientSignal: context.request.signal,
+      initialEvents: initialSourcesEvents(searchResults),
       maxCharacters,
       onFinalize: handle.cleanup,
       signal: handle.deadlineSignal,
@@ -198,10 +260,11 @@ async function handleServerFallback(
   if (providerConfiguration === null) {
     return problemResponse("CONFIGURATION_ERROR", 503);
   }
+  const searchResults = await performWebSearch(context, request);
   const handle = prepareUpstreamFetch(context);
   let upstream: Response;
   try {
-    upstream = await requestStepFun(request, providerConfiguration, handle.signal);
+    upstream = await requestStepFun(enrichRequest(request, searchResults), providerConfiguration, handle.signal);
   } catch {
     handle.cleanup();
     return handle.isTimedOut()
@@ -213,10 +276,11 @@ async function handleServerFallback(
     await upstream.body?.cancel();
     return problemResponse("PROVIDER_ERROR", 502);
   }
-  const maxCharacters = request.mode === "summary" ? 1000 : 200;
+  const maxCharacters = request.mode === "summary" || request.webSearch === true ? 1000 : 200;
   return proxyStepFunStream(upstream, {
     abort: handle.abort,
     clientSignal: context.request.signal,
+    initialEvents: initialSourcesEvents(searchResults),
     maxCharacters,
     onFinalize: handle.cleanup,
     signal: handle.deadlineSignal,

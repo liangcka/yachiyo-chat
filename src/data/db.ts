@@ -4,7 +4,11 @@ import type { LlmSettingsRecord, ProviderId } from "../domain/llm";
 
 export type AppSetting =
   | { key: "locale"; value: Locale }
-  | { key: "activeProvider"; value: ProviderId };
+  | { key: "activeProvider"; value: ProviderId }
+  | { key: "activeSkills"; value: string[] }
+  | { key: "webSearchEnabled"; value: boolean }
+  | { key: "webSearchShowSources"; value: boolean }
+  | { key: "webSearchSmart"; value: boolean };
 
 export class YachiyoDatabase extends Dexie {
   conversations!: Table<Conversation, string>;

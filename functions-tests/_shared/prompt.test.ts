@@ -31,4 +31,94 @@ describe("buildSystemPrompt", () => {
     expect(jaPrompt).toContain("記憶・要約アシスタント");
     expect(jaPrompt).toContain("重要な事実");
   });
+
+  it("relaxes the runtime output cap to 1000 characters when web search is on", () => {
+    for (const locale of ["zh-CN", "ja-JP"] as const) {
+      const prompt = buildSystemPrompt(locale, "chat", { webSearch: true });
+      expect(prompt).toContain("输出最多1000个Unicode字符，优先50至200字符");
+      expect(prompt).not.toContain("200个Unicode字符");
+    }
+  });
+
+  it("appends the numbered web search results block after the runtime section", () => {
+    const prompt = buildSystemPrompt("zh-CN", "chat", {
+      webSearch: true,
+      searchResults: [
+        { title: "上海天气", url: "https://weather.example.cn/", snippet: "今日多云，24至30度。" },
+        { title: "第二来源", url: "https://news.example.org/", snippet: "摘要内容。" },
+      ],
+    });
+
+    expect(prompt.indexOf("</runtime>")).toBeLessThan(prompt.indexOf("<web_search_results>"));
+    expect(prompt).toContain("以下是针对用户最新消息的必应网络搜索结果，按相关度排序：");
+    expect(prompt).toContain("[1] 上海天气（https://weather.example.cn/）\n今日多云，24至30度。");
+    expect(prompt).toContain("[2] 第二来源（https://news.example.org/）\n摘要内容。");
+    expect(prompt).toContain("联网模式已开启");
+    expect(prompt).toContain("用 [1]、[2] 这样的数字序号标注引用的来源");
+    expect(prompt).toContain("以它们为准，不要固执旧答案");
+  });
+
+  it("renders the Japanese web search block instructions", () => {
+    const prompt = buildSystemPrompt("ja-JP", "chat", {
+      webSearch: true,
+      searchResults: [{ title: "天気", url: "https://weather.example.jp/", snippet: "晴れ。" }],
+    });
+
+    expect(prompt).toContain("<web_search_results>");
+    expect(prompt).toContain("[1] 天気（https://weather.example.jp/）\n晴れ。");
+    expect(prompt).toContain("ウェブ検索モードが有効です");
+    expect(prompt).toContain("[1]、[2] のような数字で引用した出典の番号");
+  });
+
+  it("annotates sources with publish dates and recency guidance in smart mode", () => {
+    const prompt = buildSystemPrompt("zh-CN", "chat", {
+      webSearch: true,
+      smartSearch: true,
+      searchResults: [
+        {
+          title: "Gemini 3.7 Flash",
+          url: "https://deepmind.google/models/gemini/flash/",
+          snippet: "最新模型。",
+          publishedAt: "2026-08-20",
+        },
+        { title: "旧消息", url: "https://legacy.example.com/", snippet: "无日期。" },
+      ],
+    });
+
+    expect(prompt).toContain(
+      "[1] Gemini 3.7 Flash（https://deepmind.google/models/gemini/flash/，发布于2026-08-20）\n最新模型。",
+    );
+    expect(prompt).toContain("[2] 旧消息（https://legacy.example.com/，发布日期未知）\n无日期。");
+    expect(prompt).toContain("优先采信发布日期更新、来自官方或权威站点的结果");
+    expect(prompt).toContain("以发布日期最近的结果为准");
+  });
+
+  it("keeps the plain source format without smart mode", () => {
+    const prompt = buildSystemPrompt("zh-CN", "chat", {
+      webSearch: true,
+      searchResults: [
+        {
+          title: "带日期结果",
+          url: "https://example.com/",
+          snippet: "摘要。",
+          publishedAt: "2026-08-20",
+        },
+      ],
+    });
+
+    expect(prompt).toContain("[1] 带日期结果（https://example.com/）\n摘要。");
+    expect(prompt).not.toContain("发布于2026-08-20");
+    expect(prompt).not.toContain("优先采信发布日期更新");
+  });
+
+  it("keeps summary mode unchanged regardless of web search options", () => {
+    const prompt = buildSystemPrompt("zh-CN", "summary", {
+      webSearch: true,
+      searchResults: [{ title: "t", url: "https://example.com/", snippet: "s" }],
+    });
+
+    expect(prompt).toContain("记忆总结助手");
+    expect(prompt).not.toContain("<web_search_results>");
+    expect(prompt).not.toContain("1000个Unicode字符");
+  });
 });

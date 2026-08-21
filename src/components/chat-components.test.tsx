@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -7,6 +7,7 @@ import { copyFor } from "../i18n/messages";
 import { Composer } from "./Composer";
 import { ControlDock } from "./ControlDock";
 import { ConversationView } from "./ConversationView";
+import { SkillsPanel } from "./SkillsPanel";
 import { TopControls } from "./TopControls";
 
 describe("reference chat components", () => {
@@ -368,5 +369,176 @@ describe("reference chat components", () => {
 
     fireEvent.click(regenerateMenuItem);
     expect(onRegenerate).toHaveBeenCalledWith("assistant-1");
+  });
+
+  it("renders source links under assistant replies and respects the showSources switch", () => {
+    const messages: ChatMessage[] = [
+      {
+        conversationId: "one",
+        createdAt: 1,
+        id: "assistant-1",
+        role: "assistant",
+        status: "complete",
+        text: "基于搜索的回复",
+        sources: [
+          { title: "必应搜索结果一", url: "https://www.bing.com/" },
+          { title: "必应搜索结果二", url: "https://cn.bing.com/" },
+        ],
+      },
+      {
+        conversationId: "one",
+        createdAt: 2,
+        id: "user-1",
+        role: "user",
+        status: "complete",
+        text: "用户消息不渲染来源",
+        sources: [{ title: "不应出现", url: "https://example.com/" }],
+      },
+    ];
+
+    const { rerender } = render(<ConversationView locale="zh-CN" messages={messages} />);
+
+    const sourcesRegion = screen.getByLabelText("参考来源");
+    const links = within(sourcesRegion).getAllByRole("link");
+    expect(links).toHaveLength(2);
+    expect(links[0]).toHaveAttribute("href", "https://www.bing.com/");
+    expect(links[0]).toHaveAttribute("target", "_blank");
+    expect(links[0]).toHaveAttribute("rel", "noopener noreferrer");
+    expect(links[1]).toHaveAttribute("href", "https://cn.bing.com/");
+
+    // 关闭"显示引用来源"后不再渲染列表
+    rerender(<ConversationView locale="zh-CN" messages={messages} showSources={false} />);
+    expect(screen.queryByLabelText("参考来源")).not.toBeInTheDocument();
+  });
+
+  it("keeps the typing indicator clean while sources arrive before any reply text", () => {
+    const messages: ChatMessage[] = [
+      {
+        conversationId: "one",
+        createdAt: 1,
+        id: "assistant-1",
+        role: "assistant",
+        status: "streaming",
+        text: "",
+        sources: [{ title: "必应搜索结果一", url: "https://www.bing.com/" }],
+      },
+    ];
+
+    render(<ConversationView locale="zh-CN" messages={messages} />);
+
+    // 等待期只有三点动画，不渲染参考来源区块（避免出现超高气泡）
+    expect(document.querySelector(".message-bubble__typing")).not.toBeNull();
+    expect(screen.queryByLabelText("参考来源")).not.toBeInTheDocument();
+
+    // 正文开始流式输出后，来源区块随正文出现
+    const streaming: ChatMessage[] = [
+      { ...messages[0]!, text: "彩叶~查到啦", status: "streaming" },
+    ];
+    cleanup();
+    render(<ConversationView locale="zh-CN" messages={streaming} />);
+    expect(screen.getByText("彩叶~查到啦")).toBeInTheDocument();
+    expect(screen.getByLabelText("参考来源")).toBeInTheDocument();
+  });
+
+  it("hides citation markers in the reply text when the showSources switch is off", () => {
+    const base: ChatMessage = {
+      conversationId: "one",
+      createdAt: 1,
+      id: "assistant-1",
+      role: "assistant",
+      status: "complete",
+      text: "彩叶~上海今天晴哦！[1][2]",
+      sources: [
+        { title: "必应搜索结果一", url: "https://www.bing.com/" },
+        { title: "必应搜索结果二", url: "https://cn.bing.com/" },
+      ],
+    };
+
+    // 开关开启：正文保留 [n] 标记，与来源列表序号对应
+    const { rerender } = render(
+      <ConversationView locale="zh-CN" messages={[base]} showSources />,
+    );
+    expect(screen.getByText("彩叶~上海今天晴哦！[1][2]")).toBeInTheDocument();
+    expect(screen.getByLabelText("参考来源")).toBeInTheDocument();
+
+    // 开关关闭：正文中的 [n] 标记与来源列表一并隐藏（仅展示层，存储不变）
+    rerender(<ConversationView locale="zh-CN" messages={[base]} showSources={false} />);
+    expect(screen.getByText("彩叶~上海今天晴哦！")).toBeInTheDocument();
+    expect(screen.queryByText(/\[\d\]/u)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("参考来源")).not.toBeInTheDocument();
+  });
+
+  it("renders web search toggles and reports enabled state via callbacks", async () => {
+    const user = userEvent.setup();
+    const onWebSearchEnabledChange = vi.fn();
+    const onWebSearchShowSourcesChange = vi.fn();
+    const onWebSearchSmartChange = vi.fn();
+    const { rerender } = render(
+      <SkillsPanel
+        activeIds={[]}
+        copy={copyFor("zh-CN")}
+        onClose={vi.fn()}
+        onToggle={vi.fn()}
+        onWebSearchEnabledChange={onWebSearchEnabledChange}
+        onWebSearchShowSourcesChange={onWebSearchShowSourcesChange}
+        onWebSearchSmartChange={onWebSearchSmartChange}
+        open
+        skills={[]}
+        webSearchEnabled={false}
+        webSearchShowSources
+        webSearchSmart={false}
+      />,
+    );
+
+    expect(screen.getByText("联网搜索")).toBeVisible();
+    expect(screen.getByText("发送前先用必应搜索网络资料，回复将基于最新信息")).toBeVisible();
+    expect(screen.getByText("显示引用来源")).toBeVisible();
+    expect(screen.getByText("在联网回复下方显示参考来源链接")).toBeVisible();
+    expect(screen.getByText("智能搜索")).toBeVisible();
+    expect(screen.getByText("同时检索国际市场近30天结果，提升时效信息的准确性")).toBeVisible();
+
+    const enabledToggle = screen.getByRole("button", {
+      name: "切换技能启用状态: 联网搜索",
+    });
+    const showSourcesToggle = screen.getByRole("button", {
+      name: "切换技能启用状态: 显示引用来源",
+    });
+    const smartToggle = screen.getByRole("button", {
+      name: "切换技能启用状态: 智能搜索",
+    });
+    expect(enabledToggle).toHaveAttribute("aria-pressed", "false");
+    expect(showSourcesToggle).toHaveAttribute("aria-pressed", "true");
+    expect(smartToggle).toHaveAttribute("aria-pressed", "false");
+    // 联网关闭时"显示引用来源"与"智能搜索"按钮均禁用置灰
+    expect(showSourcesToggle).toBeDisabled();
+    expect(smartToggle).toBeDisabled();
+
+    await user.click(enabledToggle);
+    expect(onWebSearchEnabledChange).toHaveBeenCalledWith(true);
+    expect(onWebSearchShowSourcesChange).not.toHaveBeenCalled();
+    expect(onWebSearchSmartChange).not.toHaveBeenCalled();
+
+    // 联网开启后"显示引用来源"与"智能搜索"均可点击
+    rerender(
+      <SkillsPanel
+        activeIds={[]}
+        copy={copyFor("zh-CN")}
+        onClose={vi.fn()}
+        onToggle={vi.fn()}
+        onWebSearchEnabledChange={onWebSearchEnabledChange}
+        onWebSearchShowSourcesChange={onWebSearchShowSourcesChange}
+        onWebSearchSmartChange={onWebSearchSmartChange}
+        open
+        skills={[]}
+        webSearchEnabled
+        webSearchShowSources
+        webSearchSmart={false}
+      />,
+    );
+    expect(showSourcesToggle).toBeEnabled();
+    expect(smartToggle).toBeEnabled();
+
+    await user.click(showSourcesToggle);
+    expect(onWebSearchShowSourcesChange).toHaveBeenCalledWith(false);
   });
 });

@@ -1,6 +1,6 @@
 import { Check, Pencil, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { useClosing } from "../app/use-closing";
+import { usePanel } from "../app/use-panel";
 import type { Conversation } from "../domain/chat";
 import type { UiCopy } from "../i18n/messages";
 
@@ -25,24 +25,27 @@ export function HistoryPanel({
   onSelect,
   open,
 }: HistoryPanelProps) {
-  const closeRef = useRef<HTMLButtonElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
   const [deletingId, setDeletingId] = useState<string>();
   const [editingId, setEditingId] = useState<string>();
   const [title, setTitle] = useState("");
 
-  const { render, closing } = useClosing(open, 300);
+  const { render, closing, closeRef, panelRef, handleKeyDown } = usePanel(open, onClose);
 
-  useEffect(() => {
-    if (open) closeRef.current?.focus();
-  }, [open]);
   useEffect(() => editInputRef.current?.focus(), [editingId]);
 
   if (!render) return null;
 
   return (
     <div className={`overlay overlay--history ${closing ? "overlay--closing" : ""}`}>
-      <section aria-label={copy.history} aria-modal="true" className={`history-panel ${closing ? "history-panel--closing" : ""}`} role="dialog">
+      <section
+        ref={panelRef}
+        aria-label={copy.history}
+        aria-modal="true"
+        className={`history-panel ${closing ? "history-panel--closing" : ""}`}
+        role="dialog"
+        onKeyDown={handleKeyDown}
+      >
         <header>
           <h1>{copy.history}</h1>
           <button ref={closeRef} aria-label={copy.closeMenu} onClick={onClose} type="button">

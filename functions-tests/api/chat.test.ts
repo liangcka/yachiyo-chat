@@ -14,6 +14,35 @@ function providerSse(text: string): string {
   return `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\ndata: [DONE]\n\n`;
 }
 
+const bingUrlPrefix = "https://www.bing.com/search";
+
+function bingRss(): string {
+  return [
+    '<?xml version="1.0" encoding="utf-8"?>',
+    '<rss version="2.0"><channel><title>上海天气 - Bing</title>',
+    "<item><title>上海天气实况</title><link>https://weather.example.cn/shanghai</link><description>今日多云，24至30度。</description></item>",
+    "</channel></rss>",
+  ].join("");
+}
+
+/** 国际路（en-US 近 30 天）的模拟结果：带发布日期的权威新信息 */
+function internationalBingRss(): string {
+  return [
+    '<?xml version="1.0" encoding="utf-8"?>',
+    '<rss version="2.0"><channel><title>Gemini - Bing</title>',
+    "<item><title>Gemini 3.7 Flash</title><link>https://deepmind.google/models/gemini/flash/</link><description>Our most intelligent workhorse model.</description><pubDate>Thu, 20 Aug 2026 12:11:00 GMT</pubDate></item>",
+    "</channel></rss>",
+  ].join("");
+}
+
+function bingSearchUrl(query: string): string {
+  return `https://www.bing.com/search?q=${encodeURIComponent(query)}&format=rss&mkt=zh-CN&setlang=zh-hans`;
+}
+
+async function toRequest(input: RequestInfo | URL, init?: RequestInit): Promise<Request> {
+  return input instanceof Request ? input : new Request(input, init);
+}
+
 async function chatRequest(
   body: unknown,
   sessionId: string,
@@ -271,5 +300,282 @@ describe("POST /api/chat", () => {
     expect(timedOut).toBe(true);
     expect(cancel).toHaveBeenCalledOnce();
     expect(events).toEqual([{ type: "error", code: "PROVIDER_STREAM_ERROR" }]);
+  });
+
+  it("searches Bing first and streams sources before deltas when webSearch is on", async () => {
+    const fetchUrls: string[] = [];
+    let providerBody: Record<string, unknown> | undefined;
+    providerFetch.mockImplementation(async (input, init) => {
+      const request = await toRequest(input, init);
+      fetchUrls.push(request.url);
+      if (request.url.startsWith(bingUrlPrefix)) {
+        return new Response(bingRss(), { status: 200, headers: { "content-type": "text/xml" } });
+      }
+      providerBody = JSON.parse(await request.clone().text()) as Record<string, unknown>;
+      return new Response(providerSse("彩叶~查到啦 [1]"), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    });
+
+    const response = await invoke(
+      await chatRequest(
+        {
+          locale: "zh-CN",
+          messages: [{ role: "user", text: "今天上海天气怎么样" }],
+          webSearch: true,
+        },
+        "web-search-session",
+      ),
+    );
+    const events = await collectClientEvents(response.body!);
+
+    expect(fetchUrls).toEqual([bingSearchUrl("上海天气"), providerUrl]);
+    expect(JSON.stringify(providerBody)).toContain("<web_search_results>");
+    expect(JSON.stringify(providerBody)).toContain("上海天气实况");
+    expect(events[0]).toEqual({
+      type: "sources",
+      sources: [{ title: "上海天气实况", url: "https://weather.example.cn/shanghai" }],
+    });
+    expect(events[1]).toEqual({ type: "delta", text: "彩叶~查到啦 [1]" });
+    expect(events.at(-1)).toEqual({ type: "done", truncated: false });
+  });
+
+  it("runs dual-market search and injects dated sources when smartSearch is on", async () => {
+    const fetchUrls: string[] = [];
+    let providerBody: Record<string, unknown> | undefined;
+    providerFetch.mockImplementation(async (input, init) => {
+      const request = await toRequest(input, init);
+      fetchUrls.push(request.url);
+      if (request.url.startsWith(bingUrlPrefix)) {
+        if (request.url.includes("mkt=en-US")) {
+          return new Response(internationalBingRss(), {
+            status: 200,
+            headers: { "content-type": "text/xml" },
+          });
+        }
+        return new Response(bingRss(), { status: 200, headers: { "content-type": "text/xml" } });
+      }
+      providerBody = JSON.parse(await request.clone().text()) as Record<string, unknown>;
+      return new Response(providerSse("彩叶~最新的是3.7 flash哦 [2]"), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    });
+
+    const response = await invoke(
+      await chatRequest(
+        {
+          locale: "zh-CN",
+          messages: [{ role: "user", text: "Gemini最新模型是什么" }],
+          webSearch: true,
+          smartSearch: true,
+        },
+        "smart-search-session",
+      ),
+    );
+    const events = await collectClientEvents(response.body!);
+
+    // 双路必应请求：本地市场 + en-US 近 30 天过滤
+    expect(fetchUrls).toEqual([
+      bingSearchUrl("Gemini模型"),
+      `https://www.bing.com/search?q=${encodeURIComponent("Gemini模型")}&format=rss&mkt=en-US&setlang=en&qft=${encodeURIComponent('interval="30"')}`,
+      providerUrl,
+    ]);
+
+    // prompt 注入两路合并结果，且智能模式带发布日期
+    const systemContent = JSON.stringify(providerBody);
+    expect(systemContent).toContain("上海天气实况");
+    expect(systemContent).toContain("Gemini 3.7 Flash");
+    expect(systemContent).toContain("发布于2026-08-20");
+    expect(systemContent).toContain("优先采信发布日期更新");
+
+    // sources 事件：本地路在前、国际路在后
+    expect(events[0]).toEqual({
+      type: "sources",
+      sources: [
+        { title: "上海天气实况", url: "https://weather.example.cn/shanghai" },
+        { title: "Gemini 3.7 Flash", url: "https://deepmind.google/models/gemini/flash/" },
+      ],
+    });
+    expect(events[1]).toEqual({ type: "delta", text: "彩叶~最新的是3.7 flash哦 [2]" });
+    expect(events.at(-1)).toEqual({ type: "done", truncated: false });
+  });
+
+  it("continues the conversation without sources when Bing fails", async () => {
+    const fetchUrls: string[] = [];
+    providerFetch.mockImplementation(async (input, init) => {
+      const request = await toRequest(input, init);
+      fetchUrls.push(request.url);
+      if (request.url.startsWith(bingUrlPrefix)) {
+        return new Response("denied", { status: 503 });
+      }
+      return new Response(providerSse("彩叶~我们聊聊别的吧"), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    });
+
+    const response = await invoke(
+      await chatRequest(
+        {
+          locale: "zh-CN",
+          messages: [{ role: "user", text: "今天上海天气怎么样" }],
+          webSearch: true,
+        },
+        "bing-fail-session",
+      ),
+    );
+    const events = await collectClientEvents(response.body!);
+
+    expect(fetchUrls).toEqual([bingSearchUrl("上海天气"), providerUrl]);
+    expect(events.some((event) => event.type === "sources")).toBe(false);
+    expect(events).toEqual([
+      { type: "delta", text: "彩叶~我们聊聊别的吧" },
+      { type: "done", truncated: false },
+    ]);
+  });
+
+  it("skips the search step for summary mode and image-only messages", async () => {
+    const imageDataUrl = "data:image/png;base64,iVBORw0KGgo=";
+    const fetchUrls: string[] = [];
+    providerFetch.mockImplementation(async (input, init) => {
+      const request = await toRequest(input, init);
+      fetchUrls.push(request.url);
+      return new Response(providerSse("好的"), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    });
+
+    const summaryResponse = await invoke(
+      await chatRequest(
+        {
+          locale: "zh-CN",
+          messages: [
+            { role: "user", text: "你好" },
+            { role: "assistant", text: "彩叶~" },
+            { role: "user", text: "继续" },
+          ],
+          mode: "summary",
+          webSearch: true,
+        },
+        "summary-skip-session",
+      ),
+    );
+    const summaryEvents = await collectClientEvents(summaryResponse.body!);
+    expect(summaryEvents.some((event) => event.type === "sources")).toBe(false);
+
+    const imageResponse = await invoke(
+      await chatRequest(
+        {
+          locale: "zh-CN",
+          messages: [{ role: "user", text: "", imageDataUrl }],
+          webSearch: true,
+        },
+        "image-skip-session",
+      ),
+    );
+    const imageEvents = await collectClientEvents(imageResponse.body!);
+
+    expect(imageEvents.some((event) => event.type === "sources")).toBe(false);
+    expect(fetchUrls).toEqual([providerUrl, providerUrl]);
+  });
+
+  it("relaxes the streaming cap to 1000 Unicode characters while online", async () => {
+    providerFetch.mockImplementation(async (input, init) => {
+      const request = await toRequest(input, init);
+      if (request.url.startsWith(bingUrlPrefix)) {
+        return new Response(bingRss(), { status: 200, headers: { "content-type": "text/xml" } });
+      }
+      return new Response(providerSse("八".repeat(1_200)), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    });
+
+    const response = await invoke(
+      await chatRequest(
+        {
+          locale: "zh-CN",
+          messages: [{ role: "user", text: "讲个长故事" }],
+          webSearch: true,
+        },
+        "online-cap-session",
+      ),
+    );
+    const events = await collectClientEvents(response.body!);
+    const text = events
+      .filter((event) => event.type === "delta")
+      .map((event) => (event.type === "delta" ? event.text : ""))
+      .join("");
+
+    expect([...text]).toHaveLength(1000);
+    expect(events.at(-1)).toEqual({ type: "done", truncated: true });
+  });
+
+  it("injects search results into a user-key provider request as well", async () => {
+    const openaiUrl = "https://api.openai.com/v1/chat/completions";
+    const fetchUrls: string[] = [];
+    let openaiBody: Record<string, unknown> | undefined;
+    providerFetch.mockImplementation(async (input, init) => {
+      const request = await toRequest(input, init);
+      fetchUrls.push(request.url);
+      if (request.url.startsWith(bingUrlPrefix)) {
+        return new Response(bingRss(), { status: 200, headers: { "content-type": "text/xml" } });
+      }
+      openaiBody = JSON.parse(await request.clone().text()) as Record<string, unknown>;
+      return new Response(providerSse("彩叶~帮你查过啦"), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    });
+
+    const response = await invoke(
+      await chatRequest(
+        {
+          locale: "zh-CN",
+          messages: [{ role: "user", text: "今天上海天气" }],
+          provider: "openai",
+          apiKey: "sk-" + "a".repeat(40),
+          model: "gpt-5.6-luna",
+          webSearch: true,
+        },
+        "user-key-search-session",
+      ),
+    );
+    const events = await collectClientEvents(response.body!);
+
+    expect(fetchUrls).toEqual([bingSearchUrl("上海天气"), openaiUrl]);
+    expect(JSON.stringify(openaiBody)).toContain("<web_search_results>");
+    expect(events[0]?.type).toBe("sources");
+    expect(events.at(-1)).toEqual({ type: "done", truncated: false });
+  });
+
+  it("prepends two fixed mock sources in mock mode with webSearch", async () => {
+    const mockEnv: Env = { ...env, APP_MODE: "mock" };
+    const response = await invoke(
+      await chatRequest(
+        {
+          locale: "zh-CN",
+          messages: [{ role: "user", text: "你好" }],
+          webSearch: true,
+        },
+        "mock-sources-session",
+        mockEnv,
+      ),
+      mockEnv,
+    );
+    const events = await collectClientEvents(response.body!);
+
+    expect(events[0]).toEqual({
+      type: "sources",
+      sources: [
+        { title: "必应搜索结果一", url: "https://www.bing.com/" },
+        { title: "必应搜索结果二", url: "https://cn.bing.com/" },
+      ],
+    });
+    expect(events.at(-1)).toEqual({ type: "done", truncated: false });
+    expect(providerFetch).not.toHaveBeenCalled();
   });
 });

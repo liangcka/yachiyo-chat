@@ -1,5 +1,6 @@
 import { buildSystemPrompt } from "../prompt";
 import type { ClientChatRequest, ClientHistoryMessage } from "../validation";
+import type { EnrichedChatRequest } from "../web-search";
 import type { BuiltProviderRequest, ProviderAdapter, ProviderRequestInput } from "./registry";
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
@@ -88,11 +89,26 @@ export function buildGeminiContents(
   return merged;
 }
 
-export function buildGeminiBody(request: ClientChatRequest): unknown {
+export function buildGeminiBody(request: EnrichedChatRequest): unknown {
   return {
     contents: buildGeminiContents(request.messages, request.locale),
-    systemInstruction: { parts: [{ text: buildSystemPrompt(request.locale, request.mode) }] },
-    generationConfig: { maxOutputTokens: request.mode === "summary" ? 1024 : 2048 },
+    systemInstruction: {
+      parts: [
+        {
+          text: buildSystemPrompt(request.locale, request.mode, {
+            webSearch: request.webSearch,
+            smartSearch: request.smartSearch,
+            searchResults: request.searchResults,
+          }),
+        },
+      ],
+    },
+    // Gemini 3 系列默认开启 thinking 且思考 token 计入 maxOutputTokens，
+    // 预算过小会被思考耗尽导致正文为空；thinkingLevel low 适配角色聊天场景
+    generationConfig: {
+      maxOutputTokens: request.mode === "summary" ? 4096 : 8192,
+      thinkingConfig: { thinkingLevel: "low" },
+    },
   };
 }
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ClientChatRequest } from "../../../functions/_shared/validation";
+import type { EnrichedChatRequest } from "../../../functions/_shared/web-search";
 import {
   buildGeminiAdapter,
   buildGeminiBody,
@@ -19,14 +20,15 @@ describe("buildGeminiBody", () => {
     const body = buildGeminiBody(textRequest) as {
       contents: Array<{ role: string; parts: Array<{ text: string }> }>;
       systemInstruction: { parts: Array<{ text: string }> };
-      generationConfig: { maxOutputTokens: number };
+      generationConfig: { maxOutputTokens: number; thinkingConfig?: { thinkingLevel?: string } };
     };
 
     expect(body.contents).toEqual([
       { role: "user", parts: [{ text: "今天有点累" }] },
     ]);
     expect(body.systemInstruction.parts[0]?.text).toContain("月见八千代");
-    expect(body.generationConfig.maxOutputTokens).toBe(2048);
+    expect(body.generationConfig.maxOutputTokens).toBe(8192);
+    expect(body.generationConfig.thinkingConfig).toEqual({ thinkingLevel: "low" });
   });
 
   it("merges adjacent same-role messages to enforce strict user/model alternation", () => {
@@ -51,13 +53,13 @@ describe("buildGeminiBody", () => {
     ]);
   });
 
-  it("sets 1024 maxOutputTokens and summary prompt for summary mode", () => {
+  it("sets 4096 maxOutputTokens and summary prompt for summary mode", () => {
     const body = buildGeminiBody({ ...textRequest, mode: "summary" }) as {
       systemInstruction: { parts: Array<{ text: string }> };
       generationConfig: { maxOutputTokens: number };
     };
     expect(body.systemInstruction.parts[0]?.text).toContain("记忆总结助手");
-    expect(body.generationConfig.maxOutputTokens).toBe(1024);
+    expect(body.generationConfig.maxOutputTokens).toBe(4096);
   });
 
   it("maps image data URLs into Gemini inlineData parts and merges adjacent user parts", () => {
@@ -79,6 +81,26 @@ describe("buildGeminiBody", () => {
       { inlineData: { mimeType: "image/jpeg", data: "/9j/4AAQ" } },
       { text: "好看吗？" },
     ]);
+  });
+
+  it("injects web search results and the 1000-character rule into the system instruction", () => {
+    const request: EnrichedChatRequest = {
+      ...textRequest,
+      webSearch: true,
+      searchResults: [
+        { title: "上海天气", url: "https://weather.example.cn/", snippet: "今日多云，24至30度。" },
+      ],
+    };
+    const body = buildGeminiBody(request) as {
+      systemInstruction: { parts: Array<{ text: string }> };
+    };
+    const system = body.systemInstruction.parts[0]?.text ?? "";
+
+    expect(system).toContain("<web_search_results>");
+    expect(system).toContain("[1] 上海天气（https://weather.example.cn/）");
+    expect(system).toContain("今日多云，24至30度。");
+    expect(system).toContain("输出最多1000个Unicode字符");
+    expect(system).not.toContain("最多200个Unicode字符");
   });
 });
 
@@ -108,7 +130,7 @@ describe("buildGeminiAdapter", () => {
     expect(adapter.id).toBe("gemini");
     expect(adapter.isOpenAICompat).toBe(false);
     expect(adapter.supportsImage).toBe(true);
-    expect(adapter.defaultModel).toBe("gemini-3.6-flash");
+    expect(adapter.defaultModel).toBe("gemini-3.7-flash");
     expect(adapter.allowedModels).toContain("gemini-3.5-flash");
   });
 
@@ -126,6 +148,6 @@ describe("buildGeminiAdapter", () => {
     expect(built.headers["content-type"]).toBe("application/json");
     const body = JSON.parse(built.body) as { contents: unknown[]; generationConfig: { maxOutputTokens: number } };
     expect(Array.isArray(body.contents)).toBe(true);
-    expect(body.generationConfig.maxOutputTokens).toBe(2048);
+    expect(body.generationConfig.maxOutputTokens).toBe(8192);
   });
 });

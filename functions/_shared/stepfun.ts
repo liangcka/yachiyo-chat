@@ -1,5 +1,6 @@
 import { buildSystemPrompt } from "./prompt";
 import type { ClientChatRequest, ClientHistoryMessage } from "./validation";
+import type { EnrichedChatRequest } from "./web-search";
 
 interface StepFunTextPart {
   type: "text";
@@ -59,19 +60,27 @@ function mapHistoryMessage(
 }
 
 export function buildStepFunBody(
-  request: ClientChatRequest,
+  request: EnrichedChatRequest,
   model: string,
 ): StepFunRequestBody {
   const containsImage = request.messages.some((message) => message.imageDataUrl !== undefined);
   return {
     model,
     messages: [
-      { role: "system", content: buildSystemPrompt(request.locale, request.mode) },
+      {
+        role: "system",
+        content: buildSystemPrompt(request.locale, request.mode, {
+          webSearch: request.webSearch,
+          smartSearch: request.smartSearch,
+          searchResults: request.searchResults,
+        }),
+      },
       ...request.messages.map((message) => mapHistoryMessage(message, request.locale)),
     ],
     stream: true,
     reasoning_effort: containsImage ? "medium" : "low",
-    max_tokens: request.mode === "summary" ? 1024 : 2048,
+    // 推理模型的思考 token 计入 max_tokens 预算，2048 会被偶发冲高的思考耗尽导致正文为空
+    max_tokens: request.mode === "summary" ? 4096 : 8192,
   };
 }
 
@@ -115,7 +124,7 @@ export function resolveStepFunConfiguration(
 }
 
 export async function requestStepFun(
-  request: ClientChatRequest,
+  request: EnrichedChatRequest,
   configuration: StepFunConfiguration,
   signal: AbortSignal,
 ): Promise<Response> {

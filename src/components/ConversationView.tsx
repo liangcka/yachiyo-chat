@@ -27,6 +27,8 @@ export interface ConversationViewProps {
   messages: ChatMessage[];
   imageUrls?: ReadonlyMap<string, string>;
   summary?: string;
+  /** "显示引用来源"开关，向下传递给消息气泡 */
+  showSources?: boolean;
   onRecall?: () => void;
   onRegenerate?: (messageId?: string) => void;
   onToast?: (message: string) => void;
@@ -41,6 +43,7 @@ export function ConversationView({
   onRegenerate,
   onScrolledFromTopChange,
   onToast,
+  showSources,
   summary,
 }: ConversationViewProps) {
   const containerRef = useRef<HTMLElement>(null);
@@ -135,6 +138,7 @@ export function ConversationView({
                   scrollToBottom();
                 }
               }}
+              showSources={showSources}
               onRecall={message.role === "user" && index === lastUserMessageIndex ? onRecall : undefined}
               onRegenerate={
                 message.role === "assistant" &&

@@ -148,6 +148,39 @@ describe("useChatController", () => {
     );
   });
 
+  it("marks a completed stream without any delta as a retryable provider failure", async () => {
+    const repository = repositoryWith();
+    const stream = vi.fn<StreamChatFunction>(async () => ({ truncated: false }));
+    const { result } = renderHook(() =>
+      useChatController({
+        id: ids("user-1", "assistant-1"),
+        now: (() => {
+          let value = 20;
+          return () => value++;
+        })(),
+        repository,
+        streamChat: stream,
+      }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    await act(async () => result.current.send("今天有点累"));
+
+    expect(result.current.phase).toBe("error");
+    expect(result.current.errorCode).toBe("PROVIDER_ERROR");
+    expect(result.current.messages.at(-1)).toMatchObject({
+      id: "assistant-1",
+      status: "failed",
+      text: "",
+    });
+    const persisted = vi.mocked(repository.putMessage).mock.calls.map(([message]) => message);
+    expect(persisted.at(-1)).toMatchObject({
+      id: "assistant-1",
+      status: "failed",
+      text: "",
+    });
+  });
+
   it("aborts generation and preserves partial text when stopped", async () => {
     const repository = repositoryWith();
     let capturedSignal: AbortSignal | undefined;
@@ -419,6 +452,116 @@ describe("useChatController", () => {
       role: "user",
       text: "天气怎么样？",
     });
+  });
+
+  it("prepends active skill instructions as the leading request messages", async () => {
+    const repository = repositoryWith();
+    const stream = vi.fn<StreamChatFunction>(async () => ({ truncated: false }));
+
+    const { result } = renderHook(() =>
+      useChatController({
+        id: ids("user-1", "assistant-1"),
+        repository,
+        streamChat: stream,
+        activeSkills: [
+          {
+            id: "humanizer",
+            name: "Humanizer",
+            description: "去除文本中的 AI 味",
+            content: "# Humanizer\n四层自检体系：L1 硬性规则零容忍。",
+          },
+        ],
+      }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    await act(async () => result.current.send("帮我改写这段话"));
+
+    const chatRequest = stream.mock.calls[0]?.[0];
+    expect(chatRequest?.messages[0]).toEqual({
+      role: "user",
+      text: expect.stringContaining("【技能指令 / Skill Instructions】"),
+    });
+    expect(chatRequest?.messages[0]?.text).toContain("L1 硬性规则零容忍。");
+    expect(chatRequest?.messages[1]).toEqual({
+      role: "assistant",
+      text: "（已收到技能指令，将严格遵守执行）",
+    });
+    expect(chatRequest?.messages.at(-1)).toEqual({
+      role: "user",
+      text: "帮我改写这段话",
+    });
+  });
+
+  it("sends webSearch flag when enabled and persists sources received before deltas", async () => {
+    const repository = repositoryWith();
+    const sources = [
+      { title: "必应搜索结果一", url: "https://www.bing.com/" },
+      { title: "必应搜索结果二", url: "https://cn.bing.com/" },
+    ];
+    const stream = vi.fn<StreamChatFunction>(async (request, options) => {
+      expect(request.webSearch).toBe(true);
+      options.onSources?.(sources);
+      options.onDelta("基于搜索的回复");
+      return { truncated: false };
+    });
+    const { result } = renderHook(() =>
+      useChatController({
+        id: ids("user-1", "assistant-1"),
+        repository,
+        streamChat: stream,
+        webSearchEnabled: true,
+      }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    await act(async () => result.current.send("今天上海天气怎么样"));
+
+    const chatRequest = stream.mock.calls[0]?.[0];
+    expect(chatRequest?.webSearch).toBe(true);
+    expect(result.current.messages.at(-1)).toMatchObject({
+      status: "complete",
+      sources,
+      text: "基于搜索的回复",
+    });
+    // 最终持久化的消息包含 sources
+    expect(vi.mocked(repository.putMessage).mock.calls.at(-1)?.[0]).toMatchObject({
+      id: "assistant-1",
+      sources,
+    });
+  });
+
+  it("omits the webSearch flag on summary compression requests even when enabled", async () => {
+    const messages: ChatMessage[] = Array.from({ length: 20 }, (_, index) => ({
+      conversationId: conversation.id,
+      createdAt: 20 + index,
+      id: `history-${index}`,
+      role: index % 2 === 0 ? "user" : "assistant",
+      status: "complete",
+      text: `消息 ${index}`,
+    }));
+    const repository = repositoryWith({ listMessages: vi.fn(async () => messages) });
+    const stream = vi.fn<StreamChatFunction>(async () => ({ truncated: false }));
+    const { result } = renderHook(() =>
+      useChatController({
+        id: ids("user-1", "assistant-1"),
+        repository,
+        streamChat: stream,
+        webSearchEnabled: true,
+      }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    // 触发 20 条上限 → 先压缩（summary）再聊天
+    await act(async () => result.current.send("次"));
+
+    const summaryRequest = stream.mock.calls[0]?.[0];
+    expect(summaryRequest?.mode).toBe("summary");
+    expect(summaryRequest?.webSearch).toBeUndefined();
+
+    const chatRequest = stream.mock.calls[1]?.[0];
+    expect(chatRequest?.mode).toBeUndefined();
+    expect(chatRequest?.webSearch).toBe(true);
   });
 
   it("recovers an interrupted persisted assistant as stopped on startup", async () => {
