@@ -12,6 +12,14 @@ export interface ProviderRequestInput {
   model: string;
 }
 
+/** 搜索意图判断请求的输入：简短 judge prompt + 最近若干轮纯文本消息 */
+export interface JudgeRequestInput {
+  apiKey: string;
+  model: string;
+  systemPrompt: string;
+  messages: ReadonlyArray<{ role: "user" | "assistant"; text: string }>;
+}
+
 export interface BuiltProviderRequest {
   url: string;
   headers: Record<string, string>;
@@ -31,6 +39,10 @@ export interface ProviderAdapter {
   buildRequest(input: ProviderRequestInput): BuiltProviderRequest;
   /** 解析 upstream SSE 的单条 data，返回增量文本；null 表示无内容或结束信号 */
   extractDeltaText(data: string): string | null;
+  /** 构造非流式的搜索意图判断请求（小 token 预算、低思考档位） */
+  buildJudgeRequest(input: JudgeRequestInput): BuiltProviderRequest;
+  /** 解析非流式判断响应 JSON 的完整文本；null 表示无内容 */
+  extractJudgeText(responseJson: string): string | null;
 }
 
 const openaiCompatProviders = {

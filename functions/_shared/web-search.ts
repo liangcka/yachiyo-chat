@@ -7,6 +7,8 @@ export interface WebSearchResult {
   snippet: string;
   /** 发布日期（YYYY-MM-DD，UTC）；RSS 缺失或解析失败时省略 */
   publishedAt?: string;
+  /** 页面正文摘录（抓取成功且比摘要更有信息量时存在，替代 snippet 注入） */
+  content?: string;
 }
 
 /**
@@ -21,12 +23,20 @@ const maximumQueryCharacters = 100;
 const maximumResults = 5;
 /** 智能搜索模式：双市场合并去重后的结果上限 */
 const maximumSmartResults = 10;
+/** 每个可注册域名最多保留的结果数，避免同站点堆积压窄信息面 */
+const maximumResultsPerDomain = 2;
 const maximumTitleCharacters = 120;
 const maximumSnippetCharacters = 300;
 const maximumUrlCharacters = 512;
 const searchTimeoutMs = 8_000;
 /** 智能搜索国际路的近因时间过滤（天）：排除过时内容 */
 const smartRecencyDays = 30;
+/** 页面正文抓取：仅对排名最前的若干条执行 */
+const maximumPageFetches = 3;
+const pageFetchTimeoutMs = 5_000;
+const maximumContentCharacters = 1_500;
+/** 原始 HTML 超过此长度先截断，保护 workerd CPU（正文大多在前部） */
+const maximumHtmlCharacters = 300_000;
 const bingSearchOrigin = "https://www.bing.com/search";
 const browserUserAgent =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
@@ -76,6 +86,65 @@ const greetingKeywords: ReadonlySet<string> = new Set([
   "こんにちは", "こんばんは", "おはよう", "おやすみ",
 ]);
 
+/**
+ * 闲聊回应词表：整条消息（去标点、小写化后）仅由这些词组合时视为无信息量闲聊，
+ * 跳过联网搜索。含问候、应答、感谢、告别、情绪回应、对话流程控制与语气尾词；
+ * 单字词可重复匹配，覆盖"哈哈哈""嗯嗯嗯"等叠音。
+ * 注意：仅收录整词匹配安全的词，任何含实质名词/疑问/时效词的句子都不会命中。
+ */
+const chatReplyWords: readonly string[] = [
+  ...greetingKeywords,
+  // 应答确认
+  "好的", "好滴", "好呀", "好吧", "好嘞", "好耶", "可以的", "没问题", "没错", "是的", "确实",
+  "嗯", "哦", "噢", "唉", "欸", "诶", "哼", "对", "ok",
+  // 感谢与告别
+  "谢谢", "多谢", "感谢", "thx", "ありがとう", "拜拜", "再见", "またね",
+  // 情绪与认知回应
+  "太好了", "原来如此", "原来是这样", "我知道了", "我明白了", "我懂了", "我了解了",
+  "明白了", "懂了", "知道了", "涨知识了", "学到了", "厉害", "不错", "挺好", "真好",
+  "哈", "嘿", "呵", "呜", "耶", "哇",
+  // 对话流程控制
+  "继续", "继续说", "接着说", "说下去", "然后呢", "再说一遍", "重复一下", "别说了",
+  // 语气尾词
+  "呀", "啊", "呢", "啦", "嘛", "哟", "嘞",
+  // 日语回应
+  "なるほど", "わかった", "そうだね",
+].sort((a, b) => b.length - a.length);
+
+/** 纯闲聊消息匹配：整条消息去标点后可完全由闲聊词序列组成 */
+const chatReplyPattern = new RegExp(`^(?:${chatReplyWords.join("|")})+$`, "u");
+
+/**
+ * 联网搜索意图门控：判断最新 user 消息是否值得发起搜索。
+ * 对消息原文（而非去噪后的查询词）判定——"今天/最新"等时效词虽被查询清洗剔除，
+ * 却是搜索强信号，门控必须能看到它们。规则：
+ * 1. 无文本（纯图片/无 user 消息）→ 不搜；
+ * 2. 去标点符号后为空（纯表情/颜文字）→ 不搜；
+ * 3. 整条消息仅由闲聊回应词组成（问候/应答/感谢/告别/情绪/流程控制）→ 不搜；
+ * 4. 其余一律搜索（宁多搜不漏搜：联网开关由用户主动开启，模糊地带保留搜索能力）。
+ */
+export function shouldSearchWeb(messages: readonly ClientHistoryMessage[]): boolean {
+  let lastText: string | null = null;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message === undefined || message.role !== "user") {
+      continue;
+    }
+    const normalized = message.text.trim().replace(/[\r\n\t]/gu, " ");
+    lastText = normalized.length === 0 ? null : normalized;
+    break;
+  }
+  if (lastText === null) {
+    return false;
+  }
+
+  const compact = lastText.toLowerCase().replace(/[\p{P}\p{S}\s]+/gu, "");
+  if (compact.length === 0) {
+    return false;
+  }
+  return !chatReplyPattern.test(compact);
+}
+
 /** 去除噪声词、标点，并合并中日文之间的空格（"上海 天气"→"上海天气"）；数字间的小数点保留（如 3.7） */
 function stripQueryNoise(value: string): string {
   let result = value;
@@ -112,6 +181,8 @@ function isInjectedContextMessage(text: string): boolean {
 /**
  * 以最后一条 user 消息文本构造搜索词：
  * trim、把换行/制表符压成空格、按 Unicode 字符截断到 100，再做噪声词归一化。
+ * 原文含"最新/最近"等求新意图时，查询词末尾追加当前年份提升必应新鲜度排序
+ * （"今天/现在"等实时语境不加：天气类查询必应本就返回当前信息，年份反而引入噪声）。
  * 追问/纠错类消息（如"不对，3.7 flash已经出来了"、"那北京呢"）单独作为查询词缺乏主题，
  * 会拼上上一轮真实提问的关键词作为上下文（跳过问候语、客户端注入消息与重复内容）。
  * 归一化与上文均为空时回退原文；最后一条 user 消息为空文本（纯图片）返回 null。
@@ -144,6 +215,7 @@ export function buildSearchQuery(messages: readonly ClientHistoryMessage[]): str
     return null;
   }
 
+  const freshnessYear = /最新|最近/u.test(lastText) ? `${new Date().getUTCFullYear()}` : null;
   const currentKeywords = stripQueryNoise(truncateUnicode(lastText, maximumQueryCharacters));
   const previousKeywords =
     previousText === null ? null : stripQueryNoise(truncateUnicode(previousText, maximumQueryCharacters));
@@ -156,15 +228,22 @@ export function buildSearchQuery(messages: readonly ClientHistoryMessage[]): str
       ? previousKeywords
       : null;
 
+  const withFreshness = (query: string): string =>
+    freshnessYear === null ? query : truncateUnicode(`${query} ${freshnessYear}`, maximumQueryCharacters);
+
   if (currentKeywords.length > 0) {
-    return usablePrevious === null
-      ? currentKeywords
-      : truncateUnicode(`${currentKeywords} ${usablePrevious}`, maximumQueryCharacters);
+    return withFreshness(
+      usablePrevious === null
+        ? currentKeywords
+        : truncateUnicode(`${currentKeywords} ${usablePrevious}`, maximumQueryCharacters),
+    );
   }
   const fallback = truncateUnicode(lastText, maximumQueryCharacters);
-  return usablePrevious === null
-    ? fallback
-    : truncateUnicode(`${fallback} ${usablePrevious}`, maximumQueryCharacters);
+  return withFreshness(
+    usablePrevious === null
+      ? fallback
+      : truncateUnicode(`${fallback} ${usablePrevious}`, maximumQueryCharacters),
+  );
 }
 
 function codePointText(codePoint: number): string {
@@ -182,11 +261,37 @@ function decodeHtmlEntities(value: string): string {
     .replace(/&#(\d+);/gu, (_match, decimal: string) =>
       codePointText(Number.parseInt(decimal, 10)),
     )
+    .replace(/&nbsp;/gu, " ")
     .replace(/&quot;/gu, '"')
     .replace(/&apos;/gu, "'")
     .replace(/&lt;/gu, "<")
     .replace(/&gt;/gu, ">")
     .replace(/&amp;/gu, "&");
+}
+
+/**
+ * 从 HTML 提取可读正文文本（纯正则实现，保证 vitest node 环境可测，不依赖 HTMLRewriter）：
+ * 去注释、脚本/样式/模板块与语义性非正文区（nav/header/footer/aside/form），
+ * 块级闭合标签与 <br> 转换行，剥其余标签，解码实体后压缩空白。
+ */
+export function extractPageText(html: string): string {
+  return decodeHtmlEntities(
+    html
+      .replace(/<!--[\s\S]*?-->/gu, " ")
+      .replace(/<(script|style|noscript|svg|template|iframe)\b[\s\S]*?<\/\1\s*>/giu, " ")
+      .replace(/<(nav|header|footer|aside|form)\b[\s\S]*?<\/\1\s*>/giu, " ")
+      .replace(/<br\s*\/?\s*>/giu, "\n")
+      .replace(
+        /<\/(?:p|div|li|ul|ol|tr|td|th|section|article|main|h[1-6]|blockquote|pre|figure|figcaption|dl|dt|dd)\s*>/giu,
+        "\n",
+      )
+      .replace(/<[^>]*>/gu, " "),
+  )
+    .replace(/[ \t\f\v\u00a0]+/gu, " ")
+    .replace(/[ \t]+\n/gu, "\n")
+    .replace(/\n[ \t]+/gu, "\n")
+    .replace(/\n{2,}/gu, "\n")
+    .trim();
 }
 
 function extractTagText(item: string, tag: "title" | "link" | "description"): string | null {
@@ -287,6 +392,46 @@ function mergeSearchResults(
   return merged;
 }
 
+/** 常见二级后缀（co.jp / com.cn 等）：可注册域名需取三段 */
+const secondLevelSuffixes: ReadonlySet<string> = new Set([
+  "co", "com", "net", "org", "gov", "edu", "ac",
+]);
+
+/** 提取 URL 的可注册域名（如 a.b.example.co.jp → example.co.jp）；解析失败返回 null */
+function registrableDomain(url: string): string | null {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    const labels = hostname.split(".");
+    if (labels.length <= 2) {
+      return hostname;
+    }
+    const secondLevel = labels[labels.length - 2];
+    return secondLevelSuffixes.has(secondLevel) ? labels.slice(-3).join(".") : labels.slice(-2).join(".");
+  } catch {
+    return null;
+  }
+}
+
+/** 同一可注册域名最多保留 2 条，避免单一站点堆积压窄信息面（保持原排序） */
+function dedupeByDomain(results: readonly WebSearchResult[]): WebSearchResult[] {
+  const counts = new Map<string, number>();
+  const kept: WebSearchResult[] = [];
+  for (const result of results) {
+    const domain = registrableDomain(result.url);
+    if (domain === null) {
+      kept.push(result);
+      continue;
+    }
+    const count = counts.get(domain) ?? 0;
+    if (count >= maximumResultsPerDomain) {
+      continue;
+    }
+    counts.set(domain, count + 1);
+    kept.push(result);
+  }
+  return kept;
+}
+
 interface BingMarket {
   readonly mkt: string;
   readonly setlang: string;
@@ -346,12 +491,78 @@ async function fetchBingRss(
 }
 
 /**
+ * 单条结果的页面正文抓取：仅接受 HTML 响应。
+ * 5 秒超时、联动客户端断开；提取文本必须比 RSS 摘要更长才有信息量，
+ * 否则保留摘要。任何失败（非 200、非 HTML、反爬、超时、网络错误）静默返回原结果。
+ */
+async function fetchPageContent(
+  result: WebSearchResult,
+  locale: ChatLocale,
+  signal: AbortSignal | undefined,
+): Promise<WebSearchResult> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), pageFetchTimeoutMs);
+  const forwardAbort = () => controller.abort();
+
+  if (signal !== undefined && signal.aborted) {
+    controller.abort();
+  }
+  signal?.addEventListener("abort", forwardAbort);
+
+  try {
+    const response = await fetch(result.url, {
+      headers: {
+        accept: "text/html,application/xhtml+xml,*/*",
+        "accept-language": localeMarket[locale].acceptLanguage,
+        "user-agent": browserUserAgent,
+      },
+      signal: controller.signal,
+    });
+    const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+    if (!response.ok || !contentType.includes("html")) {
+      await response.body?.cancel().catch(() => undefined);
+      return result;
+    }
+    const html = (await response.text()).slice(0, maximumHtmlCharacters);
+    const text = extractPageText(html);
+    return text.length > result.snippet.length
+      ? { ...result, content: truncateUnicode(text, maximumContentCharacters) }
+      : result;
+  } catch {
+    return result;
+  } finally {
+    clearTimeout(timeout);
+    signal?.removeEventListener("abort", forwardAbort);
+  }
+}
+
+/**
+ * 页面正文增强：对排名最前的 3 条结果并行抓取页面正文（各 5 秒超时），
+ * 其余结果保持摘要。抓取互不阻塞、失败静默降级，结果顺序保持不变。
+ */
+export async function enrichWithPageContent(
+  results: readonly WebSearchResult[],
+  locale: ChatLocale,
+  signal?: AbortSignal,
+): Promise<WebSearchResult[]> {
+  const targets = results.slice(0, maximumPageFetches);
+  if (targets.length === 0) {
+    return [...results];
+  }
+  const enriched = await Promise.all(
+    targets.map((result) => fetchPageContent(result, locale, signal)),
+  );
+  return [...enriched, ...results.slice(maximumPageFetches)];
+}
+
+/**
  * 服务端必应 RSS 搜索（无需 Key）。
  * locale 用于锁定必应市场参数（mkt/setlang）与 Accept-Language，缺省 zh-CN。
  * smart=false：仅 locale 市场（现状行为）。
  * smart=true：双路并行——locale 市场无时间过滤 + en-US 市场限近 30 天，
  * 解决中文内容池索引滞后（如新模型发布信息缺失）；两路各自 8 秒超时、互不阻塞，
  * 失败静默降级；合并按 URL 去重、本地市场在前，上限 10 条。
+ * 两种模式的结果最后均做同域名去重（每域名最多 2 条）。
  */
 export async function searchWeb(
   query: string,
@@ -360,12 +571,12 @@ export async function searchWeb(
   smart = false,
 ): Promise<WebSearchResult[]> {
   if (!smart) {
-    return fetchBingRss(query, localeMarket[locale], signal);
+    return dedupeByDomain(await fetchBingRss(query, localeMarket[locale], signal));
   }
 
   const [local, international] = await Promise.all([
     fetchBingRss(query, localeMarket[locale], signal),
     fetchBingRss(query, internationalMarket, signal, smartRecencyDays),
   ]);
-  return mergeSearchResults(local, international);
+  return dedupeByDomain(mergeSearchResults(local, international));
 }

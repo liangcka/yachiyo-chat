@@ -1,7 +1,12 @@
 import { buildSystemPrompt } from "../prompt";
 import type { ClientChatRequest, ClientHistoryMessage } from "../validation";
 import type { EnrichedChatRequest } from "../web-search";
-import type { BuiltProviderRequest, ProviderAdapter, ProviderRequestInput } from "./registry";
+import type {
+  BuiltProviderRequest,
+  JudgeRequestInput,
+  ProviderAdapter,
+  ProviderRequestInput,
+} from "./registry";
 
 const ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -149,6 +154,27 @@ export function extractAnthropicDeltaText(data: string): string | null {
   return text;
 }
 
+/** 非流式 judge 响应：拼接 content 数组中的 text 块 */
+export function extractAnthropicJudgeText(responseJson: string): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(responseJson);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null) return null;
+  const content = (parsed as Record<string, unknown>).content;
+  if (!Array.isArray(content) || content.length === 0) return null;
+  const text = content
+    .map((block): string => {
+      if (typeof block !== "object" || block === null) return "";
+      const value = block as Record<string, unknown>;
+      return value.type === "text" && typeof value.text === "string" ? value.text : "";
+    })
+    .join("");
+  return text.length > 0 ? text : null;
+}
+
 export function buildAnthropicAdapter(): ProviderAdapter {
   return {
     id: "claude",
@@ -171,5 +197,28 @@ export function buildAnthropicAdapter(): ProviderAdapter {
       };
     },
     extractDeltaText: extractAnthropicDeltaText,
+    buildJudgeRequest(input: JudgeRequestInput): BuiltProviderRequest {
+      const body = {
+        model: input.model,
+        max_tokens: 256,
+        system: input.systemPrompt,
+        messages: input.messages.map((message) => ({
+          role: message.role,
+          content: message.text,
+        })),
+        stream: false,
+      };
+      return {
+        url: ANTHROPIC_ENDPOINT,
+        headers: {
+          accept: "application/json",
+          "content-type": "application/json",
+          "anthropic-version": ANTHROPIC_VERSION,
+          "x-api-key": input.apiKey,
+        },
+        body: JSON.stringify(body),
+      };
+    },
+    extractJudgeText: extractAnthropicJudgeText,
   };
 }

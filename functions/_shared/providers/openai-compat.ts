@@ -1,7 +1,12 @@
 import { buildSystemPrompt } from "../prompt";
 import type { ClientChatRequest, ClientHistoryMessage } from "../validation";
 import type { EnrichedChatRequest } from "../web-search";
-import type { BuiltProviderRequest, ProviderAdapter, ProviderRequestInput } from "./registry";
+import type {
+  BuiltProviderRequest,
+  JudgeRequestInput,
+  ProviderAdapter,
+  ProviderRequestInput,
+} from "./registry";
 
 export interface OpenAICompatConfig {
   readonly endpoint: string;
@@ -107,6 +112,26 @@ export function extractOpenAIDeltaText(data: string): string | null {
   return content;
 }
 
+/** 非流式 judge 响应：提取 choices[0].message.content 完整文本 */
+export function extractOpenAIJudgeText(responseJson: string): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(responseJson);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null) return null;
+  const choices = (parsed as Record<string, unknown>).choices;
+  if (!Array.isArray(choices) || choices.length === 0) return null;
+  const first = choices[0];
+  if (typeof first !== "object" || first === null) return null;
+  const message = (first as Record<string, unknown>).message;
+  if (typeof message !== "object" || message === null) return null;
+  const content = (message as Record<string, unknown>).content;
+  if (typeof content !== "string" || content.length === 0) return null;
+  return content;
+}
+
 export function buildOpenAICompatAdapter(
   id: ProviderAdapter["id"],
   config: OpenAICompatConfig,
@@ -136,5 +161,28 @@ export function buildOpenAICompatAdapter(
       };
     },
     extractDeltaText: extractOpenAIDeltaText,
+    buildJudgeRequest(input: JudgeRequestInput): BuiltProviderRequest {
+      const body = {
+        model: input.model,
+        messages: [
+          { role: "system", content: input.systemPrompt },
+          ...input.messages.map((message) => ({ role: message.role, content: message.text })),
+        ],
+        stream: false,
+        // 推理模型的思考 token 计入 max_tokens 预算，512 足够 YES/NO 输出
+        max_tokens: 512,
+        ...(config.reasoningEffort === true ? { reasoning_effort: "low" as const } : {}),
+      };
+      return {
+        url: config.endpoint,
+        headers: {
+          accept: "application/json",
+          authorization: `Bearer ${input.apiKey}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(body),
+      };
+    },
+    extractJudgeText: extractOpenAIJudgeText,
   };
 }

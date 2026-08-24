@@ -66,7 +66,8 @@ function buildSearchResultsSection(
           ? `${result.url}，发布日期未知`
           : `${result.url}，发布于${result.publishedAt}`
         : result.url;
-      return `[${index + 1}] ${result.title}（${source}）\n${result.snippet}`;
+      // 抓取到页面正文时优先注入正文（信息量远大于 RSS 摘要）
+      return `[${index + 1}] ${result.title}（${source}）\n${result.content ?? result.snippet}`;
     })
     .join("\n\n");
   const instruction = smart

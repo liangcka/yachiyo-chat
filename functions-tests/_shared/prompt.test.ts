@@ -58,6 +58,27 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("以它们为准，不要固执旧答案");
   });
 
+  it("prefers fetched page content over the snippet when present", () => {
+    const prompt = buildSystemPrompt("zh-CN", "chat", {
+      webSearch: true,
+      searchResults: [
+        {
+          title: "上海天气",
+          url: "https://weather.example.cn/",
+          snippet: "今日多云。",
+          content: "这是抓取到的完整页面正文，包含比 RSS 摘要更详细的天气信息。",
+        },
+        { title: "第二来源", url: "https://news.example.org/", snippet: "摘要内容。" },
+      ],
+    });
+
+    expect(prompt).toContain(
+      "[1] 上海天气（https://weather.example.cn/）\n这是抓取到的完整页面正文，包含比 RSS 摘要更详细的天气信息。",
+    );
+    expect(prompt).not.toContain("[1] 上海天气（https://weather.example.cn/）\n今日多云。");
+    expect(prompt).toContain("[2] 第二来源（https://news.example.org/）\n摘要内容。");
+  });
+
   it("renders the Japanese web search block instructions", () => {
     const prompt = buildSystemPrompt("ja-JP", "chat", {
       webSearch: true,

@@ -1,7 +1,12 @@
 import { buildSystemPrompt } from "../prompt";
 import type { ClientChatRequest, ClientHistoryMessage } from "../validation";
 import type { EnrichedChatRequest } from "../web-search";
-import type { BuiltProviderRequest, ProviderAdapter, ProviderRequestInput } from "./registry";
+import type {
+  BuiltProviderRequest,
+  JudgeRequestInput,
+  ProviderAdapter,
+  ProviderRequestInput,
+} from "./registry";
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const ALLOWED_MODELS = [
@@ -145,6 +150,33 @@ export function extractGeminiDeltaText(data: string): string | null {
   return text;
 }
 
+/** 非流式 judge 响应：提取 candidates[0].content.parts 的完整文本 */
+export function extractGeminiJudgeText(responseJson: string): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(responseJson);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null) return null;
+  const candidates = (parsed as Record<string, unknown>).candidates;
+  if (!Array.isArray(candidates) || candidates.length === 0) return null;
+  const first = candidates[0];
+  if (typeof first !== "object" || first === null) return null;
+  const content = (first as Record<string, unknown>).content;
+  if (typeof content !== "object" || content === null) return null;
+  const parts = (content as Record<string, unknown>).parts;
+  if (!Array.isArray(parts) || parts.length === 0) return null;
+  const text = parts
+    .map((part): string => {
+      if (typeof part !== "object" || part === null) return "";
+      const value = (part as Record<string, unknown>).text;
+      return typeof value === "string" ? value : "";
+    })
+    .join("");
+  return text.length > 0 ? text : null;
+}
+
 export function buildGeminiAdapter(): ProviderAdapter {
   return {
     id: "gemini",
@@ -167,5 +199,30 @@ export function buildGeminiAdapter(): ProviderAdapter {
       };
     },
     extractDeltaText: extractGeminiDeltaText,
+    buildJudgeRequest(input: JudgeRequestInput): BuiltProviderRequest {
+      const body = {
+        contents: input.messages.map((message) => ({
+          role: message.role === "assistant" ? "model" : "user",
+          parts: [{ text: message.text }],
+        })),
+        systemInstruction: { parts: [{ text: input.systemPrompt }] },
+        generationConfig: {
+          // 思考 token 计入 maxOutputTokens，512 足够 YES/NO 输出
+          maxOutputTokens: 512,
+          thinkingConfig: { thinkingLevel: "low" },
+        },
+      };
+      const url = `${GEMINI_BASE}/models/${encodeURIComponent(input.model)}:generateContent`;
+      return {
+        url,
+        headers: {
+          accept: "application/json",
+          "content-type": "application/json",
+          "x-goog-api-key": input.apiKey,
+        },
+        body: JSON.stringify(body),
+      };
+    },
+    extractJudgeText: extractGeminiJudgeText,
   };
 }

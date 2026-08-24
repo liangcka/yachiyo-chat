@@ -39,6 +39,19 @@ function bingSearchUrl(query: string): string {
   return `https://www.bing.com/search?q=${encodeURIComponent(query)}&format=rss&mkt=zh-CN&setlang=zh-hans`;
 }
 
+/** 非流式搜索意图判断响应（OpenAI 兼容格式，与服务端 fallback 的 StepFun judge 一致） */
+function judgeResponse(verdict: string): Response {
+  return new Response(JSON.stringify({ choices: [{ message: { content: verdict } }] }), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+/** 识别搜索意图判断请求：judge 请求非流式，accept 为 application/json */
+function isJudgeInit(init?: RequestInit): boolean {
+  return ((init?.headers ?? {}) as Record<string, string>).accept === "application/json";
+}
+
 async function toRequest(input: RequestInfo | URL, init?: RequestInit): Promise<Request> {
   return input instanceof Request ? input : new Request(input, init);
 }
@@ -88,6 +101,19 @@ describe("POST /api/chat", () => {
       new Request(`${origin}/api/chat`, {
         method: "POST",
         headers: { "content-type": "application/json", origin },
+        body: JSON.stringify({ locale: "zh-CN", messages: [{ role: "user", text: "你好" }] }),
+      }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: { code: "SESSION_REQUIRED" } });
+  });
+
+  it("passes the origin check for the native app origin", async () => {
+    const response = await invoke(
+      new Request(`${origin}/api/chat`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "https://localhost" },
         body: JSON.stringify({ locale: "zh-CN", messages: [{ role: "user", text: "你好" }] }),
       }),
     );
@@ -308,6 +334,9 @@ describe("POST /api/chat", () => {
     providerFetch.mockImplementation(async (input, init) => {
       const request = await toRequest(input, init);
       fetchUrls.push(request.url);
+      if (isJudgeInit(init)) {
+        return judgeResponse("YES");
+      }
       if (request.url.startsWith(bingUrlPrefix)) {
         return new Response(bingRss(), { status: 200, headers: { "content-type": "text/xml" } });
       }
@@ -330,7 +359,13 @@ describe("POST /api/chat", () => {
     );
     const events = await collectClientEvents(response.body!);
 
-    expect(fetchUrls).toEqual([bingSearchUrl("上海天气"), providerUrl]);
+    // 模型 judge YES → 必应搜索 → Top 结果页面抓取（mock 非 HTML 降级）→ 主调用
+    expect(fetchUrls).toEqual([
+      providerUrl,
+      bingSearchUrl("上海天气"),
+      "https://weather.example.cn/shanghai",
+      providerUrl,
+    ]);
     expect(JSON.stringify(providerBody)).toContain("<web_search_results>");
     expect(JSON.stringify(providerBody)).toContain("上海天气实况");
     expect(events[0]).toEqual({
@@ -347,6 +382,9 @@ describe("POST /api/chat", () => {
     providerFetch.mockImplementation(async (input, init) => {
       const request = await toRequest(input, init);
       fetchUrls.push(request.url);
+      if (isJudgeInit(init)) {
+        return judgeResponse("YES");
+      }
       if (request.url.startsWith(bingUrlPrefix)) {
         if (request.url.includes("mkt=en-US")) {
           return new Response(internationalBingRss(), {
@@ -376,10 +414,16 @@ describe("POST /api/chat", () => {
     );
     const events = await collectClientEvents(response.body!);
 
-    // 双路必应请求：本地市场 + en-US 近 30 天过滤
+    // 模型 judge YES → 双路必应（本地市场 + en-US 近 30 天过滤，原文含"最新"时查询词追加当前年份）
+    // → 合并 Top 结果页面抓取（mock 非 HTML 降级）→ 主调用
+    const year = new Date().getUTCFullYear();
+    const smartQuery = `Gemini模型 ${year}`;
     expect(fetchUrls).toEqual([
-      bingSearchUrl("Gemini模型"),
-      `https://www.bing.com/search?q=${encodeURIComponent("Gemini模型")}&format=rss&mkt=en-US&setlang=en&qft=${encodeURIComponent('interval="30"')}`,
+      providerUrl,
+      bingSearchUrl(smartQuery),
+      `https://www.bing.com/search?q=${encodeURIComponent(smartQuery)}&format=rss&mkt=en-US&setlang=en&qft=${encodeURIComponent('interval="30"')}`,
+      "https://weather.example.cn/shanghai",
+      "https://deepmind.google/models/gemini/flash/",
       providerUrl,
     ]);
 
@@ -407,6 +451,9 @@ describe("POST /api/chat", () => {
     providerFetch.mockImplementation(async (input, init) => {
       const request = await toRequest(input, init);
       fetchUrls.push(request.url);
+      if (isJudgeInit(init)) {
+        return judgeResponse("YES");
+      }
       if (request.url.startsWith(bingUrlPrefix)) {
         return new Response("denied", { status: 503 });
       }
@@ -428,12 +475,97 @@ describe("POST /api/chat", () => {
     );
     const events = await collectClientEvents(response.body!);
 
-    expect(fetchUrls).toEqual([bingSearchUrl("上海天气"), providerUrl]);
+    expect(fetchUrls).toEqual([providerUrl, bingSearchUrl("上海天气"), providerUrl]);
     expect(events.some((event) => event.type === "sources")).toBe(false);
     expect(events).toEqual([
       { type: "delta", text: "彩叶~我们聊聊别的吧" },
       { type: "done", truncated: false },
     ]);
+  });
+
+  it("skips the search when the model judge says NO", async () => {
+    const fetchUrls: string[] = [];
+    providerFetch.mockImplementation(async (input, init) => {
+      const request = await toRequest(input, init);
+      fetchUrls.push(request.url);
+      if (isJudgeInit(init)) {
+        return judgeResponse("NO");
+      }
+      return new Response(providerSse("彩叶~陪你聊天"), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    });
+
+    const response = await invoke(
+      await chatRequest(
+        {
+          locale: "zh-CN",
+          // 规则门控会放行（含时效词），但模型结合语境判断为闲聊陪伴 → NO
+          messages: [{ role: "user", text: "今天陪我聊聊最近的烦恼吧" }],
+          webSearch: true,
+        },
+        "judge-no-session",
+      ),
+    );
+    const events = await collectClientEvents(response.body!);
+
+    // 仅 judge 请求 + 主调用，无必应搜索与页面抓取
+    expect(fetchUrls).toEqual([providerUrl, providerUrl]);
+    expect(events.some((event) => event.type === "sources")).toBe(false);
+    expect(events[0]).toEqual({ type: "delta", text: "彩叶~陪你聊天" });
+  });
+
+  it("falls back to rule gating when the judge request fails", async () => {
+    const fetchUrls: string[] = [];
+    providerFetch.mockImplementation(async (input, init) => {
+      const request = await toRequest(input, init);
+      fetchUrls.push(request.url);
+      if (isJudgeInit(init)) {
+        return new Response("error", { status: 500 });
+      }
+      if (request.url.startsWith(bingUrlPrefix)) {
+        return new Response(bingRss(), { status: 200, headers: { "content-type": "text/xml" } });
+      }
+      return new Response(providerSse("彩叶~查到啦"), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    });
+
+    // judge 失败 → 回退规则门控：时效性提问仍会搜索
+    const searchResponse = await invoke(
+      await chatRequest(
+        {
+          locale: "zh-CN",
+          messages: [{ role: "user", text: "今天上海天气怎么样" }],
+          webSearch: true,
+        },
+        "judge-fallback-search-session",
+      ),
+    );
+    const searchEvents = await collectClientEvents(searchResponse.body!);
+    expect(fetchUrls).toEqual([
+      providerUrl,
+      bingSearchUrl("上海天气"),
+      "https://weather.example.cn/shanghai",
+      providerUrl,
+    ]);
+    expect(searchEvents[0]?.type).toBe("sources");
+
+    // judge 失败 → 回退规则门控：纯问候仍不搜索
+    const chattyResponse = await invoke(
+      await chatRequest(
+        {
+          locale: "zh-CN",
+          messages: [{ role: "user", text: "你好" }],
+          webSearch: true,
+        },
+        "judge-fallback-skip-session",
+      ),
+    );
+    const chattyEvents = await collectClientEvents(chattyResponse.body!);
+    expect(chattyEvents.some((event) => event.type === "sources")).toBe(false);
   });
 
   it("skips the search step for summary mode and image-only messages", async () => {
@@ -485,6 +617,9 @@ describe("POST /api/chat", () => {
   it("relaxes the streaming cap to 1000 Unicode characters while online", async () => {
     providerFetch.mockImplementation(async (input, init) => {
       const request = await toRequest(input, init);
+      if (isJudgeInit(init)) {
+        return judgeResponse("YES");
+      }
       if (request.url.startsWith(bingUrlPrefix)) {
         return new Response(bingRss(), { status: 200, headers: { "content-type": "text/xml" } });
       }
@@ -521,6 +656,9 @@ describe("POST /api/chat", () => {
     providerFetch.mockImplementation(async (input, init) => {
       const request = await toRequest(input, init);
       fetchUrls.push(request.url);
+      if (isJudgeInit(init)) {
+        return judgeResponse("YES");
+      }
       if (request.url.startsWith(bingUrlPrefix)) {
         return new Response(bingRss(), { status: 200, headers: { "content-type": "text/xml" } });
       }
@@ -546,7 +684,13 @@ describe("POST /api/chat", () => {
     );
     const events = await collectClientEvents(response.body!);
 
-    expect(fetchUrls).toEqual([bingSearchUrl("上海天气"), openaiUrl]);
+    // judge 请求也走用户所选 provider（同端点、用户 key）
+    expect(fetchUrls).toEqual([
+      openaiUrl,
+      bingSearchUrl("上海天气"),
+      "https://weather.example.cn/shanghai",
+      openaiUrl,
+    ]);
     expect(JSON.stringify(openaiBody)).toContain("<web_search_results>");
     expect(events[0]?.type).toBe("sources");
     expect(events.at(-1)).toEqual({ type: "done", truncated: false });
