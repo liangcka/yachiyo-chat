@@ -122,6 +122,20 @@ describe("POST /api/session", () => {
     expect(await response.json()).toEqual({ error: { code: "ORIGIN_NOT_ALLOWED" } });
   });
 
+  it("issues a SameSite=None cookie for the native app origin", async () => {
+    const request = postRequest("correct horse moonlight");
+    request.headers.set("origin", "https://localhost");
+
+    const response = await onRequestPost(
+      createPagesEventContext<typeof onRequestPost>({ request, params: {}, data: {} }),
+    );
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("set-cookie")).toMatch(
+      /^yachiyo_session=.+; Max-Age=2592000; Path=\/; HttpOnly; Secure; SameSite=None$/,
+    );
+  });
+
   it.each([undefined, "1"])(
     "stream-limits an oversized body when Content-Length is %s",
     async (contentLength) => {
@@ -213,6 +227,24 @@ describe("session verification", () => {
     expect(response.status).toBe(204);
     expect(response.headers.get("set-cookie")).toMatch(
       /^yachiyo_session=; Max-Age=0; Path=\/; HttpOnly; Secure; SameSite=Strict$/,
+    );
+  });
+
+  it("clears the cookie with SameSite=None for the native app origin", async () => {
+    const response = await onRequestDelete(
+      createPagesEventContext<typeof onRequestDelete>({
+        request: new Request(`${origin}/api/session`, {
+          method: "DELETE",
+          headers: { origin: "https://localhost" },
+        }),
+        params: {},
+        data: {},
+      }),
+    );
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("set-cookie")).toMatch(
+      /^yachiyo_session=; Max-Age=0; Path=\/; HttpOnly; Secure; SameSite=None$/,
     );
   });
 });

@@ -2,10 +2,17 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "yachiyo-chat",
   "compatibility_date": "2026-07-11",
+  "pages_build_output_dir": "dist",
   "vars": {
     "STEPFUN_BASE_URL": "https://api.stepfun.com/step_plan/v1",
     "STEPFUN_MODEL": "step-3.7-flash",
     "DAILY_REQUEST_LIMIT": "100",
     "AUTH_ATTEMPT_LIMIT": "10"
-  }
+  },
+  "kv_namespaces": [
+    {
+      "binding": "RATE_LIMIT_KV",
+      "id": "2ad6fb7da0cb4d298c68f6181485cf41"
+    }
+  ]
 }

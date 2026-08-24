@@ -47,6 +47,7 @@ export interface UiCopy {
   readonly imageInvalid: string;
   readonly imageTooLarge: string;
   readonly storageFull: string;
+  readonly exitHint: string;
   readonly conversationLimit: string;
   readonly truncated: string;
   readonly llmSettings: string;
@@ -143,6 +144,7 @@ const chinese = Object.freeze({
   imageInvalid: "请选择 JPEG、PNG 或 WebP 图片。",
   imageTooLarge: "图片太大，请换一张试试。",
   storageFull: "本地空间不足，请先清理历史记录。",
+  exitHint: "再按一次返回键退出",
   conversationLimit: "本地最多保留 30 段对话，请先删除一段。",
   truncated: "回复太长，已截断显示。",
   llmSettings: "LLM 设置",
@@ -239,6 +241,7 @@ const japanese = Object.freeze({
   imageInvalid: "JPEG、PNG、WebP の画像を選んでください。",
   imageTooLarge: "画像が大きすぎます。別の画像を試してください。",
   storageFull: "端末の空き容量が足りません。履歴を整理してください。",
+  exitHint: "もう一度戻ると終了します",
   conversationLimit: "会話は端末に30件まで保存できます。先に1件削除してください。",
   truncated: "返答が長すぎたため、途中まで表示しています。",
   llmSettings: "LLM 設定",

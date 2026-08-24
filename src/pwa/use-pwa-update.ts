@@ -1,4 +1,5 @@
 import { useRegisterSW } from "virtual:pwa-register/react";
+import { isNativeApp } from "../services/app-platform";
 
 export function usePwaUpdate() {
   const {
@@ -6,8 +7,12 @@ export function usePwaUpdate() {
     offlineReady: [offlineReady, setOfflineReady],
     updateServiceWorker,
   } = useRegisterSW({
-    immediate: true,
+    // APK 原生壳加载的是本地打包资源，无需 Service Worker
+    immediate: !isNativeApp(),
     onRegisteredSW(_swUrl, registration) {
+      if (isNativeApp()) {
+        return;
+      }
       if (registration) {
         const checkUpdate = () => {
           if (navigator.onLine) {

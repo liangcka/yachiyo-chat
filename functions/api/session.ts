@@ -4,8 +4,9 @@ import {
   sha256Bytes,
 } from "../_shared/crypto";
 import {
+  isAllowedOrigin,
+  isAppOriginRequest,
   isJsonRequest,
-  isSameOriginRequest,
   jsonResponse,
   noContentResponse,
   problemResponse,
@@ -133,7 +134,7 @@ export async function onRequestGet(context: SessionContext): Promise<Response> {
 
 export async function onRequestPost(context: SessionContext): Promise<Response> {
   try {
-    if (!isSameOriginRequest(context.request)) {
+    if (!isAllowedOrigin(context.request)) {
       return problemResponse("ORIGIN_NOT_ALLOWED", 403);
     }
 
@@ -184,16 +185,19 @@ export async function onRequestPost(context: SessionContext): Promise<Response> 
       secret,
     );
 
-    return noContentResponse({ "set-cookie": sessionCookie(token) });
+    // 原生壳跨源请求（https://localhost）必须 SameSite=None 才能在 WebView 中携带 cookie
+    const sameSite = isAppOriginRequest(context.request) ? "None" : "Strict";
+    return noContentResponse({ "set-cookie": sessionCookie(token, sameSite) });
   } catch {
     return problemResponse("SERVICE_UNAVAILABLE", 503);
   }
 }
 
 export async function onRequestDelete(context: SessionContext): Promise<Response> {
-  if (!isSameOriginRequest(context.request)) {
+  if (!isAllowedOrigin(context.request)) {
     return problemResponse("ORIGIN_NOT_ALLOWED", 403);
   }
 
-  return noContentResponse({ "set-cookie": clearSessionCookie() });
+  const sameSite = isAppOriginRequest(context.request) ? "None" : "Strict";
+  return noContentResponse({ "set-cookie": clearSessionCookie(sameSite) });
 }

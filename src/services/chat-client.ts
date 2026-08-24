@@ -1,5 +1,6 @@
 import type { ChatSource, Locale } from "../domain/chat";
 import type { ProviderId } from "../domain/llm";
+import { apiCredentials, apiOrigin } from "./app-platform";
 
 export interface StreamChatMessage {
   role: "user" | "assistant";
@@ -131,9 +132,9 @@ export async function streamChat(
   const fetcher = options.fetcher ?? globalThis.fetch;
   let response: Response;
   try {
-    response = await fetcher("/api/chat", {
+    response = await fetcher(`${apiOrigin()}/api/chat`, {
       body: JSON.stringify(request),
-      credentials: "same-origin",
+      credentials: apiCredentials(),
       headers: { accept: "text/event-stream", "content-type": "application/json" },
       method: "POST",
       signal: options.signal,

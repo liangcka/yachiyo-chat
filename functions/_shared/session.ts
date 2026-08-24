@@ -108,12 +108,15 @@ export async function verifySession(
   }
 }
 
-export function sessionCookie(token: string): string {
-  return `${SESSION_COOKIE}=${token}; Max-Age=${SESSION_MAX_AGE_SECONDS}; Path=/; HttpOnly; Secure; SameSite=Strict`;
+/** SameSite 策略：网页同源保持 Strict；原生壳跨源（https://localhost）需 None 才能携带 cookie */
+export type SessionCookieSameSite = "Strict" | "None";
+
+export function sessionCookie(token: string, sameSite: SessionCookieSameSite = "Strict"): string {
+  return `${SESSION_COOKIE}=${token}; Max-Age=${SESSION_MAX_AGE_SECONDS}; Path=/; HttpOnly; Secure; SameSite=${sameSite}`;
 }
 
-export function clearSessionCookie(): string {
-  return `${SESSION_COOKIE}=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Strict`;
+export function clearSessionCookie(sameSite: SessionCookieSameSite = "Strict"): string {
+  return `${SESSION_COOKIE}=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=${sameSite}`;
 }
 
 export function sessionTokenFromCookie(cookieHeader: string | null): string | null {

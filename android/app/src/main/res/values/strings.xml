@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Yachiyo Chat</string>
+    <string name="title_activity_main">Yachiyo Chat</string>
+    <string name="package_name">app.yachiyo.chat</string>
+    <string name="custom_url_scheme">app.yachiyo.chat</string>
+</resources>

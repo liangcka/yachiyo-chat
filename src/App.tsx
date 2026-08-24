@@ -19,6 +19,7 @@ import { processImage, type ImageProcessingErrorCode, type ProcessedImage } from
 import { copyFor, type UiCopy } from "./i18n/messages";
 import { UpdatePrompt } from "./pwa/UpdatePrompt";
 import { usePwaUpdate } from "./pwa/use-pwa-update";
+import { useAndroidBack } from "./app/use-android-back";
 import { useOnlineStatus } from "./pwa/use-online-status";
 import { streamChat } from "./services/chat-client";
 import { LlmSettingsService } from "./services/llm-settings";
@@ -166,6 +167,29 @@ export function App({ services }: AppProps) {
     setToast({ id: ++toastSequenceRef.current, message, tone });
   }, []);
   const showSessionFailure = useEffectEvent(() => showToast(copy.genericFailure, "error"));
+  // APK 原生壳：返回键先关弹层，2 秒内再按一次才退出
+  useAndroidBack(
+    () => {
+      if (llmOpen) {
+        setLlmOpen(false);
+        return true;
+      }
+      if (skillsOpen) {
+        setSkillsOpen(false);
+        return true;
+      }
+      if (historyOpen) {
+        setHistoryOpen(false);
+        return true;
+      }
+      if (menuOpen) {
+        setMenuOpen(false);
+        return true;
+      }
+      return false;
+    },
+    () => showToast(copy.exitHint),
+  );
   const readLlmSettings = useCallback(async () => {
     const [records, active] = await Promise.all([
       llmService.list(),

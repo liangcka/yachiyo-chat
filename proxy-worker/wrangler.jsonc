@@ -1,0 +1,9 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "yachiyo-proxy",
+  "main": "index.js",
+  "compatibility_date": "2026-07-11",
+  "routes": [
+    { "pattern": "yachiyochat.amtale.cn/*", "zone_name": "amtale.cn" }
+  ]
+}

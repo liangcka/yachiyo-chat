@@ -9,6 +9,7 @@ export default tseslint.config(
     ignores: [
       ".npm-cache",
       ".wrangler",
+      "android",
       "coverage",
       "dist",
       "functions/runtime-types.d.ts",

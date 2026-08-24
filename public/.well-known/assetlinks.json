@@ -1,0 +1,8 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "app.yachiyo.chat",
+    "sha256_cert_fingerprints": ["82:71:56:4F:2C:1C:69:DA:FD:CF:70:61:A4:3E:25:5B:FE:74:4A:AA:7B:3B:A7:9E:AC:22:E1:FB:A9:43:25:CA"]
+  }
+}]
