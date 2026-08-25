@@ -1,3 +1,4 @@
+import { fetchWithTimeout } from "./web-search/http";
 import type { ClientHistoryMessage } from "./validation";
 import type { ProviderAdapter } from "./providers/registry";
 
@@ -107,22 +108,17 @@ export async function judgeSearchNeed(
     messages: judgeMessages,
   });
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), judgeTimeoutMs);
-  const forwardAbort = () => controller.abort();
-
-  if (signal !== undefined && signal.aborted) {
-    controller.abort();
-  }
-  signal?.addEventListener("abort", forwardAbort);
-
   try {
-    const response = await fetch(built.url, {
-      method: "POST",
-      headers: built.headers,
-      body: built.body,
-      signal: controller.signal,
-    });
+    const response = await fetchWithTimeout(
+      built.url,
+      {
+        method: "POST",
+        headers: built.headers,
+        body: built.body,
+      },
+      judgeTimeoutMs,
+      signal,
+    );
     if (!response.ok) {
       await response.body?.cancel().catch(() => undefined);
       return null;
@@ -131,8 +127,5 @@ export async function judgeSearchNeed(
     return text === null ? null : parseJudgeVerdict(text);
   } catch {
     return null;
-  } finally {
-    clearTimeout(timeout);
-    signal?.removeEventListener("abort", forwardAbort);
   }
 }
