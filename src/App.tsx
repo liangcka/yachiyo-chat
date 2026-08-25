@@ -21,6 +21,8 @@ import { UpdatePrompt } from "./pwa/UpdatePrompt";
 import { usePwaUpdate } from "./pwa/use-pwa-update";
 import { useAndroidBack } from "./app/use-android-back";
 import { useOnlineStatus } from "./pwa/use-online-status";
+import { clearWebCaches } from "./services/api-origins";
+import { isNativeApp } from "./services/app-platform";
 import { streamChat } from "./services/chat-client";
 import { LlmSettingsService } from "./services/llm-settings";
 import { SessionClient } from "./services/session-client";
@@ -257,6 +259,12 @@ export function App({ services }: AppProps) {
     const timeout = setTimeout(() => setControllerOnline(isOnline), 0);
     return () => clearTimeout(timeout);
   }, [isOnline, setControllerOnline]);
+
+  // 原生壳启动自愈：清掉旧版 APK 可能残留的 Service Worker 与缓存，防止脏缓存劫持请求。
+  // 仅原生壳执行——网页 PWA 的离线缓存不能在每次启动时清空。
+  useEffect(() => {
+    if (isNativeApp()) void clearWebCaches();
+  }, []);
 
   useEffect(() => {
     if (toast === undefined) return;

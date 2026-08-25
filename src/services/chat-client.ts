@@ -1,6 +1,7 @@
 import type { ChatSource, Locale } from "../domain/chat";
 import type { ProviderId } from "../domain/llm";
-import { apiCredentials, apiOrigin } from "./app-platform";
+import { apiCredentials } from "./app-platform";
+import { apiFetch } from "./api-origins";
 
 export interface StreamChatMessage {
   role: "user" | "assistant";
@@ -129,16 +130,20 @@ export async function streamChat(
   request: StreamChatRequest,
   options: StreamChatOptions,
 ): Promise<StreamChatResult> {
-  const fetcher = options.fetcher ?? globalThis.fetch;
+  const fetcher = options.fetcher ?? globalThis.fetch.bind(globalThis);
   let response: Response;
   try {
-    response = await fetcher(`${apiOrigin()}/api/chat`, {
-      body: JSON.stringify(request),
-      credentials: apiCredentials(),
-      headers: { accept: "text/event-stream", "content-type": "application/json" },
-      method: "POST",
-      signal: options.signal,
-    });
+    response = await apiFetch(
+      "/api/chat",
+      {
+        body: JSON.stringify(request),
+        credentials: apiCredentials(),
+        headers: { accept: "text/event-stream", "content-type": "application/json" },
+        method: "POST",
+        signal: options.signal,
+      },
+      { fetcher },
+    );
   } catch (error) {
     throw new ChatClientError(isAbort(error, options.signal) ? "ABORTED" : "NETWORK_ERROR");
   }

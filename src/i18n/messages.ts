@@ -19,6 +19,8 @@ export interface UiCopy {
   readonly verifying: string;
   readonly accessDenied: string;
   readonly accessRateLimited: string;
+  readonly accessNetworkError: string;
+  readonly switchLineRetry: string;
   readonly history: string;
   readonly noHistory: string;
   readonly newChat: string;
@@ -116,6 +118,8 @@ const chinese = Object.freeze({
   verifying: "正在验证…",
   accessDenied: "访问码不正确，请重试。",
   accessRateLimited: "尝试次数过多，请稍后再试。",
+  accessNetworkError: "连不上服务器，请检查网络后重试。",
+  switchLineRetry: "切换线路重试",
   history: "历史记录",
   noHistory: "还没有历史对话",
   newChat: "新建对话",
@@ -213,6 +217,8 @@ const japanese = Object.freeze({
   verifying: "確認中…",
   accessDenied: "アクセスコードが違います。もう一度お試しください。",
   accessRateLimited: "試行回数が多すぎます。しばらくしてからお試しください。",
+  accessNetworkError: "サーバーに接続できません。ネットワークを確認して再試行してください。",
+  switchLineRetry: "回線を切り替えて再試行",
   history: "履歴",
   noHistory: "まだ会話履歴はありません",
   newChat: "新しい会話",

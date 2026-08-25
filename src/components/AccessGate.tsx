@@ -1,6 +1,7 @@
-import { Eye, EyeOff, KeyRound, Sparkles } from "lucide-react";
+import { Eye, EyeOff, KeyRound, RefreshCw, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { UiCopy } from "../i18n/messages";
+import { cycleApiOrigin, recoverConnection } from "../services/api-origins";
 import { SessionClientError, type SessionClientErrorCode } from "../services/session-client";
 
 export interface AccessGateProps {
@@ -11,6 +12,7 @@ export interface AccessGateProps {
 function errorMessage(code: SessionClientErrorCode, copy: UiCopy): string {
   if (code === "ACCESS_DENIED") return copy.accessDenied;
   if (code === "AUTH_RATE_LIMITED") return copy.accessRateLimited;
+  if (code === "NETWORK_ERROR") return copy.accessNetworkError;
   return copy.genericFailure;
 }
 
@@ -20,6 +22,7 @@ export function AccessGate({ copy, onAuthenticate }: AccessGateProps) {
   const [errorCode, setErrorCode] = useState<SessionClientErrorCode>();
   const [showCode, setShowCode] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [switching, setSwitching] = useState(false);
 
   useEffect(() => inputRef.current?.focus(), []);
   useEffect(() => {
@@ -40,6 +43,14 @@ export function AccessGate({ copy, onAuthenticate }: AccessGateProps) {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  // 换线重试：切到下一条 API 线路，清掉 SW/缓存脏状态后刷新页面重走启动流程
+  const handleSwitchLine = () => {
+    if (switching) return;
+    setSwitching(true);
+    cycleApiOrigin();
+    void recoverConnection();
   };
 
   return (
@@ -85,6 +96,17 @@ export function AccessGate({ copy, onAuthenticate }: AccessGateProps) {
       <p aria-live="assertive" className="access-gate__error">
         {errorCode === undefined ? "" : errorMessage(errorCode, copy)}
       </p>
+      {errorCode === "NETWORK_ERROR" ? (
+        <button
+          className="access-gate__switch-line"
+          disabled={switching}
+          onClick={handleSwitchLine}
+          type="button"
+        >
+          <RefreshCw aria-hidden="true" size={16} />
+          {copy.switchLineRetry}
+        </button>
+      ) : null}
     </section>
   );
 }

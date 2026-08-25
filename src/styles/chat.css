@@ -766,6 +766,24 @@
   font-size: 0.8rem;
 }
 
+/* 网络错误时的「切换线路重试」按钮 */
+.access-gate__switch-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+  margin-top: 0.35rem;
+  padding: 0.52rem 1.05rem;
+  border: 1px solid rgb(120 150 210 / 45%);
+  border-radius: var(--radius-control);
+  color: var(--text-muted);
+  background: rgb(20 34 70 / 55%);
+  font-size: 0.85rem;
+}
+
+.access-gate__switch-line:disabled {
+  opacity: 0.5;
+}
+
 .overlay {
   position: absolute;
   z-index: 20;

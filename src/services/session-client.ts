@@ -1,4 +1,5 @@
-import { apiCredentials, apiOrigin } from "./app-platform";
+import { apiCredentials } from "./app-platform";
+import { apiFetch } from "./api-origins";
 import { getDeviceId } from "./device-id";
 
 export type SessionClientErrorCode =
@@ -96,12 +97,16 @@ export class SessionClient {
     signal: AbortSignal | undefined,
   ): Promise<Response> {
     try {
-      const response = await this.fetcher(`${apiOrigin()}/api/session`, {
-        ...(body === undefined ? {} : { body, headers: { "content-type": "application/json" } }),
-        credentials: apiCredentials(),
-        method,
-        signal,
-      });
+      const response = await apiFetch(
+        "/api/session",
+        {
+          ...(body === undefined ? {} : { body, headers: { "content-type": "application/json" } }),
+          credentials: apiCredentials(),
+          method,
+          signal,
+        },
+        { fetcher: this.fetcher },
+      );
       if (!response.ok) {
         throw new SessionClientError(await problemCode(response), response.status);
       }
