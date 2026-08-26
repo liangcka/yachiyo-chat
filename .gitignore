@@ -28,5 +28,13 @@ types/runtime-types.d.ts
 # Android 安装包：二进制不入库，通过 GitHub Release 分发
 *.apk
 
+# 证书与签名秘钥
+*.jks
+*.keystore
+*.p12
+*.pem
+*.key
+*.bks
+
 # 本地交接文档
 交接文档.md

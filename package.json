@@ -1,7 +1,12 @@
 {
   "name": "yachiyo-chat",
-  "private": true,
   "version": "0.1.0",
+  "description": "Mobile-first PWA for roleplay chat with Tsukimi Yachiyo, featuring starfield glass UI, multi-provider LLM support, web search, and offline capabilities.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/liangcka/yachiyo-chat.git"
+  },
   "type": "module",
   "scripts": {
     "sync:prompt": "node scripts/sync-role-prompt.mjs",

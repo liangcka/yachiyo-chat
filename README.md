@@ -1,6 +1,11 @@
 # Yachiyo Chat
 
+[![CI](https://github.com/liangcka/yachiyo-chat/actions/workflows/ci.yml/badge.svg)](https://github.com/liangcka/yachiyo-chat/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+
 Yachiyo Chat 是一个手机优先的 Cloudflare Pages PWA：以深蓝星空和磨砂玻璃 UI 提供月见八千代角色聊天、拍照识图、联网搜索（必应）、中日双语、本地历史、停止生成与离线只读。浏览器只访问同源 `/api/*`；服务端备用 StepFun 凭据只存在于 Pages Functions，用户在 LLM 设置中填写的 Key 只保存在当前浏览器并随同源聊天请求临时转发。
+
+> **English Overview**: Yachiyo Chat is a mobile-first Progressive Web App (PWA) built for roleplay chat with Tsukimi Yachiyo, featuring a starfield frosted glass UI, multi-provider LLM settings, image capture & vision, Bing web search, bilingual support (zh-CN / ja-JP), local IndexedDB conversation storage, and offline capabilities. Powered by React 19, TypeScript, and Cloudflare Pages Functions.
 
 ## 本地运行
 
@@ -153,3 +158,12 @@ rg -n "$oldKeyPrefix|Authorization: Bearer [A-Za-z0-9]" . -g "!node_modules" -g 
 ## 隐私边界
 
 聊天记录、语言和压缩后的图片仅保存在当前浏览器 IndexedDB。服务端不保存聊天内容或图片；KV 只保存访问失败计数和按会话/日期的请求额度。退出访问不会删除本地历史，清除本地数据需要单独确认。开启"联网搜索"时，最后一条用户消息文本会由 Pages Functions 转发至必应（Microsoft）完成搜索；搜索返回的标题与链接仅用于本次回答与本地展示，参考来源随消息一起保存在当前浏览器。
+
+## 参与贡献
+
+欢迎提交 Issue 与 Pull Request！详情请参阅 [CONTRIBUTING.md](CONTRIBUTING.md)。
+如发现安全漏洞，请阅读 [SECURITY.md](SECURITY.md) 了解反馈流程。
+
+## 许可证
+
+本项目采用 [Apache License 2.0](LICENSE) 许可证。
