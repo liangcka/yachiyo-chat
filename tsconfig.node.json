@@ -21,6 +21,8 @@
     "vitest.config.ts",
     "vitest.functions.config.ts",
     "playwright.config.ts",
-    "e2e"
+    "playwright.perf.config.ts",
+    "e2e",
+    "tests"
   ]
 }

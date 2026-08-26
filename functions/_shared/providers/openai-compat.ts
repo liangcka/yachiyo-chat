@@ -1,4 +1,5 @@
 import { buildSystemPrompt } from "../prompt";
+import type { ExtractedDelta, TokenUsage } from "../stream";
 import type { ClientChatRequest, ClientHistoryMessage } from "../validation";
 import type { EnrichedChatRequest } from "../web-search";
 import type {
@@ -79,13 +80,20 @@ export function buildOpenAICompatBody(
       ...request.messages.map((message) => mapHistoryMessage(message, request.locale, supportsImage)),
     ],
     stream: true,
+    stream_options: { include_usage: true },
     // 推理模型的思考 token 计入 max_tokens 预算，过小会被思考耗尽导致正文为空
     max_tokens: request.mode === "summary" ? 4096 : 8192,
     ...(reasoningEffort ? { reasoning_effort: containsImage ? "medium" : "low" } : {}),
   };
 }
 
-export function extractOpenAIDeltaText(data: string): string | null {
+function isRawUsage(
+  value: unknown,
+): value is { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } {
+  return typeof value === "object" && value !== null;
+}
+
+export function extractOpenAIDeltaText(data: string): ExtractedDelta {
   if (data === "[DONE]") return null;
   let parsed: unknown;
   try {
@@ -96,20 +104,49 @@ export function extractOpenAIDeltaText(data: string): string | null {
   if (typeof parsed !== "object" || parsed === null || "error" in parsed) {
     throw new TypeError("Invalid OpenAI SSE data");
   }
-  const choices = (parsed as Record<string, unknown>).choices;
-  if (!Array.isArray(choices) || choices.length === 0) return null;
+  const recordObj = parsed as Record<string, unknown>;
+  let usage: TokenUsage | undefined;
+  if (isRawUsage(recordObj.usage)) {
+    const p = recordObj.usage.prompt_tokens;
+    const c = recordObj.usage.completion_tokens;
+    const t = recordObj.usage.total_tokens;
+    usage = {
+      ...(typeof p === "number" ? { promptTokens: p } : {}),
+      ...(typeof c === "number" ? { completionTokens: c } : {}),
+      ...(typeof t === "number" ? { totalTokens: t } : {}),
+    };
+  }
+
+  const choices = recordObj.choices;
+  if (!Array.isArray(choices) || choices.length === 0) {
+    return usage !== undefined ? { usage } : null;
+  }
   const first = choices[0];
   if (typeof first !== "object" || first === null) {
     throw new TypeError("Invalid OpenAI SSE data");
   }
   const delta = (first as Record<string, unknown>).delta;
-  if (typeof delta !== "object" || delta === null) return null;
-  const content = (delta as Record<string, unknown>).content;
-  if (content === undefined || content === null || content === "") return null;
-  if (typeof content !== "string") {
+  if (typeof delta !== "object" || delta === null) {
     throw new TypeError("Invalid OpenAI SSE data");
   }
-  return content;
+  const deltaObj = delta as Record<string, unknown>;
+  const content =
+    typeof deltaObj.content === "string" && deltaObj.content.length > 0 ? deltaObj.content : null;
+  const thought =
+    typeof deltaObj.reasoning_content === "string" && deltaObj.reasoning_content.length > 0
+      ? deltaObj.reasoning_content
+      : typeof deltaObj.reasoning === "string" && deltaObj.reasoning.length > 0
+        ? deltaObj.reasoning
+        : null;
+
+  if (content === null && thought === null && usage === undefined) {
+    return null;
+  }
+  return {
+    content,
+    thought,
+    ...(usage !== undefined ? { usage } : {}),
+  };
 }
 
 /** 非流式 judge 响应：提取 choices[0].message.content 完整文本 */

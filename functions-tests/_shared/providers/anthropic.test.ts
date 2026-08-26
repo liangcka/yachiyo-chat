@@ -106,13 +106,38 @@ describe("extractAnthropicDeltaText", () => {
       index: 0,
       delta: { type: "text_delta", text: "彩叶" },
     });
-    expect(extractAnthropicDeltaText(data)).toBe("彩叶");
+    expect(extractAnthropicDeltaText(data)).toEqual({ content: "彩叶" });
   });
 
-  it("returns null for non-delta events and [DONE]", () => {
+  it("reads thinking from thinking_delta events", () => {
+    const data = JSON.stringify({
+      type: "content_block_delta",
+      index: 0,
+      delta: { type: "thinking_delta", thinking: "思考过程..." },
+    });
+    expect(extractAnthropicDeltaText(data)).toEqual({ thought: "思考过程..." });
+  });
+
+  it("reads input tokens from message_start events", () => {
+    const start = JSON.stringify({
+      type: "message_start",
+      message: { usage: { input_tokens: 30 } },
+    });
+    expect(extractAnthropicDeltaText(start)).toEqual({ usage: { promptTokens: 30 } });
+  });
+
+  it("reads output tokens from message_delta events", () => {
+    const delta = JSON.stringify({
+      type: "message_delta",
+      usage: { output_tokens: 25 },
+    });
+    expect(extractAnthropicDeltaText(delta)).toEqual({ usage: { completionTokens: 25 } });
+  });
+
+  it("returns null for unknown events and [DONE]", () => {
     expect(extractAnthropicDeltaText("[DONE]")).toBeNull();
-    const start = JSON.stringify({ type: "message_start", message: {} });
-    expect(extractAnthropicDeltaText(start)).toBeNull();
+    const ping = JSON.stringify({ type: "ping" });
+    expect(extractAnthropicDeltaText(ping)).toBeNull();
   });
 
   it("throws on malformed data", () => {

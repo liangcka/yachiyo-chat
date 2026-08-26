@@ -191,6 +191,44 @@ describe("chatReducer", () => {
     expect(compressed.activeConversation?.summary).toBe("用户今天有点累");
   });
 
+  it("advances compression boundary and user memory on context-compressed", () => {
+    const idleState = {
+      ...initialChatState,
+      activeConversation: { ...conversation, compressedUpTo: 10, summary: "旧记忆" },
+      messages: [user],
+      phase: "idle" as const,
+      userMemory: "旧画像",
+    };
+
+    const compressed = chatReducer(idleState, {
+      compressedUpTo: 20,
+      summary: "新记忆",
+      type: "context-compressed",
+      userMemory: "新画像",
+    });
+
+    expect(compressed.activeConversation).toMatchObject({
+      compressedUpTo: 20,
+      summary: "新记忆",
+    });
+    expect(compressed.userMemory).toBe("新画像");
+  });
+
+  it("updates user memory via user-memory-updated without touching other state", () => {
+    const idleState = {
+      ...initialChatState,
+      activeConversation: conversation,
+      messages: [user],
+      phase: "idle" as const,
+    };
+
+    const updated = chatReducer(idleState, { memory: "彩叶喜欢猫", type: "user-memory-updated" });
+
+    expect(updated.userMemory).toBe("彩叶喜欢猫");
+    expect(updated.messages).toEqual([user]);
+    expect(updated.phase).toBe("idle");
+  });
+
   it("handles messages-reverted to restore message history and clear error/streaming state", () => {
     const streamingState = {
       ...initialChatState,
@@ -206,5 +244,159 @@ describe("chatReducer", () => {
     expect(reverted.phase).toBe("idle");
     expect(reverted.errorCode).toBeUndefined();
     expect(reverted.messages).toEqual([]);
+  });
+
+  it("handles thought-delta and records usage, latencyMs on complete/stopped", () => {
+    const streamingState = {
+      ...initialChatState,
+      activeConversation: conversation,
+      messages: [user, assistant],
+      phase: "streaming" as const,
+    };
+
+    const withThought = chatReducer(streamingState, {
+      type: "thought-delta",
+      messageId: assistant.id,
+      text: "深度思考中...",
+    });
+    // 流式期间增量只写入 streaming 槽位，消息对象保持不变
+    expect(withThought.messages[1]?.thought).toBeUndefined();
+    expect(withThought.streaming).toEqual({ messageId: assistant.id, thought: "深度思考中..." });
+
+    const completed = chatReducer(withThought, {
+      type: "completed",
+      messageId: assistant.id,
+      usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+      latencyMs: 350,
+    });
+    expect(completed.messages[1]).toMatchObject({
+      status: "complete",
+      thought: "深度思考中...",
+      usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+      latencyMs: 350,
+    });
+
+    const stopped = chatReducer(withThought, {
+      type: "stopped",
+      messageId: assistant.id,
+      latencyMs: 200,
+    });
+    expect(stopped.messages[1]).toMatchObject({
+      status: "stopped",
+      interrupted: true,
+      latencyMs: 200,
+    });
+  });
+
+  it("preserves compressedUpToId in context-compressed action", () => {
+    const idleState = {
+      ...initialChatState,
+      activeConversation: conversation,
+      messages: [user, assistant],
+      phase: "idle" as const,
+    };
+    const compressed = chatReducer(idleState, {
+      type: "context-compressed",
+      summary: "已压缩摘要",
+      compressedUpTo: 100,
+      compressedUpToId: "assistant-1",
+    });
+    expect(compressed.activeConversation?.compressedUpToId).toBe("assistant-1");
+  });
+
+  it("lazily creates the streaming slot, folds terminal text back, and clears the slot", () => {
+    const loaded = chatReducer(initialChatState, {
+      type: "loaded",
+      conversation,
+      locale: "zh-CN",
+      messages: [],
+    });
+    const streaming = chatReducer(loaded, { type: "send-started", user, assistant });
+
+    const withText = chatReducer(streaming, {
+      type: "delta",
+      messageId: assistant.id,
+      text: "你好，",
+    });
+    expect(withText.streaming).toEqual({ messageId: assistant.id, text: "你好，" });
+
+    const withBoth = chatReducer(withText, {
+      type: "thought-delta",
+      messageId: assistant.id,
+      text: "思考片段",
+    });
+    expect(withBoth.streaming).toEqual({
+      messageId: assistant.id,
+      text: "你好，",
+      thought: "思考片段",
+    });
+
+    const completed = chatReducer(withBoth, { type: "completed", messageId: assistant.id });
+    expect(completed.streaming).toBeUndefined();
+    expect(completed.messages.at(-1)).toMatchObject({
+      text: "你好，",
+      thought: "思考片段",
+      status: "complete",
+    });
+  });
+
+  it("ignores deltas for unknown ids and late arrivals after the run ended", () => {
+    const idle = {
+      ...initialChatState,
+      activeConversation: conversation,
+      messages: [user, assistant],
+      phase: "idle" as const,
+    };
+    // 未知 messageId：消息不存在且无槽位，直接忽略
+    const unknown = chatReducer(idle, {
+      type: "delta",
+      messageId: "missing-message",
+      text: "幽灵增量",
+    });
+    expect(unknown).toBe(idle);
+
+    const streaming = chatReducer(idle, { type: "send-started", user: undefined, assistant });
+    const withText = chatReducer(streaming, {
+      type: "delta",
+      messageId: assistant.id,
+      text: "部分文本",
+    });
+    const completed = chatReducer(withText, { type: "completed", messageId: assistant.id });
+    expect(completed.phase).toBe("idle");
+
+    // 终态之后迟到的增量不得复活槽位或改写消息
+    const late = chatReducer(completed, {
+      type: "delta",
+      messageId: assistant.id,
+      text: "迟到增量",
+    });
+    expect(late).toBe(completed);
+  });
+
+  it("clears the streaming slot when switching conversations or reverting messages", () => {
+    const streaming = chatReducer(
+      { ...initialChatState, phase: "idle", activeConversation: conversation },
+      { type: "send-started", user, assistant },
+    );
+    const withText = chatReducer(streaming, {
+      type: "delta",
+      messageId: assistant.id,
+      text: "未折叠的文本",
+    });
+    expect(withText.streaming).toBeDefined();
+
+    const nextConversation = { ...conversation, id: "conversation-2" };
+    const selected = chatReducer(withText, {
+      type: "conversation-selected",
+      conversation: nextConversation,
+      messages: [],
+    });
+    expect(selected.streaming).toBeUndefined();
+
+    const reverted = chatReducer(withText, {
+      type: "messages-reverted",
+      messages: [user],
+    });
+    expect(reverted.streaming).toBeUndefined();
   });
 });

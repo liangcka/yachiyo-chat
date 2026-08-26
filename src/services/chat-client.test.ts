@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ChatClientError, streamChat, type StreamChatRequest } from "./chat-client";
+import { ChatClientError, isRetryableChatErrorCode, streamChat, type StreamChatRequest } from "./chat-client";
 
 const sampleRequest: StreamChatRequest = {
   locale: "zh-CN",
@@ -97,6 +97,53 @@ describe("streamChat", () => {
     ).rejects.toEqual(
       expect.objectContaining<Partial<ChatClientError>>({ code: "PROVIDER_ERROR" }),
     );
+  });
+
+  it("generalizes in-stream error events to any code and preserves the message as detail", async () => {
+    serverFetch.mockResolvedValue(
+      sseResponse('event: error\ndata: {"code":"RATE_LIMITED","message":"请求过于频繁，请稍后再试"}\n\n'),
+    );
+
+    const error = await streamChat(sampleRequest, { fetcher: serverFetch, onDelta: vi.fn() }).then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+
+    expect(error).toBeInstanceOf(ChatClientError);
+    const clientError = error as ChatClientError;
+    expect(clientError.code).toBe("PROVIDER_ERROR");
+    expect(clientError.retryable).toBe(true);
+    expect(clientError.detail).toBe("RATE_LIMITED 请求过于频繁，请稍后再试");
+  });
+
+  it("keeps the sanitized provider stream error detail when a message is present", async () => {
+    serverFetch.mockResolvedValue(
+      sseResponse('event: error\ndata: {"code":"PROVIDER_STREAM_ERROR","message":"上游超时"}\n\n'),
+    );
+
+    await expect(
+      streamChat(sampleRequest, { fetcher: serverFetch, onDelta: vi.fn() }),
+    ).rejects.toEqual(
+      expect.objectContaining<Partial<ChatClientError>>({
+        code: "PROVIDER_ERROR",
+        detail: "上游超时",
+      }),
+    );
+  });
+
+  it("exposes retryable only for transient codes", () => {
+    for (const transient of ["NETWORK_ERROR", "PROVIDER_ERROR", "SERVICE_UNAVAILABLE", "STREAM_ERROR"]) {
+      expect(isRetryableChatErrorCode(transient)).toBe(true);
+    }
+    for (const permanent of [
+      "SESSION_REQUIRED",
+      "DAILY_QUOTA_EXCEEDED",
+      "INVALID_REQUEST",
+      "ABORTED",
+      undefined,
+    ]) {
+      expect(isRetryableChatErrorCode(permanent)).toBe(false);
+    }
   });
 
   it("rejects malformed or incomplete streams", async () => {
@@ -197,5 +244,30 @@ describe("streamChat", () => {
         signal: controller.signal,
       }),
     ).rejects.toEqual(expect.objectContaining<Partial<ChatClientError>>({ code: "ABORTED" }));
+  });
+
+  it("handles thought events and returns usage on completion", async () => {
+    serverFetch.mockResolvedValue(
+      sseResponse(
+        'event: thought\r\ndata: {"text":"思考..."}\r\n\r\n' +
+          'event: delta\ndata: {"text":"回复"}\n\n' +
+          'event: done\ndata: {"truncated":false,"usage":{"promptTokens":10,"completionTokens":5,"totalTokens":15}}\n\n',
+      ),
+    );
+    const deltas: string[] = [];
+    const thoughts: string[] = [];
+
+    const result = await streamChat(sampleRequest, {
+      fetcher: serverFetch,
+      onDelta: (text) => deltas.push(text),
+      onThought: (text) => thoughts.push(text),
+    });
+
+    expect(deltas).toEqual(["回复"]);
+    expect(thoughts).toEqual(["思考..."]);
+    expect(result).toEqual({
+      truncated: false,
+      usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+    });
   });
 });

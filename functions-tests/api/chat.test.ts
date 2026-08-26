@@ -247,7 +247,11 @@ describe("POST /api/chat", () => {
     expect(events.some((event) => event.type === "delta" && event.text.includes("彩葉"))).toBe(
       true,
     );
-    expect(events.at(-1)).toEqual({ type: "done", truncated: false });
+    expect(events.at(-1)).toEqual({
+      type: "done",
+      truncated: false,
+      usage: { promptTokens: 35, completionTokens: 28, totalTokens: 63 },
+    });
     expect(providerFetch).not.toHaveBeenCalled();
   });
 
@@ -719,7 +723,11 @@ describe("POST /api/chat", () => {
         { title: "必应搜索结果二", url: "https://cn.bing.com/" },
       ],
     });
-    expect(events.at(-1)).toEqual({ type: "done", truncated: false });
+    expect(events.at(-1)).toEqual({
+      type: "done",
+      truncated: false,
+      usage: { promptTokens: 35, completionTokens: 28, totalTokens: 63 },
+    });
     expect(providerFetch).not.toHaveBeenCalled();
   });
 });

@@ -8,6 +8,7 @@ import { HistoryPanel } from "./components/HistoryPanel";
 import { LlmSettingsPanel, type LlmProviderEntry } from "./components/LlmSettingsPanel";
 import { MenuDrawer } from "./components/MenuDrawer";
 import { SkillsPanel } from "./components/SkillsPanel";
+import { UserMemoryPanel } from "./components/UserMemoryPanel";
 import { StarfieldCanvas } from "./components/StarfieldCanvas";
 import { ToastRegion } from "./components/ToastRegion";
 import { TopControls } from "./components/TopControls";
@@ -23,7 +24,7 @@ import { useAndroidBack } from "./app/use-android-back";
 import { useOnlineStatus } from "./pwa/use-online-status";
 import { clearWebCaches } from "./services/api-origins";
 import { isNativeApp } from "./services/app-platform";
-import { streamChat } from "./services/chat-client";
+import { isRetryableChatErrorCode, streamChat } from "./services/chat-client";
 import { LlmSettingsService } from "./services/llm-settings";
 import { SessionClient } from "./services/session-client";
 import { SkillSettingsService } from "./services/skill-settings";
@@ -93,15 +94,6 @@ function controllerErrorMessage(code: string, copy: UiCopy): string {
   return copy.genericFailure;
 }
 
-function isRetryableGenerationError(code: string | undefined): boolean {
-  return (
-    code === "PROVIDER_ERROR" ||
-    code === "SERVICE_UNAVAILABLE" ||
-    code === "NETWORK_ERROR" ||
-    code === "STREAM_ERROR"
-  );
-}
-
 export function App({ services }: AppProps) {
   const activeServices = services ?? productionServices;
   const llmService = activeServices.llmSettings ?? productionLlmService;
@@ -122,6 +114,7 @@ export function App({ services }: AppProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [pendingImageDataUrl, setPendingImageDataUrl] = useState<string>();
   const [skillsOpen, setSkillsOpen] = useState(false);
+  const [memoryOpen, setMemoryOpen] = useState(false);
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [webSearchShowSources, setWebSearchShowSources] = useState(true);
@@ -266,6 +259,28 @@ export function App({ services }: AppProps) {
     if (isNativeApp()) void clearWebCaches();
   }, []);
 
+  const chatBottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const bottomEl = chatBottomRef.current;
+    if (!bottomEl || typeof ResizeObserver === "undefined") return;
+
+    const updateHeight = () => {
+      const height = bottomEl.getBoundingClientRect().height;
+      if (height > 0) {
+        document.documentElement.style.setProperty("--chat-bottom-height", `${height + 20}px`);
+      }
+    };
+
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(bottomEl);
+    return () => {
+      observer.disconnect();
+      document.documentElement.style.removeProperty("--chat-bottom-height");
+    };
+  }, [authentication]);
+
   useEffect(() => {
     if (toast === undefined) return;
     const timeout = setTimeout(() => setToast(undefined), 5_200);
@@ -369,16 +384,25 @@ export function App({ services }: AppProps) {
 
   const blobUrlsRef = useRef<Map<string, string>>(new Map());
 
+  // 稳定签名：只有 imageId 集合变化时才触发 Blob 加载 effect，
+  // 流式期间 messages 每帧变化不再引起全量 diff
+  const messageImageIdsKey = useMemo(
+    () =>
+      controller.messages.flatMap(({ imageId }) => (imageId === undefined ? [] : [imageId]))
+        .sort()
+        .join("\n"),
+    [controller.messages],
+  );
+  const messageImageIds = useMemo(() => {
+    const key = messageImageIdsKey;
+    return key.length === 0 ? [] : key.split("\n");
+  }, [messageImageIdsKey]);
+
   useEffect(() => {
     if (typeof URL.createObjectURL !== "function") {
       return;
     }
     let cancelled = false;
-    const messageImageIds = [
-      ...new Set(
-        controller.messages.flatMap(({ imageId }) => (imageId === undefined ? [] : [imageId])),
-      ),
-    ];
     const missingIds = messageImageIds.filter((id) => !blobUrlsRef.current.has(id));
 
     if (missingIds.length > 0) {
@@ -409,7 +433,7 @@ export function App({ services }: AppProps) {
     return () => {
       cancelled = true;
     };
-  }, [activeServices, controller.messages]);
+  }, [activeServices, messageImageIds]);
 
   useEffect(() => {
     const cache = blobUrlsRef.current;
@@ -596,10 +620,12 @@ export function App({ services }: AppProps) {
           processImage={activeServices.processImage}
         />
         <ConversationView
+          hasMoreHistory={controller.hasMoreHistory}
           imageUrls={imageUrls}
           key={controller.activeConversation?.id}
           locale={controller.locale}
           messages={controller.messages}
+          onLoadEarlier={() => void controller.loadEarlier()}
           onRecall={handleRecall}
           onRegenerate={
             !isOnline || controller.phase === "streaming" || controller.phase === "compressing" || controller.phase === "offline"
@@ -610,7 +636,7 @@ export function App({ services }: AppProps) {
           showSources={webSearchShowSources}
           summary={controller.activeConversation?.summary}
         />
-        <div className="chat-bottom">
+        <div ref={chatBottomRef} className="chat-bottom">
           <UpdatePrompt
             copy={copy}
             needRefresh={pwa.needRefresh}
@@ -625,7 +651,7 @@ export function App({ services }: AppProps) {
           controller.errorCode !== "SESSION_REQUIRED" ? (
             <div className="status-banner status-banner--error">
               <span>{controllerErrorMessage(controller.errorCode ?? "", copy)}</span>
-              {isRetryableGenerationError(controller.errorCode) ? (
+              {isRetryableChatErrorCode(controller.errorCode) ? (
                 <button onClick={() => void controller.retry()} type="button">
                   {copy.retry}
                 </button>
@@ -680,6 +706,7 @@ export function App({ services }: AppProps) {
           onNewChat={handleNewChat}
           onSignOut={handleSignOut}
           onSkills={() => setSkillsOpen(true)}
+          onUserMemory={() => setMemoryOpen(true)}
           open={menuOpen}
         />
         <HistoryPanel
@@ -715,6 +742,22 @@ export function App({ services }: AppProps) {
           webSearchEnabled={webSearchEnabled}
           webSearchShowSources={webSearchShowSources}
           webSearchSmart={webSearchSmart}
+        />
+        <UserMemoryPanel
+          copy={copy}
+          memory={controller.userMemory ?? ""}
+          onClose={() => setMemoryOpen(false)}
+          onSave={async (memory) => {
+            const saved = await controller.updateUserMemory(memory);
+            if (saved) {
+              showToast(copy.userMemorySaved, "info");
+              setMemoryOpen(false);
+            } else {
+              showToast(copy.userMemorySaveFailed, "error");
+            }
+            return saved;
+          }}
+          open={memoryOpen}
         />
       </>
     );

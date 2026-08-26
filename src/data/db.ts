@@ -8,7 +8,8 @@ export type AppSetting =
   | { key: "activeSkills"; value: string[] }
   | { key: "webSearchEnabled"; value: boolean }
   | { key: "webSearchShowSources"; value: boolean }
-  | { key: "webSearchSmart"; value: boolean };
+  | { key: "webSearchSmart"; value: boolean }
+  | { key: "userMemory"; value: string };
 
 export class YachiyoDatabase extends Dexie {
   conversations!: Table<Conversation, string>;

@@ -21,15 +21,34 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("将用户视为酒寄彩叶");
   });
 
+  it("adds depth and memory-trust instructions to the runtime block", () => {
+    const zhPrompt = buildSystemPrompt("zh-CN");
+
+    expect(zhPrompt).toContain("真实意图与情绪");
+    expect(zhPrompt).toContain("不得敷衍带过");
+    expect(zhPrompt).toContain("既定事实");
+    expect(zhPrompt.indexOf("既定事实")).toBeLessThan(zhPrompt.indexOf("最多200个Unicode字符"));
+
+    const jaPrompt = buildSystemPrompt("ja-JP");
+    expect(jaPrompt).toContain("本当の意図と感情");
+    expect(jaPrompt).toContain("確定した事実");
+  });
+
   it("builds dedicated memory summarizer prompt in summary mode", () => {
     const zhPrompt = buildSystemPrompt("zh-CN", "summary");
-    expect(zhPrompt).toContain("记忆总结助手");
-    expect(zhPrompt).toContain("关键事实");
+    expect(zhPrompt).toContain("对话记忆整理助手");
+    expect(zhPrompt).toContain("<conversation_memory>");
+    expect(zhPrompt).toContain("<user_profile>");
+    expect(zhPrompt).toContain("核心事实");
+    expect(zhPrompt).toContain("双方约定");
+    expect(zhPrompt).toContain("不要带八千代角色口癖");
     expect(zhPrompt).not.toContain("最多200个Unicode字符");
 
     const jaPrompt = buildSystemPrompt("ja-JP", "summary");
-    expect(jaPrompt).toContain("記憶・要約アシスタント");
-    expect(jaPrompt).toContain("重要な事実");
+    expect(jaPrompt).toContain("会話メモリー管理アシスタント");
+    expect(jaPrompt).toContain("<conversation_memory>");
+    expect(jaPrompt).toContain("<user_profile>");
+    expect(jaPrompt).toContain("核心的事実");
   });
 
   it("relaxes the runtime output cap to 1000 characters when web search is on", () => {
@@ -138,7 +157,7 @@ describe("buildSystemPrompt", () => {
       searchResults: [{ title: "t", url: "https://example.com/", snippet: "s" }],
     });
 
-    expect(prompt).toContain("记忆总结助手");
+    expect(prompt).toContain("对话记忆整理助手");
     expect(prompt).not.toContain("<web_search_results>");
     expect(prompt).not.toContain("1000个Unicode字符");
   });

@@ -172,14 +172,22 @@ describe("mockChatResponse", () => {
       ],
     });
     expect(events[1]?.type).toBe("delta");
-    expect(events.at(-1)).toEqual({ type: "done", truncated: false });
+    expect(events.at(-1)).toEqual({
+      type: "done",
+      truncated: false,
+      usage: { promptTokens: 35, completionTokens: 28, totalTokens: 63 },
+    });
   });
 
   it("keeps the plain mock response without webSearch", async () => {
     const events = await collectClientEvents(mockChatResponse("zh-CN").body!);
 
     expect(events.some((event) => event.type === "sources")).toBe(false);
-    expect(events.at(-1)).toEqual({ type: "done", truncated: false });
+    expect(events.at(-1)).toEqual({
+      type: "done",
+      truncated: false,
+      usage: { promptTokens: 35, completionTokens: 28, totalTokens: 63 },
+    });
   });
 });
 
@@ -208,4 +216,26 @@ describe("collectClientEvents sources parsing", () => {
 
     await expect(collectClientEvents(chunkedResponse(malformed).body!)).rejects.toThrow(TypeError);
   });
+
+  it("extracts thought and usage from upstream stream", async () => {
+    const customExtractor = (data: string) => {
+      if (data === "chunk-1") return { thought: "思考中..." };
+      if (data === "chunk-2") return { content: "回答正文", usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 } };
+      return null;
+    };
+    const sse = "data: chunk-1\r\n\r\ndata: chunk-2\r\n\r\ndata: [DONE]\r\n\r\n";
+    const response = proxyStepFunStream(chunkedResponse(sse), {}, customExtractor);
+    const events = await collectClientEvents(response.body!);
+
+    expect(events).toEqual([
+      { type: "thought", text: "思考中..." },
+      { type: "delta", text: "回答正文" },
+      {
+        type: "done",
+        truncated: false,
+        usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+      },
+    ]);
+  });
 });
+

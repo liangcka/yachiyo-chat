@@ -116,7 +116,22 @@ describe("buildOpenAICompatBody", () => {
 describe("extractOpenAIDeltaText", () => {
   it("reads content from OpenAI-style delta events", () => {
     const data = JSON.stringify({ choices: [{ delta: { content: "彩叶" } }] });
-    expect(extractOpenAIDeltaText(data)).toBe("彩叶");
+    expect(extractOpenAIDeltaText(data)).toEqual({ content: "彩叶", thought: null });
+  });
+
+  it("reads reasoning_content as thought", () => {
+    const data = JSON.stringify({ choices: [{ delta: { reasoning_content: "思考细节..." } }] });
+    expect(extractOpenAIDeltaText(data)).toEqual({ content: null, thought: "思考细节..." });
+  });
+
+  it("reads usage metadata when present in chunk", () => {
+    const data = JSON.stringify({
+      choices: [],
+      usage: { prompt_tokens: 42, completion_tokens: 18, total_tokens: 60 },
+    });
+    expect(extractOpenAIDeltaText(data)).toEqual({
+      usage: { promptTokens: 42, completionTokens: 18, totalTokens: 60 },
+    });
   });
 
   it("returns null for [DONE] and empty content", () => {
@@ -125,7 +140,7 @@ describe("extractOpenAIDeltaText", () => {
     expect(extractOpenAIDeltaText(empty)).toBeNull();
   });
 
-  it("returns null when choices are absent", () => {
+  it("returns null when choices and usage are absent", () => {
     const noChoices = JSON.stringify({ choices: [] });
     expect(extractOpenAIDeltaText(noChoices)).toBeNull();
   });

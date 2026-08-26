@@ -19,6 +19,7 @@
     "test:unit": "vitest run --configLoader runner --config vitest.config.ts",
     "test:functions": "vitest run --configLoader runner --config vitest.functions.config.ts",
     "test:e2e": "playwright test",
+    "test:perf": "npm run build && playwright test --config playwright.perf.config.ts",
     "mob:sync": "npm run build && cap sync android",
     "mob:build": "npm run mob:sync && cd android && gradlew.bat assembleRelease",
     "cf:types": "wrangler types --path=./types/runtime-types.d.ts"
@@ -27,6 +28,7 @@
     "@capacitor/android": "^8.5.0",
     "@capacitor/app": "^8.1.1",
     "@capacitor/core": "^8.5.0",
+    "@tanstack/react-virtual": "^3.14.10",
     "dexie": "^4.4.4",
     "lucide-react": "^1.24.0",
     "react": "^19.2.7",

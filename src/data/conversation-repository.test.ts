@@ -48,6 +48,37 @@ describe("ConversationRepository", () => {
     });
   });
 
+  it("advances the compression boundary when updating a summary", async () => {
+    const conversation = await repository.createConversation("zh-CN", 10);
+
+    await repository.updateConversationSummary(conversation.id, "第一段记忆", 25, 40);
+    expect(await repository.getConversation(conversation.id)).toMatchObject({
+      compressedUpTo: 40,
+    });
+
+    // 未提供边界时不改写既有边界
+    await repository.updateConversationSummary(conversation.id, "第二段记忆", 26);
+    expect(await repository.getConversation(conversation.id)).toMatchObject({
+      compressedUpTo: 40,
+      summary: "第二段记忆",
+    });
+  });
+
+  it("persists and clears the cross-conversation user memory", async () => {
+    expect(await repository.getUserMemory()).toBe("");
+
+    await repository.updateUserMemory("彩叶喜欢草莓大福");
+    expect(await repository.getUserMemory()).toBe("彩叶喜欢草莓大福");
+
+    // 跨会话共享：与具体 conversation 无关
+    const conversation = await repository.createConversation("zh-CN", 10);
+    expect(conversation.id).toBeDefined();
+    expect(await repository.getUserMemory()).toBe("彩叶喜欢草莓大福");
+
+    await repository.clearAll();
+    expect(await repository.getUserMemory()).toBe("");
+  });
+
   it("stores messages in chronological order and updates conversation activity", async () => {
     const conversation = await repository.createConversation("zh-CN", 10);
     const later: ChatMessage = {
@@ -164,5 +195,74 @@ describe("ConversationRepository", () => {
     expect(results.filter(({ status }) => status === "fulfilled")).toHaveLength(30);
     expect(results.filter(({ status }) => status === "rejected")).toHaveLength(1);
     expect(await repository.listConversations()).toHaveLength(30);
+  });
+
+  it("pages messages backwards from an exclusive createdAt watermark", async () => {
+    const conversation = await repository.createConversation("zh-CN", 10);
+    for (let index = 1; index <= 5; index += 1) {
+      await repository.putMessage({
+        id: crypto.randomUUID(),
+        conversationId: conversation.id,
+        role: index % 2 === 1 ? "user" : "assistant",
+        text: `消息${index}`,
+        status: "complete",
+        createdAt: index * 10,
+      });
+    }
+
+    const page = await repository.listMessages(conversation.id, { beforeCreatedAt: 40, limit: 2 });
+    expect(page.map(({ text }) => text)).toEqual(["消息2", "消息3"]);
+
+    // 水位线严格排除边界值本身
+    const boundary = await repository.listMessages(conversation.id, { beforeCreatedAt: 30, limit: 10 });
+    expect(boundary.map(({ text }) => text)).toEqual(["消息1", "消息2"]);
+
+    // 不带分页参数时保持全量升序
+    expect((await repository.listMessages(conversation.id)).map(({ text }) => text)).toEqual([
+      "消息1",
+      "消息2",
+      "消息3",
+      "消息4",
+      "消息5",
+    ]);
+  });
+
+  it("deletes messages from a watermark onward without touching earlier records", async () => {
+    const conversation = await repository.createConversation("zh-CN", 10);
+    const kept: ChatMessage = {
+      id: crypto.randomUUID(),
+      conversationId: conversation.id,
+      role: "user",
+      text: "保留",
+      status: "complete",
+      createdAt: 20,
+    };
+    const dropped: ChatMessage = {
+      id: crypto.randomUUID(),
+      conversationId: conversation.id,
+      role: "assistant",
+      text: "删除一",
+      status: "complete",
+      createdAt: 30,
+    };
+    const otherConversation = await repository.createConversation("zh-CN", 11);
+    const untouched: ChatMessage = {
+      id: crypto.randomUUID(),
+      conversationId: otherConversation.id,
+      role: "user",
+      text: "别的会话",
+      status: "complete",
+      createdAt: 35,
+    };
+    await repository.putMessage(kept);
+    await repository.putMessage(dropped);
+    await repository.putMessage(untouched);
+
+    await repository.deleteMessagesFrom(conversation.id, 25);
+
+    expect((await repository.listMessages(conversation.id)).map(({ id }) => id)).toEqual([kept.id]);
+    expect((await repository.listMessages(otherConversation.id)).map(({ id }) => id)).toEqual([
+      untouched.id,
+    ]);
   });
 });

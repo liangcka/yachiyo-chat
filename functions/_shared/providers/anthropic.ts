@@ -1,4 +1,5 @@
 import { buildSystemPrompt } from "../prompt";
+import type { ExtractedDelta } from "../stream";
 import type { ClientChatRequest, ClientHistoryMessage } from "../validation";
 import type { EnrichedChatRequest } from "../web-search";
 import type {
@@ -131,7 +132,7 @@ export function buildAnthropicBody(request: EnrichedChatRequest, model: string):
   };
 }
 
-export function extractAnthropicDeltaText(data: string): string | null {
+export function extractAnthropicDeltaText(data: string): ExtractedDelta {
   if (data === "[DONE]") return null;
   let parsed: unknown;
   try {
@@ -143,15 +144,39 @@ export function extractAnthropicDeltaText(data: string): string | null {
     throw new TypeError("Invalid Anthropic SSE data");
   }
   const value = parsed as Record<string, unknown>;
-  if (value.type !== "content_block_delta") return null;
-  const delta = value.delta;
-  if (typeof delta !== "object" || delta === null) return null;
-  const text = (delta as Record<string, unknown>).text;
-  if (text === undefined || text === null || text === "") return null;
-  if (typeof text !== "string") {
-    throw new TypeError("Invalid Anthropic SSE data");
+
+  if (value.type === "message_start") {
+    const msg = value.message as Record<string, unknown> | undefined;
+    const msgUsage = msg?.usage as Record<string, unknown> | undefined;
+    const inputTokens = typeof msgUsage?.input_tokens === "number" ? msgUsage.input_tokens : undefined;
+    if (inputTokens !== undefined) {
+      return { usage: { promptTokens: inputTokens } };
+    }
+    return null;
   }
-  return text;
+
+  if (value.type === "message_delta") {
+    const deltaUsage = value.usage as Record<string, unknown> | undefined;
+    const outputTokens = typeof deltaUsage?.output_tokens === "number" ? deltaUsage.output_tokens : undefined;
+    if (outputTokens !== undefined) {
+      return { usage: { completionTokens: outputTokens } };
+    }
+    return null;
+  }
+
+  if (value.type === "content_block_delta") {
+    const delta = value.delta as Record<string, unknown> | undefined;
+    if (typeof delta !== "object" || delta === null) return null;
+
+    if (delta.type === "thinking_delta" && typeof delta.thinking === "string" && delta.thinking.length > 0) {
+      return { thought: delta.thinking };
+    }
+    if ((delta.type === "text_delta" || delta.type === undefined) && typeof delta.text === "string" && delta.text.length > 0) {
+      return { content: delta.text };
+    }
+  }
+
+  return null;
 }
 
 /** 非流式 judge 响应：拼接 content 数组中的 text 块 */

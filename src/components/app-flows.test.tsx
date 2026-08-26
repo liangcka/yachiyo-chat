@@ -43,13 +43,29 @@ class MemoryRepository implements AppRepository {
     if (conversation !== undefined) conversation.title = title.trim();
   }
 
-  async updateConversationSummary(id: string, summary: string, now = Date.now()): Promise<void> {
+  async updateConversationSummary(
+    id: string,
+    summary: string,
+    now = Date.now(),
+    compressedUpTo?: number,
+  ): Promise<void> {
     const conversation = await this.getConversation(id);
     if (conversation !== undefined) {
       conversation.summary = summary;
       conversation.lastCompressedAt = now;
+      if (compressedUpTo !== undefined) conversation.compressedUpTo = compressedUpTo;
       conversation.updatedAt = now;
     }
+  }
+
+  private userMemory = "";
+
+  async getUserMemory(): Promise<string> {
+    return this.userMemory;
+  }
+
+  async updateUserMemory(memory: string): Promise<void> {
+    this.userMemory = memory;
   }
 
   async deleteConversation(id: string): Promise<void> {
@@ -75,6 +91,12 @@ class MemoryRepository implements AppRepository {
     this.messages.push(...messages);
     const conversation = await this.getConversation(conversationId);
     if (conversation !== undefined) conversation.updatedAt = Date.now();
+  }
+
+  async deleteMessagesFrom(conversationId: string, fromCreatedAt: number): Promise<void> {
+    this.messages = this.messages.filter(
+      (message) => !(message.conversationId === conversationId && message.createdAt >= fromCreatedAt),
+    );
   }
 
   async putImage(image: StoredImage): Promise<void> {

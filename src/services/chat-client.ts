@@ -1,4 +1,4 @@
-import type { ChatSource, Locale } from "../domain/chat";
+import type { ChatSource, Locale, TokenUsage } from "../domain/chat";
 import type { ProviderId } from "../domain/llm";
 import { apiCredentials } from "./app-platform";
 import { apiFetch } from "./api-origins";
@@ -25,6 +25,7 @@ export interface StreamChatRequest {
 
 export interface StreamChatResult {
   truncated: boolean;
+  usage?: TokenUsage;
 }
 
 export type ChatClientErrorCode =
@@ -41,14 +42,39 @@ export class ChatClientError extends Error {
   constructor(
     readonly code: ChatClientErrorCode,
     readonly status?: number,
+    readonly detail?: string,
   ) {
     super(code);
     this.name = "ChatClientError";
   }
+  /** 该错误是否属于重发同一请求即可能成功的瞬时故障 */
+  get retryable(): boolean {
+    return isRetryableChatErrorCode(this.code);
+  }
+}
+
+/** 重发同一请求即可能成功的瞬时故障码；UI 层据此决定是否展示"重试"入口 */
+const retryableChatErrorCodes: ReadonlySet<string> = new Set([
+  "NETWORK_ERROR",
+  "PROVIDER_ERROR",
+  "SERVICE_UNAVAILABLE",
+  "STREAM_ERROR",
+]);
+
+export function isRetryableChatErrorCode(code: string | undefined): boolean {
+  return code !== undefined && retryableChatErrorCodes.has(code);
+}
+
+/** 流内 error 事件的 code → 客户端错误码；未知码一律视为上游故障，原始值进 detail */
+function streamErrorEvent(code: string, detail?: string): ChatClientError {
+  if (code === "PROVIDER_STREAM_ERROR") return new ChatClientError("PROVIDER_ERROR", undefined, detail);
+  return new ChatClientError("PROVIDER_ERROR", undefined, `${code}${detail === undefined ? "" : ` ${detail}`}`);
 }
 
 export interface StreamChatOptions {
   onDelta: (text: string) => void;
+  /** 深度思考/思维链流式增量回调 */
+  onThought?: (text: string) => void;
   /** sources 事件（先于首个 delta 到达）合法时回调一次 */
   onSources?: (sources: ChatSource[]) => void;
   signal?: AbortSignal;
@@ -126,6 +152,18 @@ function sourcesPayload(payload: Record<string, unknown>): ChatSource[] {
   });
 }
 
+function isUsagePayload(value: unknown): value is TokenUsage {
+  if (typeof value !== "object" || value === null) return false;
+  const usage = value as Record<string, unknown>;
+  const isOptionalInt = (v: unknown) =>
+    v === undefined || (typeof v === "number" && Number.isSafeInteger(v));
+  return (
+    isOptionalInt(usage.promptTokens) &&
+    isOptionalInt(usage.completionTokens) &&
+    isOptionalInt(usage.totalTokens)
+  );
+}
+
 export async function streamChat(
   request: StreamChatRequest,
   options: StreamChatOptions,
@@ -170,13 +208,16 @@ export async function streamChat(
       const payload = objectPayload(fields.data);
       if (fields.event === "delta" && typeof payload.text === "string") {
         options.onDelta(payload.text);
+      } else if (fields.event === "thought" && typeof payload.text === "string") {
+        options.onThought?.(payload.text);
       } else if (fields.event === "sources") {
         const sources = sourcesPayload(payload);
         options.onSources?.(sources);
       } else if (fields.event === "done" && typeof payload.truncated === "boolean") {
-        finished = { truncated: payload.truncated };
-      } else if (fields.event === "error" && payload.code === "PROVIDER_STREAM_ERROR") {
-        throw new ChatClientError("PROVIDER_ERROR");
+        const usage = isUsagePayload(payload.usage) ? payload.usage : undefined;
+        finished = { truncated: payload.truncated, ...(usage !== undefined ? { usage } : {}) };
+      } else if (fields.event === "error" && typeof payload.code === "string") {
+        throw streamErrorEvent(payload.code, typeof payload.message === "string" ? payload.message : undefined);
       } else {
         throw new ChatClientError("STREAM_ERROR");
       }

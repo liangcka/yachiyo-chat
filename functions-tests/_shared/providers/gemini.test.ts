@@ -58,7 +58,7 @@ describe("buildGeminiBody", () => {
       systemInstruction: { parts: Array<{ text: string }> };
       generationConfig: { maxOutputTokens: number };
     };
-    expect(body.systemInstruction.parts[0]?.text).toContain("记忆总结助手");
+    expect(body.systemInstruction.parts[0]?.text).toContain("对话记忆整理助手");
     expect(body.generationConfig.maxOutputTokens).toBe(4096);
   });
 
@@ -105,14 +105,44 @@ describe("buildGeminiBody", () => {
 });
 
 describe("extractGeminiDeltaText", () => {
-  it("joins text parts from candidates", () => {
+  it("reads concatenated text from parts", () => {
     const data = JSON.stringify({
       candidates: [{ content: { parts: [{ text: "彩叶" }, { text: "辛苦啦" }], role: "model" } }],
     });
-    expect(extractGeminiDeltaText(data)).toBe("彩叶辛苦啦");
+    expect(extractGeminiDeltaText(data)).toEqual({ content: "彩叶辛苦啦", thought: null });
   });
 
-  it("returns null for [DONE] and empty candidates", () => {
+  it("distinguishes thought parts from regular content parts", () => {
+    const data = JSON.stringify({
+      candidates: [
+        {
+          content: {
+            parts: [
+              { text: "思考过程...", thought: true },
+              { text: "正式回复", thought: false },
+            ],
+            role: "model",
+          },
+        },
+      ],
+    });
+    expect(extractGeminiDeltaText(data)).toEqual({
+      content: "正式回复",
+      thought: "思考过程...",
+    });
+  });
+
+  it("extracts usageMetadata when present", () => {
+    const data = JSON.stringify({
+      candidates: [],
+      usageMetadata: { promptTokenCount: 15, candidatesTokenCount: 10, totalTokenCount: 25 },
+    });
+    expect(extractGeminiDeltaText(data)).toEqual({
+      usage: { promptTokens: 15, completionTokens: 10, totalTokens: 25 },
+    });
+  });
+
+  it("returns null for [DONE] and empty candidates without usage", () => {
     expect(extractGeminiDeltaText("[DONE]")).toBeNull();
     const empty = JSON.stringify({ candidates: [] });
     expect(extractGeminiDeltaText(empty)).toBeNull();

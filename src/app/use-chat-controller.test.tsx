@@ -49,9 +49,12 @@ function repositoryWith(
     putImage: vi.fn(async () => undefined),
     putMessage: vi.fn(async () => undefined),
     updateConversationSummary: vi.fn(async () => undefined),
+    getUserMemory: vi.fn(async () => ""),
+    updateUserMemory: vi.fn(async () => undefined),
     setConversationLocale: vi.fn(async () => undefined),
     setLocale: vi.fn(async () => undefined),
     replaceMessages: vi.fn(async () => undefined),
+    deleteMessagesFrom: vi.fn(async () => undefined),
     ...overrides,
   };
 }
@@ -430,11 +433,18 @@ describe("useChatController", () => {
     // Messages must NOT be destroyed!
     expect(result.current.messages).toHaveLength(4);
     expect(result.current.activeConversation?.summary).toBe("用户喜欢草莓大福，两人约定明天去涉谷。");
+    // 增量压缩：边界推进到最后一条纳入摘要的消息
+    expect(result.current.activeConversation?.compressedUpTo).toBe(4);
+    expect(result.current.activeConversation?.compressedUpToId).toBe("a2");
     expect(repository.updateConversationSummary).toHaveBeenCalledWith(
       conversation.id,
       "用户喜欢草莓大福，两人约定明天去涉谷。",
       expect.any(Number),
+      4,
+      "a2",
     );
+    // 模型未按区块格式输出时不写用户画像
+    expect(repository.updateUserMemory).not.toHaveBeenCalled();
 
     // Now send another message, verify summary is injected in request turns
     await act(async () => result.current.send("天气怎么样？"));
@@ -452,6 +462,131 @@ describe("useChatController", () => {
       role: "user",
       text: "天气怎么样？",
     });
+  });
+
+  it("compresses incrementally: only messages after the boundary are re-summarized", async () => {
+    const compressedConversation: Conversation = {
+      ...conversation,
+      compressedUpTo: 4,
+      summary: "旧记忆：用户喜欢草莓大福。",
+    };
+    const oldMessages: ChatMessage[] = [
+      { conversationId: conversation.id, createdAt: 1, id: "u1", role: "user", text: "旧消息一", status: "complete" },
+      { conversationId: conversation.id, createdAt: 2, id: "a1", role: "assistant", text: "旧回复一", status: "complete" },
+      { conversationId: conversation.id, createdAt: 3, id: "u2", role: "user", text: "旧消息二", status: "complete" },
+      { conversationId: conversation.id, createdAt: 4, id: "a2", role: "assistant", text: "旧回复二", status: "complete" },
+    ];
+    const newMessages: ChatMessage[] = [
+      { conversationId: conversation.id, createdAt: 5, id: "u3", role: "user", text: "新消息一", status: "complete" },
+      { conversationId: conversation.id, createdAt: 6, id: "a3", role: "assistant", text: "新回复一", status: "complete" },
+    ];
+    const repository = repositoryWith({
+      getConversation: vi.fn(async () => compressedConversation),
+      getUserMemory: vi.fn(async () => "彩叶喜欢草莓大福"),
+      listConversations: vi.fn(async () => [compressedConversation]),
+      listMessages: vi.fn(async () => [...oldMessages, ...newMessages]),
+    });
+    const stream = vi.fn<StreamChatFunction>(async (_request, options) => {
+      options.onDelta(
+        "<conversation_memory>合并后的完整记忆</conversation_memory>\n<user_profile>彩叶喜欢草莓大福，最近想去涉谷</user_profile>",
+      );
+      return { truncated: false };
+    });
+
+    const { result } = renderHook(() =>
+      useChatController({ id: ids("user-new", "assistant-new"), repository, streamChat: stream }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    let compressSuccess = false;
+    await act(async () => {
+      compressSuccess = await result.current.compressConversation();
+    });
+
+    expect(compressSuccess).toBe(true);
+    const compressionRequest = stream.mock.calls[0]?.[0];
+    expect(compressionRequest?.mode).toBe("summary");
+    const compressionTexts = compressionRequest?.messages.map((message) => message.text) ?? [];
+    // 旧摘要与现有用户画像作为前缀注入
+    expect(compressionTexts.some((text) => text.includes("旧记忆：用户喜欢草莓大福。"))).toBe(true);
+    expect(compressionTexts.some((text) => text.includes("彩叶喜欢草莓大福"))).toBe(true);
+    // 已压缩区间不再重复发送
+    expect(compressionTexts.some((text) => text.includes("旧消息一"))).toBe(false);
+    expect(compressionTexts.some((text) => text.includes("旧回复二"))).toBe(false);
+    // 压缩边界之后的新消息参与合并
+    expect(compressionTexts.some((text) => text.includes("新消息一"))).toBe(true);
+    expect(compressionTexts.some((text) => text.includes("新回复一"))).toBe(true);
+
+    // 双区块解析：会话记忆与用户画像分别落库
+    expect(repository.updateConversationSummary).toHaveBeenCalledWith(
+      conversation.id,
+      "合并后的完整记忆",
+      expect.any(Number),
+      6,
+      "a3",
+    );
+    expect(repository.updateUserMemory).toHaveBeenCalledWith("彩叶喜欢草莓大福，最近想去涉谷");
+    expect(result.current.activeConversation?.compressedUpTo).toBe(6);
+    expect(result.current.activeConversation?.compressedUpToId).toBe("a3");
+    expect(result.current.userMemory).toBe("彩叶喜欢草莓大福，最近想去涉谷");
+
+    // 后续请求：长期记忆 + 摘要前缀，且已压缩消息不重复进入历史
+    await act(async () => result.current.send("继续聊"));
+    const chatRequest = stream.mock.calls[1]?.[0];
+    const chatTexts = chatRequest?.messages.map((message) => message.text) ?? [];
+    expect(chatTexts.some((text) => text.includes("【关于彩叶的长期记忆"))).toBe(true);
+    expect(chatTexts.some((text) => text.includes("彩叶喜欢草莓大福，最近想去涉谷"))).toBe(true);
+    expect(chatTexts.some((text) => text.includes("【前情提要"))).toBe(true);
+    expect(chatTexts.some((text) => text.includes("旧消息一"))).toBe(false);
+    expect(chatRequest?.messages.at(-1)).toEqual({ role: "user", text: "继续聊" });
+  });
+
+  it("loads persisted user memory and injects it into new conversations (cold start)", async () => {
+    const repository = repositoryWith({
+      getUserMemory: vi.fn(async () => "彩叶的名字是酒寄彩叶，喜欢草莓大福"),
+      listConversations: vi.fn(async () => []),
+      listMessages: vi.fn(async () => []),
+    });
+    const stream = vi.fn<StreamChatFunction>(async (_request, options) => {
+      options.onDelta("好呀~");
+      return { truncated: false };
+    });
+
+    const { result } = renderHook(() =>
+      useChatController({ id: ids("user-1", "assistant-1"), repository, streamChat: stream }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+    expect(result.current.userMemory).toBe("彩叶的名字是酒寄彩叶，喜欢草莓大福");
+
+    await act(async () => result.current.send("你好"));
+
+    const chatRequest = stream.mock.calls[0]?.[0];
+    expect(chatRequest?.messages[0]).toEqual({
+      role: "user",
+      text: expect.stringContaining("【关于彩叶的长期记忆"),
+    });
+    expect(chatRequest?.messages[0]?.text).toContain("彩叶的名字是酒寄彩叶，喜欢草莓大福");
+    expect(chatRequest?.messages[1]).toEqual({
+      role: "assistant",
+      text: "（关于彩叶的事情，我一直都记得哦~）",
+    });
+  });
+
+  it("updates user memory through the controller and reflects the change", async () => {
+    const repository = repositoryWith();
+    const { result } = renderHook(() =>
+      useChatController({ id: ids(), repository, streamChat: vi.fn<StreamChatFunction>() }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    let saved = false;
+    await act(async () => {
+      saved = await result.current.updateUserMemory("  彩叶喜欢猫  ");
+    });
+
+    expect(saved).toBe(true);
+    expect(repository.updateUserMemory).toHaveBeenCalledWith("彩叶喜欢猫");
+    expect(result.current.userMemory).toBe("彩叶喜欢猫");
   });
 
   it("prepends active skill instructions as the leading request messages", async () => {
@@ -682,7 +817,16 @@ describe("useChatController", () => {
       text: "想要撤回的消息",
     });
     expect(result.current.messages).toEqual([greeting]);
-    expect(repository.replaceMessages).toHaveBeenCalledWith(conversation.id, [greeting]);
+    // 撤回 = 水位线定点删除（从被撤回的用户消息起），不再重写保留区
+    const recalledCreatedAt = vi
+      .mocked(repository.putMessage)
+      .mock.calls.map(([message]) => message)
+      .find((message) => message.role === "user")?.createdAt;
+    expect(recalledCreatedAt).toBeGreaterThan(greeting.createdAt);
+    expect(repository.deleteMessagesFrom).toHaveBeenCalledWith(
+      conversation.id,
+      recalledCreatedAt,
+    );
   });
 
   it("aborts active streaming when recall is called", async () => {
@@ -837,10 +981,19 @@ describe("useChatController", () => {
     expect(result.current.messages).toHaveLength(3); // greeting, user-1, assistant-3
     expect(result.current.messages[2]?.id).toBe("assistant-3");
     expect(result.current.messages[2]?.text).toBe("回复 #3");
-    expect(repository.replaceMessages).toHaveBeenCalledWith(conversation.id, [
-      greeting,
-      expect.objectContaining({ id: "user-1" }),
-    ]);
+    // 重新生成 = 水位线定点删除（从被重生成的 assistant-1 起）
+    const putMessages = vi
+      .mocked(repository.putMessage)
+      .mock.calls.map(([message]) => message);
+    const assistantOneCreatedAt = putMessages.find((message) => message.id === "assistant-1")
+      ?.createdAt;
+    expect(assistantOneCreatedAt).toBeGreaterThan(greeting.createdAt);
+    const regenerated = vi
+      .mocked(repository.deleteMessagesFrom)
+      .mock.calls.filter(
+        (call) => call[0] === conversation.id && call[1] === assistantOneCreatedAt,
+      );
+    expect(regenerated).toHaveLength(1);
   });
 
   it("aborts active compression when stop is called and returns to idle", async () => {
@@ -944,5 +1097,162 @@ describe("useChatController", () => {
     // Ensure the message wasn't saved into the new conversation
     const putCalls = vi.mocked(repository.putMessage).mock.calls.map(([msg]) => msg);
     expect(putCalls.filter((m) => m.conversationId === nextConversation.id)).toHaveLength(0);
+  });
+
+  it("accumulates thought deltas and records provider/model snapshot, usage and latencyMs", async () => {
+    const repository = repositoryWith();
+    const stream = vi.fn<StreamChatFunction>(async (_request, options) => {
+      options.onThought?.("思考中...");
+      options.onThought?.("继续思考...");
+      options.onDelta("这是最终回复");
+      return {
+        truncated: false,
+        usage: { promptTokens: 50, completionTokens: 20, totalTokens: 70 },
+      };
+    });
+
+    const { result } = renderHook(() =>
+      useChatController({
+        activeLlmConfig: { apiKey: "sk-test-12345678901234567890", model: "claude-sonnet-5", provider: "claude" },
+        id: ids("user-1", "assistant-1"),
+        now: () => 1000,
+        repository,
+        streamChat: stream,
+      }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    await act(async () => {
+      await result.current.send("你好");
+    });
+
+    const assistantMsg = result.current.messages.find((m) => m.id === "assistant-1");
+    expect(assistantMsg).toBeDefined();
+    expect(assistantMsg?.text).toBe("这是最终回复");
+    expect(assistantMsg?.thought).toBe("思考中...继续思考...");
+    expect(assistantMsg?.provider).toBe("claude");
+    expect(assistantMsg?.model).toBe("claude-sonnet-5");
+    expect(assistantMsg?.usage).toEqual({ promptTokens: 50, completionTokens: 20, totalTokens: 70 });
+    expect(typeof assistantMsg?.latencyMs).toBe("number");
+  });
+
+  it("windows initial history and loads earlier pages on demand with an exclusive boundary", async () => {
+    // 60 条历史（createdAt 10..69）：初始窗口应只保留最近 50 条，更早 10 条经上翻加载
+    const pool: ChatMessage[] = Array.from({ length: 60 }, (_, index) => ({
+      conversationId: conversation.id,
+      createdAt: 10 + index,
+      id: `history-${index}`,
+      role: index % 2 === 0 ? "user" : "assistant",
+      status: "complete",
+      text: `历史 ${index}`,
+    }));
+    const repository = repositoryWith({
+      listMessages: vi.fn(
+        async (
+          conversationId: string,
+          options?: { beforeCreatedAt?: number; limit?: number },
+        ) => {
+          const all = pool
+            .filter((message) => message.conversationId === conversationId)
+            .sort((left, right) => left.createdAt - right.createdAt);
+          // 先提取上界到局部常量：属性收窄不会跨闭包保留
+          const before = options?.beforeCreatedAt;
+          const bounded =
+            before === undefined ? all : all.filter((message) => message.createdAt < before);
+          if (options?.limit === undefined || bounded.length <= options.limit) {
+            return bounded;
+          }
+          // 与真实仓库一致：带 limit 时返回区间内最靠近上界的 N 条（升序）
+          return bounded.slice(bounded.length - options.limit);
+        },
+      ),
+    });
+
+    const { result } = renderHook(() =>
+      useChatController({
+        id: ids("unused-user", "unused-assistant"),
+        repository,
+        streamChat: vi.fn<StreamChatFunction>(),
+      }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    // 初载：窗口 50 + 探测 1
+    expect(vi.mocked(repository.listMessages).mock.calls[0]).toEqual([
+      conversation.id,
+      { limit: 51 },
+    ]);
+    expect(result.current.messages).toHaveLength(50);
+    expect(result.current.messages[0]?.createdAt).toBe(20);
+    expect(result.current.messages.at(-1)?.createdAt).toBe(69);
+    expect(result.current.hasMoreHistory).toBe(true);
+
+    // 上翻：排他上界 = 当前窗口最早一条（20），应取回 10..19 共 10 条
+    await act(async () => {
+      await result.current.loadEarlier();
+    });
+    expect(
+      vi.mocked(repository.listMessages).mock.calls.at(-1),
+    ).toEqual([conversation.id, { beforeCreatedAt: 20, limit: 30 }]);
+    expect(result.current.messages).toHaveLength(60);
+    expect(result.current.messages[0]?.createdAt).toBe(10);
+    const loadedIds = result.current.messages.map((message) => message.id);
+    expect(new Set(loadedIds).size).toBe(loadedIds.length);
+
+    // 再上翻：区间为空时不触发重渲染，标志保持不变
+    const before = result.current.messages;
+    await act(async () => {
+      await result.current.loadEarlier();
+    });
+    expect(result.current.messages).toBe(before);
+    expect(result.current.hasMoreHistory).toBe(true);
+  });
+
+  it("clears hasMoreHistory when switching to a conversation without earlier history", async () => {
+    const shortConversation = { ...conversation, id: "conversation-short" };
+    const shortMessage: ChatMessage = {
+      conversationId: shortConversation.id,
+      createdAt: 100,
+      id: "only-1",
+      role: "user",
+      status: "complete",
+      text: "唯一一条",
+    };
+    const pool: ChatMessage[] = Array.from({ length: 60 }, (_, index) => ({
+      conversationId: conversation.id,
+      createdAt: 10 + index,
+      id: `history-${index}`,
+      role: index % 2 === 0 ? "user" : "assistant",
+      status: "complete",
+      text: `历史 ${index}`,
+    }));
+    const repository = repositoryWith({
+      getConversation: vi.fn(async (id: string) =>
+        id === conversation.id ? conversation : id === shortConversation.id ? shortConversation : undefined,
+      ),
+      listMessages: vi.fn(async (conversationId: string) =>
+        conversationId === shortConversation.id
+          ? [shortMessage]
+          : pool.filter((message) => message.conversationId === conversationId),
+      ),
+    });
+
+    const { result } = renderHook(() =>
+      useChatController({
+        id: ids("unused-user", "unused-assistant"),
+        repository,
+        streamChat: vi.fn<StreamChatFunction>(),
+      }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+    expect(result.current.hasMoreHistory).toBe(true);
+
+    await act(async () => {
+      await result.current.selectConversation(shortConversation.id);
+    });
+    expect(result.current.activeConversation?.id).toBe(shortConversation.id);
+    expect(result.current.messages).toEqual([shortMessage]);
+    // 标志以“字段缺席”方式清除（undefined），避免残留上一会话的 true
+    expect(result.current.hasMoreHistory).toBeUndefined();
   });
 });

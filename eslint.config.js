@@ -6,9 +6,10 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   {
+    // glob 形式才能命中任意层级的构建产物目录（根级字面量 ".wrangler" 匹配不到 proxy-worker/.wrangler）
     ignores: [
-      ".npm-cache",
-      ".wrangler",
+      "**/.npm-cache",
+      "**/.wrangler",
       "android",
       "coverage",
       "dist",
@@ -20,6 +21,19 @@ export default tseslint.config(
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
+  {
+    // Cloudflare Workers 运行时全局量（纯 JS 文件，TS 检查不覆盖）
+    files: ["proxy-worker/**/*.js"],
+    languageOptions: {
+      globals: {
+        Request: "readonly",
+        Response: "readonly",
+        URL: "readonly",
+        URLSearchParams: "readonly",
+        fetch: "readonly",
+      },
+    },
+  },
   {
     files: ["src/**/*.{ts,tsx}"],
     plugins: {

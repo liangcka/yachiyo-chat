@@ -1,4 +1,5 @@
 import { buildSystemPrompt } from "../prompt";
+import type { ExtractedDelta, TokenUsage } from "../stream";
 import type { ClientChatRequest, ClientHistoryMessage } from "../validation";
 import type { EnrichedChatRequest } from "../web-search";
 import type {
@@ -117,7 +118,7 @@ export function buildGeminiBody(request: EnrichedChatRequest): unknown {
   };
 }
 
-export function extractGeminiDeltaText(data: string): string | null {
+export function extractGeminiDeltaText(data: string): ExtractedDelta {
   if (data === "[DONE]") return null;
   let parsed: unknown;
   try {
@@ -129,25 +130,65 @@ export function extractGeminiDeltaText(data: string): string | null {
     throw new TypeError("Invalid Gemini SSE data");
   }
   const value = parsed as Record<string, unknown>;
+
+  let usage: TokenUsage | undefined;
+  const usageMeta = value.usageMetadata as Record<string, unknown> | undefined;
+  if (typeof usageMeta === "object" && usageMeta !== null) {
+    const p = typeof usageMeta.promptTokenCount === "number" ? usageMeta.promptTokenCount : undefined;
+    const c = typeof usageMeta.candidatesTokenCount === "number" ? usageMeta.candidatesTokenCount : undefined;
+    const t = typeof usageMeta.totalTokenCount === "number" ? usageMeta.totalTokenCount : undefined;
+    if (p !== undefined || c !== undefined || t !== undefined) {
+      usage = {
+        ...(p !== undefined ? { promptTokens: p } : {}),
+        ...(c !== undefined ? { completionTokens: c } : {}),
+        ...(t !== undefined ? { totalTokens: t } : {}),
+      };
+    }
+  }
+
   const candidates = value.candidates;
-  if (!Array.isArray(candidates) || candidates.length === 0) return null;
+  if (!Array.isArray(candidates) || candidates.length === 0) {
+    return usage !== undefined ? { usage } : null;
+  }
   const first = candidates[0];
   if (typeof first !== "object" || first === null) {
     throw new TypeError("Invalid Gemini SSE data");
   }
   const content = (first as Record<string, unknown>).content;
-  if (typeof content !== "object" || content === null) return null;
+  if (typeof content !== "object" || content === null) {
+    return usage !== undefined ? { usage } : null;
+  }
   const parts = (content as Record<string, unknown>).parts;
-  if (!Array.isArray(parts) || parts.length === 0) return null;
-  const text = parts
-    .map((part): string => {
-      if (typeof part !== "object" || part === null) return "";
-      const value = (part as Record<string, unknown>).text;
-      return typeof value === "string" ? value : "";
-    })
-    .join("");
-  if (text.length === 0) return null;
-  return text;
+  if (!Array.isArray(parts) || parts.length === 0) {
+    return usage !== undefined ? { usage } : null;
+  }
+
+  let contentText = "";
+  let thoughtText = "";
+  for (const part of parts) {
+    if (typeof part === "object" && part !== null) {
+      const p = part as Record<string, unknown>;
+      const text = typeof p.text === "string" ? p.text : "";
+      if (text.length > 0) {
+        if (p.thought === true) {
+          thoughtText += text;
+        } else {
+          contentText += text;
+        }
+      }
+    }
+  }
+
+  const resContent = contentText.length > 0 ? contentText : null;
+  const resThought = thoughtText.length > 0 ? thoughtText : null;
+  if (resContent === null && resThought === null && usage === undefined) {
+    return null;
+  }
+  return {
+    content: resContent,
+    thought: resThought,
+    ...(usage !== undefined ? { usage } : {}),
+  };
 }
 
 /** 非流式 judge 响应：提取 candidates[0].content.parts 的完整文本 */

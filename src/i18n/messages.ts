@@ -77,6 +77,16 @@ export interface UiCopy {
   readonly compressFailed: string;
   readonly compressingContext: string;
   readonly memoryLabel: string;
+  readonly loadEarlierLabel: string;
+  readonly userMemoryEntry: string;
+  readonly userMemoryTitle: string;
+  readonly userMemoryDescription: string;
+  readonly userMemoryPlaceholder: string;
+  readonly userMemorySave: string;
+  readonly userMemoryClear: string;
+  readonly userMemorySaved: string;
+  readonly userMemoryCleared: string;
+  readonly userMemorySaveFailed: string;
   readonly recall: string;
   readonly recallSuccess: string;
   readonly copyText: string;
@@ -176,6 +186,17 @@ const chinese = Object.freeze({
   compressFailed: "压缩上下文失败，请稍后重试",
   compressingContext: "正在压缩上下文…",
   memoryLabel: "对话记忆",
+  loadEarlierLabel: "加载更早的消息",
+  userMemoryEntry: "长期记忆",
+  userMemoryTitle: "长期记忆管理",
+  userMemoryDescription:
+    "八千代跨对话记住的关于你的信息（压缩上下文时自动提炼，也可手动编辑）；新对话中同样生效。",
+  userMemoryPlaceholder: "暂无长期记忆。与八千代对话并压缩上下文后会自动生成，也可在此手动填写。",
+  userMemorySave: "保存记忆",
+  userMemoryClear: "清除记忆",
+  userMemorySaved: "长期记忆已保存",
+  userMemoryCleared: "长期记忆已清除",
+  userMemorySaveFailed: "长期记忆保存失败，请重试",
   recall: "撤回",
   recallSuccess: "已撤回最新一条消息",
   copyText: "复制",
@@ -275,6 +296,18 @@ const japanese = Object.freeze({
   compressFailed: "コンテキストの圧縮に失敗しました。後でもう一度お試しください",
   compressingContext: "コンテキストを圧縮中…",
   memoryLabel: "会話の記憶",
+  loadEarlierLabel: "前のメッセージを読み込む",
+  userMemoryEntry: "長期記憶",
+  userMemoryTitle: "長期記憶の管理",
+  userMemoryDescription:
+    "八千代が会話をまたいで覚えているあなたの情報（コンテキスト圧縮時に自動で抽出、手動編集も可能）。新しい会話でも有効です。",
+  userMemoryPlaceholder:
+    "長期記憶はまだありません。八千代との会話を圧縮すると自動で生成されます。ここに手動で入力することもできます。",
+  userMemorySave: "記憶を保存",
+  userMemoryClear: "記憶を削除",
+  userMemorySaved: "長期記憶を保存しました",
+  userMemoryCleared: "長期記憶を削除しました",
+  userMemorySaveFailed: "長期記憶の保存に失敗しました。もう一度お試しください",
   recall: "取り消す",
   recallSuccess: "最新のメッセージを取り消しました",
   copyText: "コピー",

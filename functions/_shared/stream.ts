@@ -1,8 +1,23 @@
 import type { ChatLocale } from "./validation";
 
+export interface TokenUsage {
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+}
+
+export interface ProviderChunkResult {
+  content?: string | null;
+  thought?: string | null;
+  usage?: TokenUsage | null;
+}
+
+export type ExtractedDelta = string | ProviderChunkResult | null;
+
 export type ClientStreamEvent =
+  | { type: "thought"; text: string }
   | { type: "delta"; text: string }
-  | { type: "done"; truncated: boolean }
+  | { type: "done"; truncated: boolean; usage?: TokenUsage }
   | { type: "error"; code: "PROVIDER_STREAM_ERROR" }
   | { type: "sources"; sources: ReadonlyArray<{ title: string; url: string }> };
 
@@ -42,9 +57,16 @@ function encodeClientEvent(event: ClientStreamEvent): Uint8Array {
   if (event.type === "delta") {
     return encoder.encode(`event: delta\ndata: ${JSON.stringify({ text: event.text })}\n\n`);
   }
+  if (event.type === "thought") {
+    return encoder.encode(`event: thought\ndata: ${JSON.stringify({ text: event.text })}\n\n`);
+  }
   if (event.type === "done") {
+    const payload: { truncated: boolean; usage?: TokenUsage } = { truncated: event.truncated };
+    if (event.usage !== undefined) {
+      payload.usage = event.usage;
+    }
     return encoder.encode(
-      `event: done\ndata: ${JSON.stringify({ truncated: event.truncated })}\n\n`,
+      `event: done\ndata: ${JSON.stringify(payload)}\n\n`,
     );
   }
   if (event.type === "sources") {
@@ -85,18 +107,34 @@ function recordData(record: string): string | null {
   return dataLines.length === 0 ? null : dataLines.join("\n");
 }
 
-function extractDeltaContent(data: string): string | null {
+function isRawUsagePayload(
+  value: unknown,
+): value is { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } {
+  return typeof value === "object" && value !== null;
+}
+
+function extractDeltaContent(data: string): ExtractedDelta {
   const parsed: unknown = JSON.parse(data);
   if (typeof parsed !== "object" || parsed === null || "error" in parsed) {
     throw new TypeError("Invalid provider event");
   }
 
-  const choices = (parsed as Record<string, unknown>).choices;
-  if (!Array.isArray(choices)) {
-    throw new TypeError("Invalid provider event");
+  const recordObj = parsed as Record<string, unknown>;
+  let usage: TokenUsage | undefined;
+  if (isRawUsagePayload(recordObj.usage)) {
+    const p = recordObj.usage.prompt_tokens;
+    const c = recordObj.usage.completion_tokens;
+    const t = recordObj.usage.total_tokens;
+    usage = {
+      ...(typeof p === "number" ? { promptTokens: p } : {}),
+      ...(typeof c === "number" ? { completionTokens: c } : {}),
+      ...(typeof t === "number" ? { totalTokens: t } : {}),
+    };
   }
-  if (choices.length === 0) {
-    return null;
+
+  const choices = recordObj.choices;
+  if (!Array.isArray(choices) || choices.length === 0) {
+    return usage !== undefined ? { usage } : null;
   }
 
   const first = choices[0];
@@ -107,20 +145,30 @@ function extractDeltaContent(data: string): string | null {
   if (typeof delta !== "object" || delta === null) {
     throw new TypeError("Invalid provider event");
   }
-  const content = (delta as Record<string, unknown>).content;
-  if (content === undefined || content === null || content === "") {
+  const deltaObj = delta as Record<string, unknown>;
+  const content = typeof deltaObj.content === "string" && deltaObj.content.length > 0 ? deltaObj.content : null;
+  const thought =
+    typeof deltaObj.reasoning_content === "string" && deltaObj.reasoning_content.length > 0
+      ? deltaObj.reasoning_content
+      : typeof deltaObj.reasoning === "string" && deltaObj.reasoning.length > 0
+        ? deltaObj.reasoning
+        : null;
+
+  if (content === null && thought === null && usage === undefined) {
     return null;
   }
-  if (typeof content !== "string") {
-    throw new TypeError("Invalid provider event");
-  }
-  return content;
+
+  return {
+    content,
+    thought,
+    ...(usage !== undefined ? { usage } : {}),
+  };
 }
 
 export function proxyStepFunStream(
   upstream: Response,
   options: ProxyOptions = {},
-  extractor: (data: string) => string | null = extractDeltaContent,
+  extractor: (data: string) => ExtractedDelta = extractDeltaContent,
 ): Response {
   if (upstream.body === null) {
     return responseFromEvents([{ type: "error", code: "PROVIDER_STREAM_ERROR" }]);
@@ -131,6 +179,7 @@ export function proxyStepFunStream(
   let closed = false;
   let finalized = false;
   let removeSignalListeners = () => undefined;
+  let accumulatedUsage: TokenUsage | undefined;
 
   const finalize = () => {
     if (finalized) return;
@@ -164,7 +213,13 @@ export function proxyStepFunStream(
         if (closed) {
           return;
         }
-        controller.enqueue(encodeClientEvent({ type: "done", truncated }));
+        controller.enqueue(
+          encodeClientEvent({
+            type: "done",
+            truncated,
+            ...(accumulatedUsage !== undefined ? { usage: accumulatedUsage } : {}),
+          }),
+        );
         close();
       };
 
@@ -187,28 +242,47 @@ export function proxyStepFunStream(
           return false;
         }
 
-        const content = extractor(data);
-        if (content === null) {
+        const chunkResult = extractor(data);
+        if (chunkResult === null) {
           return true;
         }
 
-        const characterLimit = options.maxCharacters ?? maximumOutputCharacters;
-        const remaining = characterLimit - emittedCharacters;
-        const accepted = takeUnicodePrefix(content, remaining);
-        if (accepted.characters > 0) {
-          emittedCharacters += accepted.characters;
-          controller.enqueue(encodeClientEvent({ type: "delta", text: accepted.text }));
+        const content = typeof chunkResult === "string" ? chunkResult : chunkResult.content ?? null;
+        const thought = typeof chunkResult === "object" ? chunkResult.thought ?? null : null;
+        const usage = typeof chunkResult === "object" ? chunkResult.usage ?? null : null;
+
+        if (usage !== null && usage !== undefined) {
+          accumulatedUsage = {
+            ...(accumulatedUsage ?? {}),
+            ...(usage.promptTokens !== undefined ? { promptTokens: usage.promptTokens } : {}),
+            ...(usage.completionTokens !== undefined ? { completionTokens: usage.completionTokens } : {}),
+            ...(usage.totalTokens !== undefined ? { totalTokens: usage.totalTokens } : {}),
+          };
         }
 
-        if (accepted.hasMore || accepted.characters === remaining) {
-          abortUpstream();
-          try {
-            await reader.cancel();
-          } catch {
-            // The response limit has already determined the client result.
+        if (thought !== null && thought.length > 0) {
+          controller.enqueue(encodeClientEvent({ type: "thought", text: thought }));
+        }
+
+        if (content !== null && content.length > 0) {
+          const characterLimit = options.maxCharacters ?? maximumOutputCharacters;
+          const remaining = characterLimit - emittedCharacters;
+          const accepted = takeUnicodePrefix(content, remaining);
+          if (accepted.characters > 0) {
+            emittedCharacters += accepted.characters;
+            controller.enqueue(encodeClientEvent({ type: "delta", text: accepted.text }));
           }
-          finish(true);
-          return false;
+
+          if (accepted.hasMore || accepted.characters === remaining) {
+            abortUpstream();
+            try {
+              await reader.cancel();
+            } catch {
+              // The response limit has already determined the client result.
+            }
+            finish(true);
+            return false;
+          }
         }
         return true;
       };
@@ -353,7 +427,15 @@ export function mockChatResponse(
       : []),
     { type: "delta", text: characters.slice(0, midpoint).join("") },
     { type: "delta", text: characters.slice(midpoint).join("") },
-    { type: "done", truncated: false },
+    {
+      type: "done",
+      truncated: false,
+      usage: {
+        promptTokens: 35,
+        completionTokens: 28,
+        totalTokens: 63,
+      },
+    },
   ]);
 }
 
@@ -367,6 +449,18 @@ function isSourcesPayload(value: unknown): value is Array<{ title: string; url: 
         typeof (item as Record<string, unknown>).title === "string" &&
         typeof (item as Record<string, unknown>).url === "string",
     )
+  );
+}
+
+function isUsagePayload(value: unknown): value is TokenUsage {
+  if (typeof value !== "object" || value === null) return false;
+  const usage = value as Record<string, unknown>;
+  const isOptionalInt = (v: unknown) =>
+    v === undefined || (typeof v === "number" && Number.isSafeInteger(v));
+  return (
+    isOptionalInt(usage.promptTokens) &&
+    isOptionalInt(usage.completionTokens) &&
+    isOptionalInt(usage.totalTokens)
   );
 }
 
@@ -394,8 +488,15 @@ export async function collectClientEvents(
 
     if (eventName === "delta" && typeof value.text === "string") {
       events.push({ type: "delta", text: value.text });
+    } else if (eventName === "thought" && typeof value.text === "string") {
+      events.push({ type: "thought", text: value.text });
     } else if (eventName === "done" && typeof value.truncated === "boolean") {
-      events.push({ type: "done", truncated: value.truncated });
+      const usage = isUsagePayload(value.usage) ? value.usage : undefined;
+      events.push({
+        type: "done",
+        truncated: value.truncated,
+        ...(usage !== undefined ? { usage } : {}),
+      });
     } else if (eventName === "error" && value.code === "PROVIDER_STREAM_ERROR") {
       events.push({ type: "error", code: "PROVIDER_STREAM_ERROR" });
     } else if (eventName === "sources" && isSourcesPayload(value.sources)) {

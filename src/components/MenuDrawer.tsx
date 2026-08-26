@@ -19,6 +19,7 @@ export interface MenuDrawerProps {
   onSignOut: () => Promise<void>;
   onSkills: () => void;
   onCompress: () => void;
+  onUserMemory: () => void;
 }
 
 /** 侧边栏抽屉组装层：布局、弹层基础设施与各功能分区。 */
@@ -34,14 +35,19 @@ export function MenuDrawer({
   onSignOut,
   onSkills,
   onCompress,
+  onUserMemory,
   open,
 }: MenuDrawerProps) {
-  const panel = usePanel<HTMLDialogElement>(open, onClose);
+  // 解构消费 usePanel 结果（与 HistoryPanel 一致）：避免编译器把成员访问视为渲染期读 ref
+  const { closing, closeRef, handleKeyDown, panelRef, render } = usePanel<HTMLDialogElement>(
+    open,
+    onClose,
+  );
 
-  if (!panel.render) return null;
+  if (!render) return null;
 
   return (
-    <div className={`overlay ${panel.closing ? "overlay--closing" : ""}`}>
+    <div className={`overlay ${closing ? "overlay--closing" : ""}`}>
       <button
         aria-label={`${copy.closeMenu} ·`}
         className="overlay__backdrop"
@@ -50,14 +56,14 @@ export function MenuDrawer({
         type="button"
       />
       <dialog
-        ref={panel.panelRef}
+        ref={panelRef}
         open
         aria-label={copy.menu}
         aria-modal="true"
-        className={`drawer ${panel.closing ? "drawer--closing" : ""}`}
-        onKeyDown={panel.handleKeyDown}
+        className={`drawer ${closing ? "drawer--closing" : ""}`}
+        onKeyDown={handleKeyDown}
       >
-        <DrawerHeader closeRef={panel.closeRef} copy={copy} onClose={onClose} />
+        <DrawerHeader closeRef={closeRef} copy={copy} onClose={onClose} />
         <DrawerNav
           copy={copy}
           onClose={onClose}
@@ -66,6 +72,7 @@ export function MenuDrawer({
           onLlmSettings={onLlmSettings}
           onNewChat={onNewChat}
           onSkills={onSkills}
+          onUserMemory={onUserMemory}
         />
         <LanguageSection copy={copy} locale={locale} onLocale={onLocale} />
         <DangerFooter copy={copy} onClearData={onClearData} onClose={onClose} onSignOut={onSignOut} />

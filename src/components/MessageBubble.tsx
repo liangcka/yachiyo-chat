@@ -1,5 +1,5 @@
 import { Copy, RotateCcw, RotateCw } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import type { ChatMessage, Locale } from "../domain/chat";
 import { copyFor } from "../i18n/messages";
 
@@ -25,7 +25,8 @@ function stripCitationMarkers(text: string): string {
   return text.replace(/\[(\d{1,2})\]/gu, "");
 }
 
-export function MessageBubble({
+/** memo 化：流式期间只有最后一条消息变化，其余气泡跳过重渲（配合上游稳定回调引用） */
+export const MessageBubble = memo(function MessageBubble({
   imageUrl,
   locale,
   message,
@@ -267,4 +268,4 @@ export function MessageBubble({
       )}
     </article>
   );
-}
+});

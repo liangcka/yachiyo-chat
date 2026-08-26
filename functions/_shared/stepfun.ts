@@ -20,6 +20,7 @@ export interface StepFunRequestBody {
   model: string;
   messages: StepFunMessage[];
   stream: true;
+  stream_options?: { include_usage?: boolean };
   reasoning_effort: "low" | "medium";
   max_tokens: number;
 }
@@ -78,6 +79,7 @@ export function buildStepFunBody(
       ...request.messages.map((message) => mapHistoryMessage(message, request.locale)),
     ],
     stream: true,
+    stream_options: { include_usage: true },
     reasoning_effort: containsImage ? "medium" : "low",
     // 推理模型的思考 token 计入 max_tokens 预算，2048 会被偶发冲高的思考耗尽导致正文为空
     max_tokens: request.mode === "summary" ? 4096 : 8192,

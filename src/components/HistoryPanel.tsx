@@ -30,7 +30,10 @@ export function HistoryPanel({
   const [editingId, setEditingId] = useState<string>();
   const [title, setTitle] = useState("");
 
-  const { render, closing, closeRef, panelRef, handleKeyDown } = usePanel(open, onClose);
+  const { render, closing, closeRef, handleKeyDown, panelRef } = usePanel<HTMLDialogElement>(
+    open,
+    onClose,
+  );
 
   useEffect(() => editInputRef.current?.focus(), [editingId]);
 
@@ -38,12 +41,13 @@ export function HistoryPanel({
 
   return (
     <div className={`overlay overlay--history ${closing ? "overlay--closing" : ""}`}>
-      <section
+      {/* 原生 dialog（对齐 MenuDrawer 模式）：交互语义由元素自身提供，无需非交互元素事件 */}
+      <dialog
         ref={panelRef}
+        open
         aria-label={copy.history}
         aria-modal="true"
         className={`history-panel ${closing ? "history-panel--closing" : ""}`}
-        role="dialog"
         onKeyDown={handleKeyDown}
       >
         <header>
@@ -140,7 +144,7 @@ export function HistoryPanel({
             ))}
           </ol>
         )}
-      </section>
+      </dialog>
     </div>
   );
 }

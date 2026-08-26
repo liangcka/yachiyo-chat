@@ -154,7 +154,7 @@
   display: flex;
   box-sizing: border-box;
   min-height: 100%;
-  padding: calc(var(--safe-top) + 4.8rem) 1rem calc(var(--safe-bottom) + 9.8rem);
+  padding: calc(var(--safe-top) + 4.8rem) 1rem var(--chat-bottom-height, calc(var(--safe-bottom) + 9.8rem));
   margin: 0;
   flex-direction: column;
   justify-content: flex-end;
@@ -1617,6 +1617,26 @@
   margin: 0.85rem 0 0;
   color: var(--text-muted);
   font-size: 0.8rem;
+}
+
+.memory-panel__editor {
+  width: 100%;
+  margin-top: 0.85rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--glass-border);
+  border-radius: 1rem;
+  color: var(--text-primary);
+  background: var(--glass-soft);
+  font-size: 0.88rem;
+  line-height: 1.55;
+  resize: vertical;
+  min-height: 9rem;
+}
+
+.memory-panel__editor:focus,
+.memory-panel__editor:focus-visible {
+  outline: none;
+  border-color: rgb(160 190 255 / 55%);
 }
 
 .skills-panel__list {

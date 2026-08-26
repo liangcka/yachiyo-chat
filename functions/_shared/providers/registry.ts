@@ -1,3 +1,4 @@
+import type { ExtractedDelta } from "../stream";
 import { type ClientChatRequest, type ProviderId, PROVIDER_IDS, isProviderId } from "../validation";
 import type { EnrichedChatRequest } from "../web-search";
 import { buildOpenAICompatAdapter } from "./openai-compat";
@@ -37,8 +38,8 @@ export interface ProviderAdapter {
   readonly defaultModel: string;
   readonly allowedModels: readonly string[];
   buildRequest(input: ProviderRequestInput): BuiltProviderRequest;
-  /** 解析 upstream SSE 的单条 data，返回增量文本；null 表示无内容或结束信号 */
-  extractDeltaText(data: string): string | null;
+  /** 解析 upstream SSE 的单条 data，返回增量结果（正文、思考流与用量）；null 表示无内容或结束信号 */
+  extractDeltaText(data: string): ExtractedDelta;
   /** 构造非流式的搜索意图判断请求（小 token 预算、低思考档位） */
   buildJudgeRequest(input: JudgeRequestInput): BuiltProviderRequest;
   /** 解析非流式判断响应 JSON 的完整文本；null 表示无内容 */
