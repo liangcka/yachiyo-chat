@@ -74,6 +74,25 @@ describe("streamChat", () => {
     });
   });
 
+  it("serializes currentTime in request body when provided", async () => {
+    serverFetch.mockResolvedValue(
+      sseResponse('event: done\ndata: {"truncated":false}\n\n'),
+    );
+    const requestWithTime: StreamChatRequest = {
+      ...sampleRequest,
+      currentTime: "2026-08-27 11:09:37 星期四",
+    };
+
+    await streamChat(requestWithTime, {
+      fetcher: serverFetch,
+      onDelta: () => undefined,
+    });
+
+    expect(serverFetch).toHaveBeenCalledWith("/api/chat", expect.objectContaining({
+      body: JSON.stringify(requestWithTime),
+    }));
+  });
+
   it.each([
     [problem("SESSION_REQUIRED", 401), "SESSION_REQUIRED"],
     [problem("DAILY_QUOTA_EXCEEDED", 429), "DAILY_QUOTA_EXCEEDED"],
@@ -269,5 +288,52 @@ describe("streamChat", () => {
       truncated: false,
       usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
     });
+  });
+
+  it("aborts and throws STREAM_ERROR when stream reading exceeds inactivity timeout", async () => {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(encoder.encode('event: delta\ndata: {"text":"第一句"}\n\n'));
+      },
+    });
+    serverFetch.mockResolvedValue(
+      new Response(stream, { headers: { "content-type": "text/event-stream" } }),
+    );
+
+    const deltas: string[] = [];
+    const promise = streamChat(sampleRequest, {
+      fetcher: serverFetch,
+      inactivityTimeoutMs: 40,
+      onDelta: (text) => deltas.push(text),
+    });
+
+    await expect(promise).rejects.toEqual(
+      expect.objectContaining<Partial<ChatClientError>>({
+        code: "STREAM_ERROR",
+        retryable: true,
+      }),
+    );
+    expect(deltas).toEqual(["第一句"]);
+  });
+
+  it("safely ignores SSE comment lines such as : ping and continues streaming", async () => {
+    serverFetch.mockResolvedValue(
+      sseResponse(
+        ': ping\r\n\r\n' +
+          'event: delta\ndata: {"text":"你好"}\n\n' +
+          ': ping\n\n' +
+          'event: done\ndata: {"truncated":false}\n\n',
+      ),
+    );
+    const deltas: string[] = [];
+
+    const result = await streamChat(sampleRequest, {
+      fetcher: serverFetch,
+      onDelta: (text) => deltas.push(text),
+    });
+
+    expect(deltas).toEqual(["你好"]);
+    expect(result).toEqual({ truncated: false });
   });
 });

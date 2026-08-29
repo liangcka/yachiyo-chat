@@ -9,6 +9,7 @@ import {
   type StreamChatResult,
 } from "../services/chat-client";
 import {
+  formatClientTimestamp,
   useChatController,
   type ChatRepository,
   type StreamChatFunction,
@@ -140,13 +141,14 @@ describe("useChatController", () => {
       text: "彩叶~辛苦啦！",
     });
     expect(stream).toHaveBeenCalledWith(
-      {
+      expect.objectContaining({
+        currentTime: expect.any(String),
         locale: "zh-CN",
         messages: [
           { role: "assistant", text: greeting.text },
           { role: "user", text: "今天有点累" },
         ],
-      },
+      }),
       expect.objectContaining({ onDelta: expect.any(Function), signal: expect.any(AbortSignal) }),
     );
   });
@@ -1254,5 +1256,46 @@ describe("useChatController", () => {
     expect(result.current.messages).toEqual([shortMessage]);
     // 标志以“字段缺席”方式清除（undefined），避免残留上一会话的 true
     expect(result.current.hasMoreHistory).toBeUndefined();
+  });
+
+  it("formats client timestamps localized to Chinese and Japanese", () => {
+    // 2026-08-27 11:09:37 (Thursday / 木曜日)
+    // Note: Date constructor with UTC or local
+    const sampleDate = new Date(2026, 7, 27, 11, 9, 37);
+    const zh = formatClientTimestamp(sampleDate.getTime(), "zh-CN");
+    expect(zh).toBe("2026-08-27 11:09:37 星期四");
+
+    const ja = formatClientTimestamp(sampleDate.getTime(), "ja-JP");
+    expect(ja).toBe("2026-08-27 11:09:37 木曜日");
+  });
+
+  it("passes formatted currentTime when sending messages via streamChat", async () => {
+    const streamChat = vi.fn<StreamChatFunction>(async (_req, options) => {
+      options.onDelta("收到！");
+      return { truncated: false };
+    });
+    const fixedNow = new Date(2026, 7, 27, 11, 9, 37).getTime();
+
+    const { result } = renderHook(() =>
+      useChatController({
+        id: () => "msg-1",
+        now: () => fixedNow,
+        repository: repositoryWith(),
+        streamChat,
+      }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    await act(async () => {
+      await result.current.send("你好");
+    });
+
+    expect(streamChat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currentTime: "2026-08-27 11:09:37 星期四",
+        locale: "zh-CN",
+      }),
+      expect.anything(),
+    );
   });
 });

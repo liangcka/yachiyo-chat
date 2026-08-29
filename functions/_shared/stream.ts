@@ -10,6 +10,7 @@ export interface ProviderChunkResult {
   content?: string | null;
   thought?: string | null;
   usage?: TokenUsage | null;
+  sources?: ReadonlyArray<{ title: string; url: string }> | null;
 }
 
 export type ExtractedDelta = string | ProviderChunkResult | null;
@@ -29,8 +30,12 @@ interface ProxyOptions {
   maxCharacters?: number;
   /** 在读取 upstream 之前先下发的客户端事件（如 sources 搜索来源） */
   initialEvents?: readonly ClientStreamEvent[];
+  /** SSE 心跳保活周期（毫秒），默认 5000ms；0 或负数表示不发送心跳 */
+  keepAliveIntervalMs?: number;
 }
 
+const defaultKeepAliveIntervalMs = 5_000;
+const keepAliveComment = new TextEncoder().encode(": ping\n\n");
 const maximumOutputCharacters = 200;
 const maximumProviderRecordBytes = 64 * 1_024;
 const encoder = new TextEncoder();
@@ -180,10 +185,19 @@ export function proxyStepFunStream(
   let finalized = false;
   let removeSignalListeners = () => undefined;
   let accumulatedUsage: TokenUsage | undefined;
+  let pingTimer: ReturnType<typeof setInterval> | undefined;
+
+  const clearPing = () => {
+    if (pingTimer !== undefined) {
+      clearInterval(pingTimer);
+      pingTimer = undefined;
+    }
+  };
 
   const finalize = () => {
     if (finalized) return;
     finalized = true;
+    clearPing();
     removeSignalListeners();
     options.onFinalize?.();
   };
@@ -204,6 +218,7 @@ export function proxyStepFunStream(
       const close = () => {
         if (!closed) {
           closed = true;
+          clearPing();
           finalize();
           controller.close();
         }
@@ -250,6 +265,11 @@ export function proxyStepFunStream(
         const content = typeof chunkResult === "string" ? chunkResult : chunkResult.content ?? null;
         const thought = typeof chunkResult === "object" ? chunkResult.thought ?? null : null;
         const usage = typeof chunkResult === "object" ? chunkResult.usage ?? null : null;
+        const sources = typeof chunkResult === "object" ? chunkResult.sources ?? null : null;
+
+        if (sources !== null && sources.length > 0) {
+          controller.enqueue(encodeClientEvent({ type: "sources", sources }));
+        }
 
         if (usage !== null && usage !== undefined) {
           accumulatedUsage = {
@@ -336,6 +356,21 @@ export function proxyStepFunStream(
         options.signal?.removeEventListener("abort", onDeadline);
       };
 
+      const keepAliveInterval = options.keepAliveIntervalMs ?? defaultKeepAliveIntervalMs;
+      if (keepAliveInterval > 0) {
+        pingTimer = setInterval(() => {
+          if (!closed) {
+            try {
+              controller.enqueue(keepAliveComment);
+            } catch {
+              clearPing();
+            }
+          } else {
+            clearPing();
+          }
+        }, keepAliveInterval);
+      }
+
       void (async () => {
         try {
           for (const event of options.initialEvents ?? []) {
@@ -386,6 +421,7 @@ export function proxyStepFunStream(
     },
     async cancel() {
       closed = true;
+      clearPing();
       abortUpstream();
       try {
         await reader.cancel();
@@ -474,7 +510,10 @@ export async function collectClientEvents(
     if (record.trim().length === 0) {
       continue;
     }
-    const lines = record.split(/\r?\n/u);
+    const lines = record.split(/\r?\n/u).filter((line) => !line.startsWith(":"));
+    if (lines.length === 0) {
+      continue;
+    }
     const eventName = lines.find((line) => line.startsWith("event:"))?.slice(6).trim();
     const data = recordData(record);
     if (data === null) {

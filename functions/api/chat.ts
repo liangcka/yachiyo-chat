@@ -25,10 +25,7 @@ import {
   type ClientChatRequest,
 } from "../_shared/validation";
 import {
-  buildSearchQuery,
-  enrichWithPageContent,
-  searchWeb,
-  shouldSearchWeb,
+  performWebSearchPipeline,
   type EnrichedChatRequest,
   type WebSearchResult,
 } from "../_shared/web-search";
@@ -37,7 +34,6 @@ import {
   getProvider,
   isAllowedModel,
   isValidApiKey,
-  type ProviderAdapter,
 } from "../_shared/providers/registry";
 
 interface ChatContext {
@@ -56,57 +52,6 @@ function dailyRequestLimit(env: Env): number | null {
 
 function requestContainsImage(request: ClientChatRequest): boolean {
   return request.messages.some((message) => message.imageDataUrl !== undefined);
-}
-
-/** 搜索意图判断的目标模型：与主调用相同的 provider/model */
-interface SearchJudgeTarget {
-  provider: ProviderAdapter;
-  apiKey: string;
-  model: string;
-}
-
-/**
- * 联网搜索编排：仅 chat 模式且 webSearch=true 时执行。
- * 先由模型自主判断（向同一 provider/model 发非流式 judge 请求，4 秒超时）；
- * 判断失败（网络错误/超时/无法解析）回退规则门控 shouldSearchWeb，行为不劣于现状。
- * smartSearch=true 时启用双市场并行检索（en-US 近 30 天 + locale 市场，合并去重上限 10 条）。
- * 命中结果后对 Top 3 并行抓取页面正文（各 5 秒超时，失败静默降级为摘要）。
- * 查询词为空（纯图片等）或搜索失败/空结果时返回 undefined（静默降级为普通对话）。
- * 搜索内部 8 秒超时，并联动客户端断开信号。
- */
-async function performWebSearch(
-  context: ChatContext,
-  request: ClientChatRequest,
-  judgeTarget: SearchJudgeTarget,
-): Promise<readonly WebSearchResult[] | undefined> {
-  if (request.webSearch !== true || request.mode === "summary") {
-    return undefined;
-  }
-  const verdict = await judgeSearchNeed(
-    judgeTarget.provider,
-    judgeTarget.apiKey,
-    judgeTarget.model,
-    request.messages,
-    context.request.signal,
-  );
-  // verdict=null（判断失败）时回退规则门控
-  if (!(verdict ?? shouldSearchWeb(request.messages))) {
-    return undefined;
-  }
-  const query = buildSearchQuery(request.messages);
-  if (query === null) {
-    return undefined;
-  }
-  const results = await searchWeb(
-    query,
-    request.locale,
-    context.request.signal,
-    request.smartSearch === true,
-  );
-  if (results.length === 0) {
-    return undefined;
-  }
-  return enrichWithPageContent(results, request.locale, context.request.signal);
 }
 
 /** 构造注入搜索结果后的服务端内部请求对象 */
@@ -238,11 +183,15 @@ async function handleUserKeyRequest(
   if (requestContainsImage(request) && !provider.imageModels.includes(request.model)) {
     return problemResponse("INVALID_REQUEST", 400);
   }
-  const searchResults = await performWebSearch(context, request, {
-    provider,
-    apiKey: request.apiKey!,
-    model: request.model!,
-  });
+  const searchResults =
+    provider.hasNativeWebSearch === true
+      ? undefined
+      : await performWebSearchPipeline(request, {
+          judge: (messages, signal) =>
+            judgeSearchNeed(provider, request.apiKey!, request.model!, messages, signal),
+          signal: context.request.signal,
+          env: context.env as unknown as Record<string, unknown>,
+        });
   const built = provider.buildRequest({
     request: enrichRequest(request, searchResults),
     apiKey: request.apiKey!,
@@ -297,12 +246,17 @@ async function handleServerFallback(
   if (providerConfiguration === null) {
     return problemResponse("CONFIGURATION_ERROR", 503);
   }
-  const searchResults = await performWebSearch(context, request, {
-    // 服务端 fallback 恒为 StepFun：registry 中 stepfun adapter 的 endpoint
-    // 与 resolveStepFunConfiguration 校验后的 env 值恒等，可直接复用
-    provider: getProvider("stepfun"),
-    apiKey: providerConfiguration.apiKey,
-    model: providerConfiguration.model,
+  const searchResults = await performWebSearchPipeline(request, {
+    judge: (messages, signal) =>
+      judgeSearchNeed(
+        getProvider("stepfun"),
+        providerConfiguration.apiKey,
+        providerConfiguration.model,
+        messages,
+        signal,
+      ),
+    signal: context.request.signal,
+    env: context.env as unknown as Record<string, unknown>,
   });
   const handle = prepareUpstreamFetch(context);
   let upstream: Response;

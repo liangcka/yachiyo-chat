@@ -114,6 +114,27 @@ describe("proxyStepFunStream", () => {
     expect(events.at(-1)).toEqual({ type: "done", truncated: false });
   });
 
+  it("emits sources event when extractor dynamically returns grounding sources", async () => {
+    const customUpstream = chunkedResponse("data: chunk-with-sources\r\n\r\ndata: [DONE]\r\n\r\n");
+    const customExtractor = (data: string) => {
+      if (data === "chunk-with-sources") {
+        return {
+          content: "民主暗潮解答",
+          sources: [{ title: "维基百科", url: "https://zh.wikipedia.org/" }],
+        };
+      }
+      return null;
+    };
+    const response = proxyStepFunStream(customUpstream, {}, customExtractor);
+    const events = await collectClientEvents(response.body!);
+
+    expect(events).toEqual([
+      { type: "sources", sources: [{ title: "维基百科", url: "https://zh.wikipedia.org/" }] },
+      { type: "delta", text: "民主暗潮解答" },
+      { type: "done", truncated: false },
+    ]);
+  });
+
   it("cancels a provider stream that exceeds its total deadline", async () => {
     vi.useFakeTimers();
     const upstream = controlledUpstream();
@@ -157,6 +178,43 @@ describe("proxyStepFunStream", () => {
     expect(upstream.cancel).toHaveBeenCalledOnce();
     expect(events).toEqual([{ type: "error", code: "PROVIDER_STREAM_ERROR" }]);
     expect(JSON.stringify(events)).not.toContain(secret);
+  });
+
+  it("emits periodic keepalive comments without corrupting client events", async () => {
+    vi.useFakeTimers();
+    const upstream = controlledUpstream();
+    const response = proxyStepFunStream(upstream.response, {
+      keepAliveIntervalMs: 10,
+    });
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    const chunks: string[] = [];
+
+    const readPromise = (async () => {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(decoder.decode(value, { stream: true }));
+      }
+    })();
+
+    await vi.advanceTimersByTimeAsync(25);
+    upstream.close();
+    await readPromise;
+    vi.useRealTimers();
+
+    const output = chunks.join("");
+    expect(output).toContain(": ping\n\n");
+  });
+
+  it("safely ignores comment-only records in collectClientEvents", async () => {
+    const sse = ": ping\r\n\r\nevent: delta\r\ndata: {\"text\":\"内容\"}\r\n\r\n: ping\r\n\r\nevent: done\r\ndata: {\"truncated\":false}\r\n\r\n";
+    const events = await collectClientEvents(chunkedResponse(sse).body!);
+
+    expect(events).toEqual([
+      { type: "delta", text: "内容" },
+      { type: "done", truncated: false },
+    ]);
   });
 });
 

@@ -102,6 +102,29 @@ describe("buildGeminiBody", () => {
     expect(system).toContain("输出最多1000个Unicode字符");
     expect(system).not.toContain("最多200个Unicode字符");
   });
+
+  it("enables googleSearch tool when webSearch is true and not summary", () => {
+    const request: ClientChatRequest = {
+      ...textRequest,
+      webSearch: true,
+    };
+    const body = buildGeminiBody(request) as {
+      tools?: Array<{ googleSearch: Record<string, unknown> }>;
+    };
+    expect(body.tools).toEqual([{ googleSearch: {} }]);
+  });
+
+  it("passes currentTime to the system instruction", () => {
+    const request: ClientChatRequest = {
+      ...textRequest,
+      currentTime: "2026-08-27 11:09:37 星期四",
+    };
+    const body = buildGeminiBody(request) as {
+      systemInstruction: { parts: Array<{ text: string }> };
+    };
+    const system = body.systemInstruction.parts[0]?.text ?? "";
+    expect(system).toContain("当前现实时间：2026-08-27 11:09:37 星期四");
+  });
 });
 
 describe("extractGeminiDeltaText", () => {
@@ -142,6 +165,30 @@ describe("extractGeminiDeltaText", () => {
     });
   });
 
+  it("extracts groundingMetadata sources when present", () => {
+    const data = JSON.stringify({
+      candidates: [
+        {
+          content: { parts: [{ text: "“民主暗潮”通常是对《绝地潜兵2》的戏称。" }] },
+          groundingMetadata: {
+            groundingChunks: [
+              { web: { uri: "https://zh.wikipedia.org/wiki/绝地潜兵2", title: "绝地潜兵2 - 维基百科" } },
+              { web: { uri: "https://www.gamersky.com/news/123.html", title: "游民星空" } },
+            ],
+          },
+        },
+      ],
+    });
+    expect(extractGeminiDeltaText(data)).toEqual({
+      content: "“民主暗潮”通常是对《绝地潜兵2》的戏称。",
+      thought: null,
+      sources: [
+        { title: "绝地潜兵2 - 维基百科", url: "https://zh.wikipedia.org/wiki/绝地潜兵2" },
+        { title: "游民星空", url: "https://www.gamersky.com/news/123.html" },
+      ],
+    });
+  });
+
   it("returns null for [DONE] and empty candidates without usage", () => {
     expect(extractGeminiDeltaText("[DONE]")).toBeNull();
     const empty = JSON.stringify({ candidates: [] });
@@ -159,6 +206,7 @@ describe("buildGeminiAdapter", () => {
   it("exposes the gemini provider metadata", () => {
     expect(adapter.id).toBe("gemini");
     expect(adapter.isOpenAICompat).toBe(false);
+    expect(adapter.hasNativeWebSearch).toBe(true);
     expect(adapter.supportsImage).toBe(true);
     expect(adapter.defaultModel).toBe("gemini-3.7-flash");
     expect(adapter.allowedModels).toContain("gemini-3.5-flash");

@@ -97,6 +97,15 @@ describe("buildAnthropicBody", () => {
     expect(body.system).toContain("输出最多1000个Unicode字符");
     expect(body.system).not.toContain("最多200个Unicode字符");
   });
+
+  it("passes currentTime to the system prompt", () => {
+    const request: ClientChatRequest = {
+      ...textRequest,
+      currentTime: "2026-08-27 11:09:37 星期四",
+    };
+    const body = buildAnthropicBody(request, "claude-sonnet-5") as { system: string };
+    expect(body.system).toContain("当前现实时间：2026-08-27 11:09:37 星期四");
+  });
 });
 
 describe("extractAnthropicDeltaText", () => {

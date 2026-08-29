@@ -158,4 +158,39 @@ describe("validateChatRequest", () => {
       }),
     ).toThrow(ChatValidationError);
   });
+
+  it("accepts an optional currentTime string on both return paths and rejects invalid values", () => {
+    expect(
+      validateChatRequest({
+        ...(validRequest() as object),
+        currentTime: "2026-08-27 11:09:37 星期四",
+      }),
+    ).toMatchObject({ currentTime: "2026-08-27 11:09:37 星期四" });
+
+    expect(
+      validateChatRequest({
+        ...(validRequest() as object),
+        provider: "openai",
+        apiKey: "sk-" + "a".repeat(40),
+        model: "gpt-5.6-luna",
+        currentTime: "2026-08-27 11:09:37 星期四",
+      }),
+    ).toMatchObject({ currentTime: "2026-08-27 11:09:37 星期四" });
+
+    expect(validateChatRequest(validRequest())).not.toHaveProperty("currentTime");
+
+    // Rejects non-string, empty, or too long currentTime
+    expect(() =>
+      validateChatRequest({ ...(validRequest() as object), currentTime: 123456 }),
+    ).toThrow(ChatValidationError);
+    expect(() =>
+      validateChatRequest({ ...(validRequest() as object), currentTime: "" }),
+    ).toThrow(ChatValidationError);
+    expect(() =>
+      validateChatRequest({ ...(validRequest() as object), currentTime: "   " }),
+    ).toThrow(ChatValidationError);
+    expect(() =>
+      validateChatRequest({ ...(validRequest() as object), currentTime: "a".repeat(101) }),
+    ).toThrow(ChatValidationError);
+  });
 });

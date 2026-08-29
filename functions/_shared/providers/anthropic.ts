@@ -126,6 +126,7 @@ export function buildAnthropicBody(request: EnrichedChatRequest, model: string):
       webSearch: request.webSearch,
       smartSearch: request.smartSearch,
       searchResults: request.searchResults,
+      currentTime: request.currentTime,
     }),
     messages: buildAnthropicMessages(request.messages, request.locale),
     stream: true,

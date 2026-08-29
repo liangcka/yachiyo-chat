@@ -96,8 +96,10 @@ export function buildGeminiContents(
 }
 
 export function buildGeminiBody(request: EnrichedChatRequest): unknown {
+  const useGoogleSearch = request.webSearch === true && request.mode !== "summary";
   return {
     contents: buildGeminiContents(request.messages, request.locale),
+    ...(useGoogleSearch ? { tools: [{ googleSearch: {} }] } : {}),
     systemInstruction: {
       parts: [
         {
@@ -105,6 +107,7 @@ export function buildGeminiBody(request: EnrichedChatRequest): unknown {
             webSearch: request.webSearch,
             smartSearch: request.smartSearch,
             searchResults: request.searchResults,
+            currentTime: request.currentTime,
           }),
         },
       ],
@@ -179,15 +182,37 @@ export function extractGeminiDeltaText(data: string): ExtractedDelta {
     }
   }
 
+  let sources: Array<{ title: string; url: string }> | undefined;
+  const groundingMeta = (first.groundingMetadata ?? value.groundingMetadata) as Record<string, unknown> | undefined;
+  if (typeof groundingMeta === "object" && groundingMeta !== null) {
+    const chunks = groundingMeta.groundingChunks;
+    if (Array.isArray(chunks) && chunks.length > 0) {
+      const extracted: Array<{ title: string; url: string }> = [];
+      for (const chunk of chunks) {
+        if (typeof chunk === "object" && chunk !== null) {
+          const web = (chunk as Record<string, unknown>).web as Record<string, unknown> | undefined;
+          if (typeof web === "object" && web !== null && typeof web.uri === "string" && web.uri.length > 0) {
+            const title = typeof web.title === "string" && web.title.length > 0 ? web.title : web.uri;
+            extracted.push({ title, url: web.uri });
+          }
+        }
+      }
+      if (extracted.length > 0) {
+        sources = extracted;
+      }
+    }
+  }
+
   const resContent = contentText.length > 0 ? contentText : null;
   const resThought = thoughtText.length > 0 ? thoughtText : null;
-  if (resContent === null && resThought === null && usage === undefined) {
+  if (resContent === null && resThought === null && usage === undefined && sources === undefined) {
     return null;
   }
   return {
     content: resContent,
     thought: resThought,
     ...(usage !== undefined ? { usage } : {}),
+    ...(sources !== undefined ? { sources } : {}),
   };
 }
 
@@ -222,6 +247,7 @@ export function buildGeminiAdapter(): ProviderAdapter {
   return {
     id: "gemini",
     isOpenAICompat: false,
+    hasNativeWebSearch: true,
     supportsImage: true,
     imageModels: [...ALLOWED_MODELS],
     defaultModel: "gemini-3.7-flash",

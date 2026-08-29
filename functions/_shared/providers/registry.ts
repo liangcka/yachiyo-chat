@@ -31,6 +31,8 @@ export interface ProviderAdapter {
   readonly id: ProviderId;
   /** true 表示 upstream SSE 已是 OpenAI 兼容格式，可直接复用通用解析器 */
   readonly isOpenAICompat: boolean;
+  /** true 表示该厂商自带原生搜索/Grounding工具（如 Gemini Google Search Grounding），无需前置拉取外部RSS */
+  readonly hasNativeWebSearch?: boolean;
   /** 该厂商是否存在支持图片输入的视觉模型 */
   readonly supportsImage: boolean;
   /** 可发送图片的具体模型白名单；后端按所选模型校验图片请求 */
@@ -58,16 +60,16 @@ const openaiCompatProviders = {
   deepseek: {
     endpoint: "https://api.deepseek.com/v1/chat/completions",
     defaultModel: "deepseek-v4-flash",
-    allowedModels: ["deepseek-v4-flash", "deepseek-v4-pro"],
-    supportsImage: false,
-    imageModels: [],
+    allowedModels: ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"],
+    supportsImage: true,
+    imageModels: ["deepseek-v4-flash-vision-exp"],
   },
   glm: {
     endpoint: "https://open.bigmodel.cn/api/paas/v4/chat/completions",
-    defaultModel: "glm-4.7-flash",
-    allowedModels: ["glm-5.2", "glm-4.7-flash", "glm-4.6", "glm-4.6v-flash", "glm-4v-flash"],
+    defaultModel: "glm-5.3-flash",
+    allowedModels: ["glm-5.3", "glm-5.3-flash", "glm-5.2", "glm-4.7-flash", "glm-4.6", "glm-4.6v-flash", "glm-4v-flash"],
     supportsImage: true,
-    imageModels: ["glm-4.6v-flash", "glm-4v-flash"],
+    imageModels: ["glm-5.3-flash", "glm-4.6v-flash", "glm-4v-flash"],
   },
   openai: {
     endpoint: "https://api.openai.com/v1/chat/completions",

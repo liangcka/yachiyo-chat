@@ -1,8 +1,9 @@
 import { ChevronDown, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useClosing } from "../app/use-closing";
-import { type SkillDefinition } from "../skills";
 import type { UiCopy } from "../i18n/messages";
+import type { WebSearchSettings } from "../services/web-search-settings";
+import { type SkillDefinition } from "../skills";
 
 export interface SkillsPanelProps {
   copy: UiCopy;
@@ -12,17 +13,61 @@ export interface SkillsPanelProps {
   onClose: () => void;
   onToggle: (id: string, next: boolean) => void;
   /** 联网搜索开关状态 */
-  webSearchEnabled: boolean;
-  /** "显示引用来源"开关状态 */
-  webSearchShowSources: boolean;
-  /** "智能搜索"开关状态 */
-  webSearchSmart: boolean;
-  /** 切换联网搜索开关 */
-  onWebSearchEnabledChange: (next: boolean) => void;
-  /** 切换"显示引用来源"开关 */
-  onWebSearchShowSourcesChange: (next: boolean) => void;
-  /** 切换"智能搜索"开关 */
-  onWebSearchSmartChange: (next: boolean) => void;
+  webSearchSettings: WebSearchSettings;
+  /** 切换联网搜索设置 */
+  onWebSearchSettingsChange: (partial: Partial<WebSearchSettings>) => void;
+}
+
+interface WebSearchItemProps {
+  title: string;
+  description: string;
+  active: boolean;
+  dataActive?: boolean;
+  disabled?: boolean;
+  isSubitem?: boolean;
+  toggleLabel: string;
+  disableLabel: string;
+  enableLabel: string;
+  onToggle: () => void;
+}
+
+function WebSearchItem({
+  title,
+  description,
+  active,
+  dataActive,
+  disabled = false,
+  isSubitem = false,
+  toggleLabel,
+  disableLabel,
+  enableLabel,
+  onToggle,
+}: WebSearchItemProps) {
+  const itemClassName = `skills-panel__item skills-panel__web-search-item${
+    isSubitem ? " skills-panel__web-search-subitem" : ""
+  }`;
+  const isDataActive = dataActive ?? active;
+
+  return (
+    <li className={itemClassName} data-active={isDataActive ? "true" : undefined}>
+      <div className="skills-panel__summary">
+        <div className="skills-panel__meta">
+          <strong>{title}</strong>
+          <span>{description}</span>
+        </div>
+        <button
+          aria-label={`${toggleLabel}: ${title}`}
+          aria-pressed={active}
+          className="skills-panel__toggle"
+          disabled={disabled}
+          onClick={onToggle}
+          type="button"
+        >
+          {active ? disableLabel : enableLabel}
+        </button>
+      </div>
+    </li>
+  );
 }
 
 export function SkillsPanel({
@@ -32,12 +77,8 @@ export function SkillsPanel({
   open,
   onClose,
   onToggle,
-  webSearchEnabled,
-  webSearchShowSources,
-  webSearchSmart,
-  onWebSearchEnabledChange,
-  onWebSearchShowSourcesChange,
-  onWebSearchSmartChange,
+  webSearchSettings,
+  onWebSearchSettingsChange,
 }: SkillsPanelProps) {
   const closeRef = useRef<HTMLButtonElement>(null);
   const [expandedId, setExpandedId] = useState<string>();
@@ -49,6 +90,8 @@ export function SkillsPanel({
   }, [open]);
 
   if (!render) return null;
+
+  const { enabled, showSources, smart } = webSearchSettings;
 
   return (
     <div className={`overlay overlay--history ${closing ? "overlay--closing" : ""}`}>
@@ -77,7 +120,18 @@ export function SkillsPanel({
               >
                 <div className="skills-panel__summary">
                   <div className="skills-panel__meta">
-                    <strong>{skill.name}</strong>
+                    <div className="skills-panel__title-row">
+                      <strong>{skill.name}</strong>
+                      <button
+                        aria-expanded={expanded}
+                        className="skills-panel__expand"
+                        onClick={() => setExpandedId(expanded ? undefined : skill.id)}
+                        type="button"
+                      >
+                        <ChevronDown aria-hidden="true" data-expanded={expanded ? "true" : undefined} size={14} />
+                        <span>{expanded ? copy.skillHideContent : copy.skillViewContent}</span>
+                      </button>
+                    </div>
                     <span>{skill.description}</span>
                   </div>
                   <button
@@ -90,83 +144,45 @@ export function SkillsPanel({
                     {active ? copy.skillDisable : copy.skillEnable}
                   </button>
                 </div>
-                <button
-                  aria-expanded={expanded}
-                  className="skills-panel__expand"
-                  onClick={() => setExpandedId(expanded ? undefined : skill.id)}
-                  type="button"
-                >
-                  <ChevronDown aria-hidden="true" data-expanded={expanded ? "true" : undefined} size={18} />
-                  <span>{expanded ? copy.skillHideContent : copy.skillViewContent}</span>
-                </button>
                 {expanded ? <pre className="skills-panel__content">{skill.content}</pre> : null}
               </li>
             );
           })}
         </ul>
         <ul className="skills-panel__list skills-panel__web-search">
-          <li
-            className="skills-panel__item skills-panel__web-search-item"
-            data-active={webSearchEnabled ? "true" : undefined}
-          >
-            <div className="skills-panel__summary">
-              <div className="skills-panel__meta">
-                <strong>{copy.webSearchTitle}</strong>
-                <span>{copy.webSearchDescription}</span>
-              </div>
-              <button
-                aria-label={`${copy.skillToggleLabel}: ${copy.webSearchTitle}`}
-                aria-pressed={webSearchEnabled}
-                className="skills-panel__toggle"
-                onClick={() => onWebSearchEnabledChange(!webSearchEnabled)}
-                type="button"
-              >
-                {webSearchEnabled ? copy.skillDisable : copy.skillEnable}
-              </button>
-            </div>
-          </li>
-          <li
-            className="skills-panel__item skills-panel__web-search-item"
-            data-active={webSearchEnabled && webSearchSmart ? "true" : undefined}
-          >
-            <div className="skills-panel__summary">
-              <div className="skills-panel__meta">
-                <strong>{copy.webSearchSmart}</strong>
-                <span>{copy.webSearchSmartDescription}</span>
-              </div>
-              <button
-                aria-label={`${copy.skillToggleLabel}: ${copy.webSearchSmart}`}
-                aria-pressed={webSearchSmart}
-                className="skills-panel__toggle"
-                disabled={!webSearchEnabled}
-                onClick={() => onWebSearchSmartChange(!webSearchSmart)}
-                type="button"
-              >
-                {webSearchSmart ? copy.skillDisable : copy.skillEnable}
-              </button>
-            </div>
-          </li>
-          <li
-            className="skills-panel__item skills-panel__web-search-item"
-            data-active={webSearchEnabled && webSearchShowSources ? "true" : undefined}
-          >
-            <div className="skills-panel__summary">
-              <div className="skills-panel__meta">
-                <strong>{copy.webSearchShowSources}</strong>
-                <span>{copy.webSearchShowSourcesDescription}</span>
-              </div>
-              <button
-                aria-label={`${copy.skillToggleLabel}: ${copy.webSearchShowSources}`}
-                aria-pressed={webSearchShowSources}
-                className="skills-panel__toggle"
-                disabled={!webSearchEnabled}
-                onClick={() => onWebSearchShowSourcesChange(!webSearchShowSources)}
-                type="button"
-              >
-                {webSearchShowSources ? copy.skillDisable : copy.skillEnable}
-              </button>
-            </div>
-          </li>
+          <WebSearchItem
+            active={enabled}
+            disableLabel={copy.skillDisable}
+            description={copy.webSearchDescription}
+            enableLabel={copy.skillEnable}
+            onToggle={() => onWebSearchSettingsChange({ enabled: !enabled })}
+            title={copy.webSearchTitle}
+            toggleLabel={copy.skillToggleLabel}
+          />
+          <WebSearchItem
+            active={smart}
+            dataActive={enabled && smart}
+            disabled={!enabled}
+            disableLabel={copy.skillDisable}
+            description={copy.webSearchSmartDescription}
+            enableLabel={copy.skillEnable}
+            isSubitem
+            onToggle={() => onWebSearchSettingsChange({ smart: !smart })}
+            title={copy.webSearchSmart}
+            toggleLabel={copy.skillToggleLabel}
+          />
+          <WebSearchItem
+            active={showSources}
+            dataActive={enabled && showSources}
+            disabled={!enabled}
+            disableLabel={copy.skillDisable}
+            description={copy.webSearchShowSourcesDescription}
+            enableLabel={copy.skillEnable}
+            isSubitem
+            onToggle={() => onWebSearchSettingsChange({ showSources: !showSources })}
+            title={copy.webSearchShowSources}
+            toggleLabel={copy.skillToggleLabel}
+          />
         </ul>
       </section>
     </div>

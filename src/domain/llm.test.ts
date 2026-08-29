@@ -48,7 +48,7 @@ describe("PROVIDER_METADATA", () => {
 
   it("reports image support flags aligned with backend", () => {
     expect(PROVIDER_METADATA.stepfun.supportsImage).toBe(true);
-    expect(PROVIDER_METADATA.deepseek.supportsImage).toBe(false);
+    expect(PROVIDER_METADATA.deepseek.supportsImage).toBe(true);
     expect(PROVIDER_METADATA.glm.supportsImage).toBe(true);
     expect(PROVIDER_METADATA.openai.supportsImage).toBe(true);
     expect(PROVIDER_METADATA.claude.supportsImage).toBe(true);
@@ -56,8 +56,12 @@ describe("PROVIDER_METADATA", () => {
   });
 
   it("limits imageModels to the models that actually accept images", () => {
-    expect(PROVIDER_METADATA.deepseek.imageModels).toEqual([]);
-    expect(PROVIDER_METADATA.glm.imageModels).toEqual(["glm-4.6v-flash", "glm-4v-flash"]);
+    expect(PROVIDER_METADATA.deepseek.imageModels).toEqual(["deepseek-v4-flash-vision-exp"]);
+    expect(PROVIDER_METADATA.glm.imageModels).toEqual([
+      "glm-5.3-flash",
+      "glm-4.6v-flash",
+      "glm-4v-flash",
+    ]);
     for (const id of PROVIDER_IDS) {
       for (const model of PROVIDER_METADATA[id].imageModels) {
         expect(PROVIDER_METADATA[id].models).toContain(model);

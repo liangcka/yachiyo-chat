@@ -24,7 +24,7 @@ describe("PROVIDERS registry", () => {
     expect(PROVIDERS.claude.isOpenAICompat).toBe(false);
     expect(PROVIDERS.gemini.isOpenAICompat).toBe(false);
 
-    expect(PROVIDERS.deepseek.supportsImage).toBe(false);
+    expect(PROVIDERS.deepseek.supportsImage).toBe(true);
     expect(PROVIDERS.glm.supportsImage).toBe(true);
     expect(PROVIDERS.openai.supportsImage).toBe(true);
     expect(PROVIDERS.claude.supportsImage).toBe(true);
@@ -32,8 +32,8 @@ describe("PROVIDERS registry", () => {
   });
 
   it("exposes per-model image support aligned with the frontend", () => {
-    expect(PROVIDERS.deepseek.imageModels).toEqual([]);
-    expect(PROVIDERS.glm.imageModels).toEqual(["glm-4.6v-flash", "glm-4v-flash"]);
+    expect(PROVIDERS.deepseek.imageModels).toEqual(["deepseek-v4-flash-vision-exp"]);
+    expect(PROVIDERS.glm.imageModels).toEqual(["glm-5.3-flash", "glm-4.6v-flash", "glm-4v-flash"]);
     for (const id of PROVIDER_IDS) {
       for (const model of PROVIDERS[id].imageModels) {
         expect(PROVIDERS[id].allowedModels).toContain(model);

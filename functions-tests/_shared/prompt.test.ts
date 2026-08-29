@@ -69,7 +69,7 @@ describe("buildSystemPrompt", () => {
     });
 
     expect(prompt.indexOf("</runtime>")).toBeLessThan(prompt.indexOf("<web_search_results>"));
-    expect(prompt).toContain("以下是针对用户最新消息的必应网络搜索结果，按相关度排序：");
+    expect(prompt).toContain("以下是针对用户最新消息的网络搜索结果，按相关度排序：");
     expect(prompt).toContain("[1] 上海天气（https://weather.example.cn/）\n今日多云，24至30度。");
     expect(prompt).toContain("[2] 第二来源（https://news.example.org/）\n摘要内容。");
     expect(prompt).toContain("联网模式已开启");
@@ -151,14 +151,36 @@ describe("buildSystemPrompt", () => {
     expect(prompt).not.toContain("优先采信发布日期更新");
   });
 
+  it("injects the provided current time into the runtime prompt", () => {
+    const zhPrompt = buildSystemPrompt("zh-CN", "chat", {
+      currentTime: "2026-08-27 11:09:37 星期四",
+    });
+    expect(zhPrompt).toContain("当前现实时间：2026-08-27 11:09:37 星期四。请结合当前时间与时段（如早晚问候、季节时令等）进行自然贴切的互动。");
+
+    const jaPrompt = buildSystemPrompt("ja-JP", "chat", {
+      currentTime: "2026-08-27 11:09:37 木曜日",
+    });
+    expect(jaPrompt).toContain("現在の現実時間：2026-08-27 11:09:37 木曜日。時間帯や季節に応じた挨拶や話題を自然に反映してください。");
+  });
+
+  it("injects fallback server time when currentTime is not specified", () => {
+    const zhPrompt = buildSystemPrompt("zh-CN");
+    expect(zhPrompt).toMatch(/当前现实时间：\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} 星期[日一二三四五六] \(UTC\)。/u);
+
+    const jaPrompt = buildSystemPrompt("ja-JP");
+    expect(jaPrompt).toMatch(/現在の現実時間：\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [日月火水木金土]曜日 \(UTC\)。/u);
+  });
+
   it("keeps summary mode unchanged regardless of web search options", () => {
     const prompt = buildSystemPrompt("zh-CN", "summary", {
       webSearch: true,
       searchResults: [{ title: "t", url: "https://example.com/", snippet: "s" }],
+      currentTime: "2026-08-27 11:09:37 星期四",
     });
 
     expect(prompt).toContain("对话记忆整理助手");
     expect(prompt).not.toContain("<web_search_results>");
     expect(prompt).not.toContain("1000个Unicode字符");
+    expect(prompt).not.toContain("当前现实时间");
   });
 });

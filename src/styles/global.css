@@ -20,11 +20,13 @@ html {
 
 body {
   min-width: 20rem;
-  min-height: 100dvh;
+  min-height: var(--visual-viewport-height, 100dvh);
+  height: var(--visual-viewport-height, 100dvh);
   margin: 0;
   overflow: hidden;
   color: var(--text-primary);
   background: var(--space-0);
+  -webkit-text-size-adjust: 100%;
 }
 
 button,
@@ -45,6 +47,7 @@ dialog {
 
 button {
   -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 button:focus-visible,
@@ -68,7 +71,8 @@ textarea:focus-visible {
 
 #root,
 .app-shell {
-  min-height: 100dvh;
+  height: var(--visual-viewport-height, 100dvh);
+  min-height: var(--visual-viewport-height, 100dvh);
 }
 
 .app-shell {

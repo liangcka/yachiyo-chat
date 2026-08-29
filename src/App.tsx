@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
+import { Sparkles } from "lucide-react";
 import { useChatController, type ChatRepository, type StreamChatFunction } from "./app/use-chat-controller";
 import { AccessGate } from "./components/AccessGate";
 import { Composer } from "./components/Composer";
@@ -16,7 +17,12 @@ import { ConversationRepository } from "./data/conversation-repository";
 import { YachiyoDatabase } from "./data/db";
 import type { Conversation, Locale, StoredImage } from "./domain/chat";
 import { PROVIDER_METADATA, type ActiveLlmConfig, type ProviderId } from "./domain/llm";
-import { processImage, type ImageProcessingErrorCode, type ProcessedImage } from "./features/capture/image-processor";
+import {
+  ImageProcessingError,
+  processImage,
+  type ImageProcessingErrorCode,
+  type ProcessedImage,
+} from "./features/capture/image-processor";
 import { copyFor, type UiCopy } from "./i18n/messages";
 import { UpdatePrompt } from "./pwa/UpdatePrompt";
 import { usePwaUpdate } from "./pwa/use-pwa-update";
@@ -28,7 +34,7 @@ import { isRetryableChatErrorCode, streamChat } from "./services/chat-client";
 import { LlmSettingsService } from "./services/llm-settings";
 import { SessionClient } from "./services/session-client";
 import { SkillSettingsService } from "./services/skill-settings";
-import { WebSearchSettingsService, defaultWebSearchSettings } from "./services/web-search-settings";
+import { WebSearchSettingsService, defaultWebSearchSettings, type WebSearchSettings } from "./services/web-search-settings";
 import { SKILLS } from "./skills";
 
 export interface AppRepository extends ChatRepository {
@@ -116,9 +122,7 @@ export function App({ services }: AppProps) {
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
-  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
-  const [webSearchShowSources, setWebSearchShowSources] = useState(true);
-  const [webSearchSmart, setWebSearchSmart] = useState(false);
+  const [webSearchSettings, setWebSearchSettings] = useState<WebSearchSettings>(defaultWebSearchSettings);
   const [toast, setToast] = useState<ToastState>();
 
   const activeLlmConfig = useMemo<ActiveLlmConfig | undefined>(() => {
@@ -142,8 +146,8 @@ export function App({ services }: AppProps) {
     streamChat: activeServices.streamChat,
     activeLlmConfig,
     activeSkills,
-    webSearchEnabled,
-    webSearchSmart,
+    webSearchEnabled: webSearchSettings.enabled,
+    webSearchSmart: webSearchSettings.smart,
   });
   const setControllerOnline = controller.setOnline;
   const copy = copyFor(controller.locale);
@@ -200,6 +204,14 @@ export function App({ services }: AppProps) {
     };
   }, [llmService]);
 
+  const syncWebSearchSettings = useCallback(async () => {
+    const webSearch = await webSearchService
+      .getWebSearchSettings()
+      .catch(() => defaultWebSearchSettings);
+    setWebSearchSettings(webSearch);
+    return webSearch;
+  }, [webSearchService]);
+
   useEffect(() => {
     if (!isOnline) {
       const timeout = setTimeout(() => {
@@ -220,13 +232,8 @@ export function App({ services }: AppProps) {
             if (!cancelled) showSessionFailure();
           }
           setActiveSkillIds(await skillService.getActiveSkillIds().catch(() => []));
-          const webSearch = await webSearchService
-            .getWebSearchSettings()
-            .catch(() => defaultWebSearchSettings);
           if (!cancelled) {
-            setWebSearchEnabled(webSearch.enabled);
-            setWebSearchShowSources(webSearch.showSources);
-            setWebSearchSmart(webSearch.smart);
+            await syncWebSearchSettings();
           }
         }
         if (cancelled) return;
@@ -246,7 +253,7 @@ export function App({ services }: AppProps) {
       cancelled = true;
       abortController.abort();
     };
-  }, [activeServices, isOnline, readLlmSettings, skillService, webSearchService]);
+  }, [activeServices, isOnline, readLlmSettings, skillService, syncWebSearchSettings]);
 
   useEffect(() => {
     const timeout = setTimeout(() => setControllerOnline(isOnline), 0);
@@ -257,6 +264,27 @@ export function App({ services }: AppProps) {
   // 仅原生壳执行——网页 PWA 的离线缓存不能在每次启动时清空。
   useEffect(() => {
     if (isNativeApp()) void clearWebCaches();
+  }, []);
+
+  // 移动端与软键盘适配：实时同步 visualViewport 高度至 CSS 变量
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.visualViewport) return;
+    const vv = window.visualViewport;
+
+    const handleViewportChange = () => {
+      const height = vv.height;
+      document.documentElement.style.setProperty("--visual-viewport-height", `${height}px`);
+    };
+
+    handleViewportChange();
+    vv.addEventListener("resize", handleViewportChange);
+    vv.addEventListener("scroll", handleViewportChange);
+
+    return () => {
+      vv.removeEventListener("resize", handleViewportChange);
+      vv.removeEventListener("scroll", handleViewportChange);
+      document.documentElement.style.removeProperty("--visual-viewport-height");
+    };
   }, []);
 
   const chatBottomRef = useRef<HTMLDivElement>(null);
@@ -347,26 +375,13 @@ export function App({ services }: AppProps) {
     [skillService],
   );
 
-  const handleWebSearchEnabledChange = useCallback(
-    (next: boolean) => {
-      setWebSearchEnabled(next);
-      void webSearchService.setEnabled(next).catch(() => undefined);
-    },
-    [webSearchService],
-  );
-
-  const handleWebSearchShowSourcesChange = useCallback(
-    (next: boolean) => {
-      setWebSearchShowSources(next);
-      void webSearchService.setShowSources(next).catch(() => undefined);
-    },
-    [webSearchService],
-  );
-
-  const handleWebSearchSmartChange = useCallback(
-    (next: boolean) => {
-      setWebSearchSmart(next);
-      void webSearchService.setSmart(next).catch(() => undefined);
+  const handleWebSearchSettingsChange = useCallback(
+    (partial: Partial<WebSearchSettings>) => {
+      setWebSearchSettings((current) => {
+        const next = { ...current, ...partial };
+        void webSearchService.set(next).catch(() => undefined);
+        return next;
+      });
     },
     [webSearchService],
   );
@@ -467,12 +482,7 @@ export function App({ services }: AppProps) {
       setLlmEntries(llmSettings.entries);
       setLlmActiveProvider(llmSettings.active);
       setActiveSkillIds(await skillService.getActiveSkillIds());
-      const webSearch = await webSearchService
-        .getWebSearchSettings()
-        .catch(() => defaultWebSearchSettings);
-      setWebSearchEnabled(webSearch.enabled);
-      setWebSearchShowSources(webSearch.showSources);
-      setWebSearchSmart(webSearch.smart);
+      await syncWebSearchSettings();
     } catch {
       showToast(copy.genericFailure, "error");
     }
@@ -577,9 +587,7 @@ export function App({ services }: AppProps) {
     await llmService.clearAll();
     setActiveSkillIds([]);
     await skillService.clear();
-    setWebSearchEnabled(false);
-    setWebSearchShowSources(true);
-    setWebSearchSmart(false);
+    setWebSearchSettings(defaultWebSearchSettings);
     await webSearchService.clear().catch(() => undefined);
     setLlmEntries([]);
     setLlmActiveProvider(undefined);
@@ -598,6 +606,76 @@ export function App({ services }: AppProps) {
   const activeProviderSupportsImage =
     activeLlmConfig === undefined ||
     PROVIDER_METADATA[activeLlmConfig.provider].imageModels.includes(activeLlmConfig.model);
+
+  useEffect(() => {
+    const handleGlobalPaste = (event: ClipboardEvent) => {
+      if (event.defaultPrevented) return;
+      if (
+        authentication !== "authenticated" ||
+        controller.phase === "streaming" ||
+        controller.phase === "compressing" ||
+        controller.phase === "loading"
+      ) {
+        return;
+      }
+      if (llmOpen || skillsOpen || historyOpen || menuOpen || memoryOpen) {
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) {
+        return;
+      }
+      const items = event.clipboardData?.items;
+      if (!items) return;
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.type.startsWith("image/")) {
+          const file = item.getAsFile();
+          if (file) {
+            event.preventDefault();
+            if (!isOnline || controller.phase === "offline") {
+              showToast(copy.offline, "error");
+              return;
+            }
+            if (!activeProviderSupportsImage) {
+              showToast(copy.llmNoImageSupport, "error");
+              return;
+            }
+            void (activeServices.processImage ?? processImage)(file)
+              .then((image) => handleImage(image))
+              .catch((error) => {
+                showToast(
+                  imageErrorMessage(
+                    error instanceof ImageProcessingError ? error.code : "IMAGE_DECODE_FAILED",
+                    copy,
+                  ),
+                  "error",
+                );
+              });
+            return;
+          }
+        }
+      }
+    };
+
+    window.addEventListener("paste", handleGlobalPaste);
+    return () => {
+      window.removeEventListener("paste", handleGlobalPaste);
+    };
+  }, [
+    activeProviderSupportsImage,
+    activeServices.processImage,
+    authentication,
+    controller.phase,
+    copy,
+    historyOpen,
+    isOnline,
+    llmOpen,
+    memoryOpen,
+    menuOpen,
+    showToast,
+    skillsOpen,
+  ]);
 
   const authenticatedContent =
     controller.phase === "loading" ? (
@@ -619,6 +697,12 @@ export function App({ services }: AppProps) {
           }}
           processImage={activeServices.processImage}
         />
+        {controller.phase === "compressing" ? (
+          <div aria-live="polite" className="compressing-pill" role="status">
+            <Sparkles aria-hidden="true" className="compressing-pill__icon" size={16} />
+            <span>{copy.compressingContext}</span>
+          </div>
+        ) : null}
         <ConversationView
           hasMoreHistory={controller.hasMoreHistory}
           imageUrls={imageUrls}
@@ -633,7 +717,7 @@ export function App({ services }: AppProps) {
               : handleRegenerate
           }
           onToast={showToast}
-          showSources={webSearchShowSources}
+          showSources={webSearchSettings.showSources}
           summary={controller.activeConversation?.summary}
         />
         <div ref={chatBottomRef} className="chat-bottom">
@@ -668,7 +752,29 @@ export function App({ services }: AppProps) {
           />
           <Composer
             copy={copy}
+            imageDisabled={
+              !isOnline ||
+              controller.phase === "streaming" ||
+              controller.phase === "compressing" ||
+              controller.phase === "offline" ||
+              !activeProviderSupportsImage
+            }
             onChange={setComposerValue}
+            onError={(code) => showToast(imageErrorMessage(code, copy), "error")}
+            onFocus={() => {
+              setTimeout(() => {
+                const chatView = document.querySelector(".conversation-view");
+                if (chatView) {
+                  chatView.scrollTop = chatView.scrollHeight;
+                }
+              }, 120);
+            }}
+            onImage={handleImage}
+            onImageDisabled={() => {
+              if (!activeProviderSupportsImage) {
+                showToast(copy.llmNoImageSupport, "error");
+              }
+            }}
             onRemoveImage={() => {
               controller.setPendingImage(undefined);
               setPendingImageDataUrl(undefined);
@@ -677,6 +783,7 @@ export function App({ services }: AppProps) {
             onStop={controller.stop}
             pendingImageDataUrl={pendingImageDataUrl}
             phase={isOnline ? controller.phase : "offline"}
+            processImage={activeServices.processImage}
             value={composerValue}
           />
         </div>
@@ -734,14 +841,10 @@ export function App({ services }: AppProps) {
           copy={copy}
           onClose={() => setSkillsOpen(false)}
           onToggle={(id, next) => void handleSkillToggle(id, next)}
-          onWebSearchEnabledChange={handleWebSearchEnabledChange}
-          onWebSearchShowSourcesChange={handleWebSearchShowSourcesChange}
-          onWebSearchSmartChange={handleWebSearchSmartChange}
+          onWebSearchSettingsChange={handleWebSearchSettingsChange}
           open={skillsOpen}
           skills={SKILLS}
-          webSearchEnabled={webSearchEnabled}
-          webSearchShowSources={webSearchShowSources}
-          webSearchSmart={webSearchSmart}
+          webSearchSettings={webSearchSettings}
         />
         <UserMemoryPanel
           copy={copy}

@@ -33,6 +33,8 @@ export interface ClientChatRequest {
   webSearch?: boolean;
   /** 智能搜索：联网搜索开启时的双市场并行检索（结果更多、带发布日期） */
   smartSearch?: boolean;
+  /** 发送消息时的客户端本地格式化时间戳 */
+  currentTime?: string;
 }
 
 export class ChatValidationError extends Error {
@@ -60,6 +62,7 @@ const allowedTopLevelKeys = new Set([
   "model",
   "webSearch",
   "smartSearch",
+  "currentTime",
 ]);
 const allowedMessageKeys = new Set(["role", "text", "imageDataUrl"]);
 
@@ -215,6 +218,16 @@ export function validateChatRequest(value: unknown): ClientChatRequest {
   }
   const smartSearch = value.smartSearch as boolean | undefined;
 
+  if (
+    value.currentTime !== undefined &&
+    (typeof value.currentTime !== "string" ||
+      value.currentTime.trim().length === 0 ||
+      value.currentTime.length > 100)
+  ) {
+    return invalid();
+  }
+  const currentTime = value.currentTime as string | undefined;
+
   const hasProvider = value.provider !== undefined;
   const hasApiKey = value.apiKey !== undefined;
   const hasModel = value.model !== undefined;
@@ -229,6 +242,7 @@ export function validateChatRequest(value: unknown): ClientChatRequest {
       ...(mode !== undefined ? { mode } : {}),
       ...(webSearch !== undefined ? { webSearch } : {}),
       ...(smartSearch !== undefined ? { smartSearch } : {}),
+      ...(currentTime !== undefined ? { currentTime: currentTime.trim() } : {}),
     };
   }
 
@@ -252,6 +266,7 @@ export function validateChatRequest(value: unknown): ClientChatRequest {
     ...(mode !== undefined ? { mode } : {}),
     ...(webSearch !== undefined ? { webSearch } : {}),
     ...(smartSearch !== undefined ? { smartSearch } : {}),
+    ...(currentTime !== undefined ? { currentTime: currentTime.trim() } : {}),
     provider: value.provider,
     apiKey: value.apiKey,
     model: value.model,

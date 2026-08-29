@@ -208,6 +208,21 @@ function isHistoryMessage(message: ChatMessage): boolean {
   return message.status === "complete" || message.status === "stopped";
 }
 
+const weekdaysZh = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"] as const;
+const weekdaysJa = ["日曜日", "月曜日", "火曜日", "水曜日", "木曜日", "金曜日", "土曜日"] as const;
+
+export function formatClientTimestamp(timestamp: number, locale: Locale): string {
+  const date = new Date(timestamp);
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  const hours = `${date.getHours()}`.padStart(2, "0");
+  const minutes = `${date.getMinutes()}`.padStart(2, "0");
+  const seconds = `${date.getSeconds()}`.padStart(2, "0");
+  const weekday = locale === "ja-JP" ? weekdaysJa[date.getDay()] : weekdaysZh[date.getDay()];
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds} ${weekday}`;
+}
+
 function truncateUnicode(value: string, maximum: number): string {
   let result = "";
   let length = 0;
@@ -728,10 +743,15 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         const requestMessages = await makeRequestMessages(history, pendingImage);
         // 流正常结束但零输出（如推理模型思考耗尽 token 预算）视为可重试失败，
         // 避免空气泡被静默隐藏
+        const currentTime = formatClientTimestamp(
+          servicesRef.current.now(),
+          stateRef.current.locale,
+        );
         const result = await servicesRef.current.streamChat(
           {
             locale: stateRef.current.locale,
             messages: requestMessages,
+            currentTime,
             ...(activeConfig !== undefined
               ? { provider: activeConfig.provider, apiKey: activeConfig.apiKey, model: activeConfig.model }
               : {}),

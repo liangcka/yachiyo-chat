@@ -464,6 +464,35 @@ describe("App flows", () => {
     });
   });
 
+  it("pastes and sends a processed image directly from composer without clicking capture", async () => {
+    const user = userEvent.setup();
+    const stream = vi.fn<StreamChatFunction>(async (_request, options) => {
+      options.onDelta("直接粘贴的图片也收到啦！");
+      return { truncated: false };
+    });
+    const services = fakeServices({ stream });
+    render(<App services={services} />);
+    const textarea = await screen.findByPlaceholderText("什么都可以告诉我");
+
+    const file = new File(["png"], "clipboard.png", { type: "image/png" });
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        items: [{ getAsFile: () => file, type: "image/png" }],
+      },
+    });
+
+    expect(await screen.findByRole("button", { name: "移除图片" })).toBeVisible();
+    await user.type(textarea, "这是我粘贴的图片");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    await waitFor(() => expect(stream).toHaveBeenCalled());
+    expect(stream.mock.calls[0]?.[0].messages.at(-1)).toMatchObject({
+      imageDataUrl: processedImage.dataUrl,
+      role: "user",
+      text: "这是我粘贴的图片",
+    });
+  });
+
   it("creates, renames, deletes, and clears local conversations behind confirmations", async () => {
     const user = userEvent.setup();
     const services = fakeServices();

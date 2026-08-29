@@ -13,6 +13,8 @@ export interface StreamChatRequest {
   locale: Locale;
   messages: StreamChatMessage[];
   mode?: "chat" | "summary";
+  /** 发送消息时的客户端本地格式化时间戳 */
+  currentTime?: string;
   /** 用户自带 Key 路径：三者必须同时存在，否则走服务端 fallback */
   provider?: ProviderId;
   apiKey?: string;
@@ -71,6 +73,8 @@ function streamErrorEvent(code: string, detail?: string): ChatClientError {
   return new ChatClientError("PROVIDER_ERROR", undefined, `${code}${detail === undefined ? "" : ` ${detail}`}`);
 }
 
+export const DEFAULT_STREAM_INACTIVITY_TIMEOUT_MS = 15_000;
+
 export interface StreamChatOptions {
   onDelta: (text: string) => void;
   /** 深度思考/思维链流式增量回调 */
@@ -79,6 +83,8 @@ export interface StreamChatOptions {
   onSources?: (sources: ChatSource[]) => void;
   signal?: AbortSignal;
   fetcher?: typeof fetch;
+  /** 单次分片读取超时（毫秒），默认 15000ms；0 或负数表示不设超时 */
+  inactivityTimeoutMs?: number;
 }
 
 function isAbort(error: unknown, signal?: AbortSignal): boolean {
@@ -115,14 +121,17 @@ async function httpError(response: Response): Promise<ChatClientError> {
   return new ChatClientError("SERVICE_UNAVAILABLE", response.status);
 }
 
-function eventFields(record: string): { event?: string; data?: string } {
+function eventFields(record: string): { event?: string; data?: string; isComment: boolean } {
   let event: string | undefined;
   const data: string[] = [];
+  let isComment = true;
   for (const line of record.split(/\r?\n/u)) {
+    if (line.startsWith(":")) continue;
+    isComment = false;
     if (line.startsWith("event:")) event = line.slice(6).trim();
     if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /u, ""));
   }
-  return { event, data: data.length === 0 ? undefined : data.join("\n") };
+  return { event, data: data.length === 0 ? undefined : data.join("\n"), isComment };
 }
 
 function objectPayload(data: string | undefined): Record<string, unknown> {
@@ -197,6 +206,26 @@ export async function streamChat(
   const decoder = new TextDecoder();
   let buffer = "";
   let finished: StreamChatResult | undefined;
+  const inactivityTimeoutMs = options.inactivityTimeoutMs ?? DEFAULT_STREAM_INACTIVITY_TIMEOUT_MS;
+  let inactivityTimer: ReturnType<typeof setTimeout> | undefined;
+  let timedOut = false;
+
+  const clearInactivityTimer = () => {
+    if (inactivityTimer !== undefined) {
+      clearTimeout(inactivityTimer);
+      inactivityTimer = undefined;
+    }
+  };
+
+  const resetInactivityTimer = () => {
+    clearInactivityTimer();
+    if (inactivityTimeoutMs > 0 && finished === undefined) {
+      inactivityTimer = setTimeout(() => {
+        timedOut = true;
+        void reader.cancel().catch(() => undefined);
+      }, inactivityTimeoutMs);
+    }
+  };
 
   const consume = (flush: boolean) => {
     while (finished === undefined) {
@@ -205,6 +234,9 @@ export async function streamChat(
       const record = buffer.slice(0, separator.index);
       buffer = buffer.slice(separator.index + separator[0].length);
       const fields = eventFields(record);
+      if (fields.isComment) {
+        continue;
+      }
       const payload = objectPayload(fields.data);
       if (fields.event === "delta" && typeof payload.text === "string") {
         options.onDelta(payload.text);
@@ -224,14 +256,20 @@ export async function streamChat(
     }
 
     if (flush && finished === undefined && buffer.trim().length > 0) {
-      throw new ChatClientError("STREAM_ERROR");
+      const fields = eventFields(buffer);
+      if (!fields.isComment) {
+        throw new ChatClientError("STREAM_ERROR");
+      }
     }
   };
 
   try {
+    resetInactivityTimer();
     while (finished === undefined) {
       const { done, value } = await reader.read();
+      resetInactivityTimer();
       if (done) {
+        clearInactivityTimer();
         buffer += decoder.decode();
         consume(true);
         break;
@@ -240,11 +278,20 @@ export async function streamChat(
       consume(false);
     }
   } catch (error) {
+    clearInactivityTimer();
     await reader.cancel().catch(() => undefined);
+    if (timedOut) {
+      throw new ChatClientError("STREAM_ERROR", undefined, "STREAM_INACTIVITY_TIMEOUT");
+    }
     if (error instanceof ChatClientError) throw error;
     throw new ChatClientError(isAbort(error, options.signal) ? "ABORTED" : "STREAM_ERROR");
+  } finally {
+    clearInactivityTimer();
   }
 
+  if (timedOut) {
+    throw new ChatClientError("STREAM_ERROR", undefined, "STREAM_INACTIVITY_TIMEOUT");
+  }
   if (finished === undefined) throw new ChatClientError("STREAM_ERROR");
   await reader.cancel().catch(() => undefined);
   return finished;

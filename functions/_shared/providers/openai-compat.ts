@@ -75,6 +75,7 @@ export function buildOpenAICompatBody(
           webSearch: request.webSearch,
           smartSearch: request.smartSearch,
           searchResults: request.searchResults,
+          currentTime: request.currentTime,
         }),
       },
       ...request.messages.map((message) => mapHistoryMessage(message, request.locale, supportsImage)),

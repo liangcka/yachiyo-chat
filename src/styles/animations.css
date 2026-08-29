@@ -166,3 +166,14 @@
   from { opacity: 1; transform: translateY(0) scale(1); }
   to { opacity: 0; transform: translateY(var(--motion-distance-panel)) scale(0.985); }
 }
+
+@keyframes motion-spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes motion-compressing-in {
+  0% { opacity: 0; transform: translate3d(-50%, -0.65rem, 0) scale(0.94); }
+  100% { opacity: 1; transform: translate3d(-50%, 0, 0) scale(1); }
+}
+

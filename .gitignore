@@ -38,3 +38,7 @@ types/runtime-types.d.ts
 
 # 本地交接文档
 交接文档.md
+
+# IDE 与本地临时规格/脚本
+.trae/
+scripts/test-check.*

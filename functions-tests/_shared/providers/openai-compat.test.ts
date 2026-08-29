@@ -111,6 +111,18 @@ describe("buildOpenAICompatBody", () => {
     expect(system).toContain("输出最多1000个Unicode字符");
     expect(system).not.toContain("最多200个Unicode字符");
   });
+
+  it("passes currentTime to the system prompt", () => {
+    const request: ClientChatRequest = {
+      ...textRequest,
+      currentTime: "2026-08-27 11:09:37 星期四",
+    };
+    const body = buildOpenAICompatBody(request, "gpt-5.6-luna", true) as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    const system = body.messages[0]?.content ?? "";
+    expect(system).toContain("当前现实时间：2026-08-27 11:09:37 星期四");
+  });
 });
 
 describe("extractOpenAIDeltaText", () => {

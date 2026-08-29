@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatMessage } from "../domain/chat";
+import type { ProcessedImage } from "../features/capture/image-processor";
 import { copyFor } from "../i18n/messages";
 import { Composer } from "./Composer";
 import { ControlDock } from "./ControlDock";
@@ -470,23 +471,21 @@ describe("reference chat components", () => {
 
   it("renders web search toggles and reports enabled state via callbacks", async () => {
     const user = userEvent.setup();
-    const onWebSearchEnabledChange = vi.fn();
-    const onWebSearchShowSourcesChange = vi.fn();
-    const onWebSearchSmartChange = vi.fn();
+    const onWebSearchSettingsChange = vi.fn();
     const { rerender } = render(
       <SkillsPanel
         activeIds={[]}
         copy={copyFor("zh-CN")}
         onClose={vi.fn()}
         onToggle={vi.fn()}
-        onWebSearchEnabledChange={onWebSearchEnabledChange}
-        onWebSearchShowSourcesChange={onWebSearchShowSourcesChange}
-        onWebSearchSmartChange={onWebSearchSmartChange}
+        onWebSearchSettingsChange={onWebSearchSettingsChange}
         open
         skills={[]}
-        webSearchEnabled={false}
-        webSearchShowSources
-        webSearchSmart={false}
+        webSearchSettings={{
+          enabled: false,
+          showSources: true,
+          smart: false,
+        }}
       />,
     );
 
@@ -514,9 +513,7 @@ describe("reference chat components", () => {
     expect(smartToggle).toBeDisabled();
 
     await user.click(enabledToggle);
-    expect(onWebSearchEnabledChange).toHaveBeenCalledWith(true);
-    expect(onWebSearchShowSourcesChange).not.toHaveBeenCalled();
-    expect(onWebSearchSmartChange).not.toHaveBeenCalled();
+    expect(onWebSearchSettingsChange).toHaveBeenCalledWith({ enabled: true });
 
     // 联网开启后"显示引用来源"与"智能搜索"均可点击
     rerender(
@@ -525,20 +522,128 @@ describe("reference chat components", () => {
         copy={copyFor("zh-CN")}
         onClose={vi.fn()}
         onToggle={vi.fn()}
-        onWebSearchEnabledChange={onWebSearchEnabledChange}
-        onWebSearchShowSourcesChange={onWebSearchShowSourcesChange}
-        onWebSearchSmartChange={onWebSearchSmartChange}
+        onWebSearchSettingsChange={onWebSearchSettingsChange}
         open
         skills={[]}
-        webSearchEnabled
-        webSearchShowSources
-        webSearchSmart={false}
+        webSearchSettings={{
+          enabled: true,
+          showSources: true,
+          smart: false,
+        }}
       />,
     );
     expect(showSourcesToggle).toBeEnabled();
     expect(smartToggle).toBeEnabled();
 
     await user.click(showSourcesToggle);
-    expect(onWebSearchShowSourcesChange).toHaveBeenCalledWith(false);
+    expect(onWebSearchSettingsChange).toHaveBeenCalledWith({ showSources: false });
+  });
+
+  it("processes and attaches image when pasted into composer", async () => {
+    const onImage = vi.fn();
+    const mockImage: ProcessedImage = {
+      blob: new Blob(["sample"], { type: "image/png" }),
+      dataUrl: "data:image/png;base64,sample",
+      height: 100,
+      mimeType: "image/png",
+      width: 100,
+    };
+    const process = vi.fn().mockResolvedValue(mockImage);
+
+    render(
+      <Composer
+        copy={copyFor("zh-CN")}
+        onChange={vi.fn()}
+        onImage={onImage}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+        phase="idle"
+        processImage={process}
+        value=""
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("什么都可以告诉我");
+    const file = new File(["dummy"], "pasted.png", { type: "image/png" });
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        items: [{ getAsFile: () => file, type: "image/png" }],
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(process).toHaveBeenCalledWith(file);
+      expect(onImage).toHaveBeenCalledWith(mockImage);
+    });
+  });
+
+  it("processes and attaches image when dropped into composer", async () => {
+    const onImage = vi.fn();
+    const mockImage: ProcessedImage = {
+      blob: new Blob(["sample"], { type: "image/jpeg" }),
+      dataUrl: "data:image/jpeg;base64,sample",
+      height: 200,
+      mimeType: "image/jpeg",
+      width: 200,
+    };
+    const process = vi.fn().mockResolvedValue(mockImage);
+
+    const { container } = render(
+      <Composer
+        copy={copyFor("zh-CN")}
+        onChange={vi.fn()}
+        onImage={onImage}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+        phase="idle"
+        processImage={process}
+        value=""
+      />,
+    );
+
+    const form = container.querySelector("form")!;
+    const file = new File(["dummy"], "dropped.jpg", { type: "image/jpeg" });
+    fireEvent.dragOver(form, {
+      dataTransfer: { types: ["Files"] },
+    });
+    fireEvent.drop(form, {
+      dataTransfer: { files: [file] },
+    });
+
+    await vi.waitFor(() => {
+      expect(process).toHaveBeenCalledWith(file);
+      expect(onImage).toHaveBeenCalledWith(mockImage);
+    });
+  });
+
+  it("notifies when image is pasted but image support is disabled", async () => {
+    const onImageDisabled = vi.fn();
+    const process = vi.fn();
+
+    render(
+      <Composer
+        copy={copyFor("zh-CN")}
+        imageDisabled
+        onChange={vi.fn()}
+        onImageDisabled={onImageDisabled}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+        phase="idle"
+        processImage={process}
+        value=""
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("什么都可以告诉我");
+    const file = new File(["dummy"], "pasted.png", { type: "image/png" });
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        items: [{ getAsFile: () => file, type: "image/png" }],
+      },
+    });
+
+    expect(onImageDisabled).toHaveBeenCalledOnce();
+    expect(process).not.toHaveBeenCalled();
   });
 });
+

@@ -7,7 +7,10 @@
     "STEPFUN_BASE_URL": "https://api.stepfun.com/step_plan/v1",
     "STEPFUN_MODEL": "step-3.7-flash",
     "DAILY_REQUEST_LIMIT": "100",
-    "AUTH_ATTEMPT_LIMIT": "10"
+    "AUTH_ATTEMPT_LIMIT": "10",
+    "DSH_WEB_SEARCH_PROVIDER": "bing",
+    "ENABLE_JINA": "true",
+    "ENABLE_DUCKDUCKGO": "true"
   },
   "kv_namespaces": [
     {
