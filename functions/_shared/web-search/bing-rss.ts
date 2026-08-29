@@ -54,13 +54,83 @@ function parseRssPubDate(value: string): string | undefined {
   return formatUtcDate(date);
 }
 
+/** 过滤低质/目录广告/无用登录页 */
+function isLowQualitySearchResult(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    if (
+      host.endsWith(".zikao.com.cn") ||
+      host === "zikao.com.cn" ||
+      host.endsWith(".58.com") ||
+      host.endsWith(".baixing.com")
+    ) {
+      return true;
+    }
+    if (parsed.pathname === "/login" || parsed.pathname === "/signin") {
+      return true;
+    }
+  } catch {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * 校验搜索结果相关度：
+ * 1. 排除低质、外文SEO垃圾域名与登录页；
+ * 2. 中文市场下排除无汉字且无英文字符的纯外文垃圾。
+ */
+export function isRelevantSearchResult(
+  result: WebSearchResult,
+  _query?: string,
+  marketLang?: string,
+): boolean {
+  const title = result.title.toLowerCase();
+  const snippet = (result.snippet ?? "").toLowerCase();
+  const combined = `${title} ${snippet}`;
+
+  try {
+    const parsed = new URL(result.url);
+    const host = parsed.hostname.toLowerCase();
+    if (
+      host.endsWith(".vn") ||
+      host.endsWith(".ru") ||
+      host.endsWith(".trunsweb.com.tw") ||
+      host.endsWith(".zikao.com.cn") ||
+      host === "zikao.com.cn" ||
+      host.endsWith(".58.com") ||
+      host.endsWith(".baixing.com") ||
+      host === "cellphones.com.vn" ||
+      host === "dpg.danawa.com" ||
+      host === "y8.com" ||
+      host.endsWith(".y8.com")
+    ) {
+      return false;
+    }
+    if (parsed.pathname === "/login" || parsed.pathname === "/signin") {
+      return false;
+    }
+  } catch {
+    return false;
+  }
+
+  if (marketLang?.startsWith("zh")) {
+    if (!/\p{Script=Han}/u.test(combined) && !/[a-z]/i.test(combined)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 /**
  * 纯函数：解析必应 RSS XML。
  * 提取每个 item 的 title/link/description/pubDate，实体解码后裁剪长度
  * （title ≤120、snippet ≤300、url ≤512，均按 Unicode 字符），
  * 仅保留 http/https 链接，不完整或非法条目整体丢弃，最多取前 5 条。
  */
-export function parseBingRss(xml: string): WebSearchResult[] {
+export function parseBingRss(xml: string, query?: string, marketLang?: string): WebSearchResult[] {
   const results: WebSearchResult[] = [];
   const items = xml.match(/<item>[\s\S]*?<\/item>/gu) ?? [];
 
@@ -76,7 +146,7 @@ export function parseBingRss(xml: string): WebSearchResult[] {
     }
 
     const url = truncateUnicode(decodeHtmlEntities(rawLink).trim(), maximumUrlCharacters);
-    if (!/^https?:\/\//u.test(url)) {
+    if (!/^https?:\/\//u.test(url) || isLowQualitySearchResult(url)) {
       continue;
     }
 
@@ -84,12 +154,18 @@ export function parseBingRss(xml: string): WebSearchResult[] {
     const publishedAt =
       rawPubDate === null ? undefined : parseRssPubDate(decodeHtmlEntities(rawPubDate));
 
-    results.push({
+    const resultItem: WebSearchResult = {
       title: truncateUnicode(decodeHtmlEntities(rawTitle).trim(), maximumTitleCharacters),
       url,
       snippet: truncateUnicode(decodeHtmlEntities(rawSnippet).trim(), maximumSnippetCharacters),
       ...(publishedAt !== undefined ? { publishedAt } : {}),
-    });
+    };
+
+    if (!isRelevantSearchResult(resultItem, query, marketLang)) {
+      continue;
+    }
+
+    results.push(resultItem);
   }
 
   return results;
@@ -130,7 +206,7 @@ export async function fetchBingRss(
     if (response.body === null) {
       return [];
     }
-    return parseBingRss(await response.text());
+    return parseBingRss(await response.text(), query, market.setlang);
   } catch {
     return [];
   }

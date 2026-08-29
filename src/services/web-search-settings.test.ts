@@ -36,6 +36,20 @@ describe("WebSearchSettingsService", () => {
     });
   });
 
+  it("persists settings object in bulk via set()", async () => {
+    await service.set({
+      enabled: true,
+      showSources: false,
+      smart: true,
+    });
+
+    expect(await service.getWebSearchSettings()).toEqual({
+      enabled: true,
+      showSources: false,
+      smart: true,
+    });
+  });
+
   it("keeps each toggle independent", async () => {
     await service.setEnabled(true);
 

@@ -1,24 +1,53 @@
 import type { WebSearchResult } from "./types";
 
-/** 智能搜索模式：双市场合并去重后的结果上限 */
-const maximumSmartResults = 10;
+/** 智能搜索模式：双市场/多Query合并去重后的结果上限 */
+export const maximumSmartResults = 10;
+/** 普通单市场搜索模式：合并去重后的结果上限 */
+export const maximumStandardResults = 5;
 /** 每个可注册域名最多保留的结果数，避免同站点堆积压窄信息面 */
 const maximumResultsPerDomain = 2;
 
-/** 智能搜索：双市场结果按 URL 去重合并，本地市场在前（保持本地化优先级），上限 10 条 */
+/**
+ * Round-Robin 轮询交错合并算法（借鉴 DeepSeek Harness）：
+ * 从多个 Query / 市场的搜索结果列表中，按排名（Rank 0, 1, 2...）依次轮流各取 1 条，
+ * 全局按 URL 严格去重，直到填满 maxResults 条数上限。
+ */
+export function mergeRoundRobin(
+  resultLists: readonly (readonly WebSearchResult[])[],
+  maxResults: number = maximumSmartResults,
+): WebSearchResult[] {
+  const seen = new Set<string>();
+  const merged: WebSearchResult[] = [];
+  if (resultLists.length === 0 || maxResults <= 0) {
+    return merged;
+  }
+
+  const maxRank = Math.max(0, ...resultLists.map((list) => list.length));
+  for (let rank = 0; rank < maxRank; rank += 1) {
+    for (const list of resultLists) {
+      if (merged.length >= maxResults) {
+        return merged;
+      }
+      const item = list[rank];
+      if (item === undefined) {
+        continue;
+      }
+      if (seen.has(item.url)) {
+        continue;
+      }
+      seen.add(item.url);
+      merged.push(item);
+    }
+  }
+  return merged;
+}
+
+/** 智能搜索：双市场结果按 Round-Robin 轮询交错合并，上限 10 条（保持导出兼容） */
 export function mergeSearchResults(
   primary: readonly WebSearchResult[],
   secondary: readonly WebSearchResult[],
 ): WebSearchResult[] {
-  const seen = new Set<string>();
-  const merged: WebSearchResult[] = [];
-  for (const result of [...primary, ...secondary]) {
-    if (merged.length >= maximumSmartResults) break;
-    if (seen.has(result.url)) continue;
-    seen.add(result.url);
-    merged.push(result);
-  }
-  return merged;
+  return mergeRoundRobin([primary, secondary], maximumSmartResults);
 }
 
 /** 常见二级后缀（co.jp / com.cn 等）：可注册域名需取三段 */

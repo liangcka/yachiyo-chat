@@ -52,6 +52,14 @@ export class WebSearchSettingsService {
     };
   }
 
+  async set(settings: WebSearchSettings): Promise<void> {
+    await this.db.settings.bulkPut([
+      { key: WEB_SEARCH_ENABLED_KEY, value: settings.enabled },
+      { key: WEB_SEARCH_SHOW_SOURCES_KEY, value: settings.showSources },
+      { key: WEB_SEARCH_SMART_KEY, value: settings.smart },
+    ]);
+  }
+
   async setEnabled(enabled: boolean): Promise<void> {
     await this.db.settings.put({ key: WEB_SEARCH_ENABLED_KEY, value: enabled });
   }

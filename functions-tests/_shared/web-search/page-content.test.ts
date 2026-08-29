@@ -1,9 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  enrichWithPageContent,
-  extractPageText,
-  type WebSearchResult,
-} from "../../../functions/_shared/web-search";
+import { enrichWithPageContent } from "../../../functions/_shared/web-search/page-content";
+import { extractPageText } from "../../../functions/_shared/web-search/page-text";
+import type { WebSearchResult } from "../../../functions/_shared/web-search/types";
 
 afterEach(() => {
   vi.unstubAllGlobals();

@@ -118,6 +118,7 @@ describe("judgeSearchNeed", () => {
     expect(body.messages.at(-1)).toEqual({ role: "user", content: "今天上海天气怎么样" });
     expect(body.messages[0]?.role).toBe("system");
     expect(body.messages[0]?.content).toContain("搜索意图判断器");
+    expect(body.messages[0]?.content).toContain("网络流行语、游戏黑话、热梗、概念定义");
   });
 
   it("returns null without fetching when the latest message is image-only", async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseBingRss } from "../../../functions/_shared/web-search";
+import { parseBingRss } from "../../../functions/_shared/web-search/bing-rss";
 import { sampleRss } from "./fixtures";
 
 describe("parseBingRss", () => {
@@ -60,5 +60,18 @@ describe("parseBingRss", () => {
       null,
       null,
     ]);
+  });
+
+  it("filters out low quality spam and login domains", () => {
+    const xml = [
+      "<rss version=\"2.0\"><channel>",
+      "<item><title>自考在线数字化学习平台</title><link>https://elearning.zikao.com.cn/login</link><description>欢迎来到自学考试学习平台</description></item>",
+      "<item><title>合法游戏新闻</title><link>https://gamersky.com/news/1.html</link><description>绝地潜兵2更新</description></item>",
+      "</channel></rss>",
+    ].join("");
+
+    const results = parseBingRss(xml);
+    expect(results).toHaveLength(1);
+    expect(results[0]?.title).toBe("合法游戏新闻");
   });
 });

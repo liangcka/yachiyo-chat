@@ -1,5 +1,91 @@
 import { describe, expect, it } from "vitest";
-import { buildSearchQuery } from "../../../functions/_shared/web-search";
+import { buildSearchQueries, buildSearchQuery } from "../../../functions/_shared/web-search";
+
+describe("buildSearchQueries", () => {
+  it("generates primary query and standalone query for contextual follow-ups", () => {
+    const queries = buildSearchQueries([
+      { role: "user", text: "StepFun 是什么" },
+      { role: "assistant", text: "阶跃星辰大模型。" },
+      { role: "user", text: "不对，3.7 flash已经出来了" },
+    ]);
+
+    expect(queries).toEqual(["3.7 flash出来了 StepFun", "3.7 flash出来了"]);
+  });
+
+  it("extracts multiple sub-entity queries for comparison questions", () => {
+    const queries = buildSearchQueries([
+      { role: "user", text: "对比一下 DeepSeek V4 和 Claude 3.7" },
+    ]);
+
+    expect(queries).toEqual([
+      "对比 DeepSeek V4 和 Claude 3.7",
+      "DeepSeek V4",
+      "Claude 3.7",
+    ]);
+  });
+
+  it("respects maxQueries limit and deduplicates identical candidate queries", () => {
+    const queries = buildSearchQueries(
+      [{ role: "user", text: "对比一下 DeepSeek V4 和 Claude 3.7" }],
+      2,
+    );
+
+    expect(queries).toHaveLength(2);
+    expect(queries).toEqual(["对比 DeepSeek V4 和 Claude 3.7", "DeepSeek V4"]);
+  });
+
+  it("extracts explicit domain qualifiers and generates focused queries for gaming memes", () => {
+    const queries = buildSearchQueries([
+      { role: "user", text: "游戏里的民主版暗潮是什么梗？" },
+    ]);
+
+    expect(queries).toContain("游戏民主版暗潮梗");
+    expect(queries.some((q) => q.includes("游戏") && q.includes("民主") && q.includes("梗"))).toBe(true);
+  });
+
+  it("preserves platform qualifier and extracts concept intention for Steam questions", () => {
+    const queries = buildSearchQueries([
+      { role: "user", text: "Steam上的民主版暗潮指的是什么？" },
+    ]);
+
+    expect(queries).toContain("Steam民主版暗潮");
+    expect(queries.some((q) => q.toLowerCase().includes("steam") && q.includes("民主"))).toBe(true);
+  });
+
+  it("fuses known genre and classification hints into specialized queries", () => {
+    const queries = buildSearchQueries([
+      { role: "user", text: "被称为民主版暗潮的射击游戏是哪个？" },
+    ]);
+
+    expect(queries).toContain("民主版暗潮射击游戏");
+    expect(queries.some((q) => q.includes("射击游戏") && q.includes("民主版暗潮"))).toBe(true);
+  });
+
+  it("automatically fans out domain qualifiers (meme/game/Steam) for meme queries without explicit domains", () => {
+    const queriesWithMeme = buildSearchQueries([
+      { role: "user", text: "民主版暗潮是什么梗" },
+    ]);
+
+    expect(queriesWithMeme).toContain("民主版暗潮梗");
+    expect(
+      queriesWithMeme.some((q) => q.includes("游戏") || q.includes("Steam") || q.includes("民主暗潮")),
+    ).toBe(true);
+
+    const queriesConceptOnly = buildSearchQueries([
+      { role: "user", text: "什么是民主版暗潮" },
+    ]);
+
+    expect(queriesConceptOnly).toContain("民主版暗潮");
+    expect(queriesConceptOnly).toContain("民主版暗潮 梗");
+    expect(queriesConceptOnly.some((q) => q.includes("游戏") || q.includes("Steam"))).toBe(true);
+  });
+
+  it("returns empty array for empty, whitespace, or non-user messages", () => {
+    expect(buildSearchQueries([])).toEqual([]);
+    expect(buildSearchQueries([{ role: "assistant", text: "你好" }])).toEqual([]);
+    expect(buildSearchQueries([{ role: "user", text: "   " }])).toEqual([]);
+  });
+});
 
 describe("buildSearchQuery", () => {
   it("uses the latest user message and strips noise words into keywords", () => {

@@ -14,7 +14,7 @@ describe("searchWeb", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const results = await searchWeb("上海天气");
+    const results = await searchWeb({ query: "上海天气" });
 
     const call = fetchMock.mock.calls[0];
     expect(call?.[0]).toBe(
@@ -34,7 +34,7 @@ describe("searchWeb", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    await searchWeb("東京の天気", "ja-JP");
+    await searchWeb({ query: "東京の天気", locale: "ja-JP" });
 
     const call = fetchMock.mock.calls[0];
     expect(call?.[0]).toBe(
@@ -50,13 +50,13 @@ describe("searchWeb", () => {
       vi.fn(async () => new Response("denied", { status: 503 })),
     );
 
-    await expect(searchWeb("test")).resolves.toEqual([]);
+    await expect(searchWeb({ query: "test" })).resolves.toEqual([]);
   });
 
   it("returns an empty list when the body is missing", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 200 })));
 
-    await expect(searchWeb("test")).resolves.toEqual([]);
+    await expect(searchWeb({ query: "test" })).resolves.toEqual([]);
   });
 
   it("returns an empty list when fetch rejects", async () => {
@@ -64,7 +64,7 @@ describe("searchWeb", () => {
       throw new Error("network down");
     }));
 
-    await expect(searchWeb("test")).resolves.toEqual([]);
+    await expect(searchWeb({ query: "test" })).resolves.toEqual([]);
   });
 
   it("silently degrades after the 8-second internal timeout", async () => {
@@ -79,7 +79,7 @@ describe("searchWeb", () => {
       ),
     );
 
-    const pending = searchWeb("slow query");
+    const pending = searchWeb({ query: "slow query" });
     await vi.advanceTimersByTimeAsync(8_000);
 
     await expect(pending).resolves.toEqual([]);
@@ -97,7 +97,7 @@ describe("searchWeb", () => {
     );
 
     const controller = new AbortController();
-    const pending = searchWeb("test", "zh-CN", controller.signal);
+    const pending = searchWeb({ query: "test", locale: "zh-CN", signal: controller.signal });
     controller.abort();
 
     await expect(pending).resolves.toEqual([]);
@@ -125,7 +125,7 @@ describe("searchWeb (domain dedup)", () => {
       ),
     );
 
-    const results = await searchWeb("测试");
+    const results = await searchWeb({ query: "测试" });
 
     expect(results.filter((result) => result.url.startsWith("https://news.example.cn/"))).toHaveLength(2);
     expect(results.map((result) => result.title)).toEqual(["堆-0", "堆-1", "其他一", "其他二"]);
@@ -139,7 +139,7 @@ describe("searchWeb (domain dedup)", () => {
       ),
     );
 
-    const results = await searchWeb("测试");
+    const results = await searchWeb({ query: "测试" });
 
     expect(results.filter((result) => result.url.includes("example.co.jp"))).toHaveLength(2);
   });
@@ -165,7 +165,7 @@ describe("searchWeb (smart)", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const results = await searchWeb("Gemini 最新模型", "zh-CN", undefined, true);
+    const results = await searchWeb({ query: "Gemini 最新模型", locale: "zh-CN", smart: true });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const urls = fetchMock.mock.calls.map(([input]) => input as string);
@@ -179,19 +179,17 @@ describe("searchWeb (smart)", () => {
       ?.headers as Record<string, string>;
     expect(intlHeaders["accept-language"]).toBe("en-US,en;q=0.9");
 
-    // 本地路 5 条在前，国际路 5 条在后，共 10 条
-    expect(results.map((result) => result.title).slice(0, 5)).toEqual([
+    // 本地路与国际路按 Round-Robin 轮询交错合并，共 10 条
+    expect(results.map((result) => result.title)).toEqual([
       "local-0",
-      "local-1",
-      "local-2",
-      "local-3",
-      "local-4",
-    ]);
-    expect(results.map((result) => result.title).slice(5)).toEqual([
       "intl-0",
+      "local-1",
       "intl-1",
+      "local-2",
       "intl-2",
+      "local-3",
       "intl-3",
+      "local-4",
       "intl-4",
     ]);
     // 智能模式保留发布日期
@@ -205,7 +203,7 @@ describe("searchWeb (smart)", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const results = await searchWeb("test", "zh-CN", undefined, true);
+    const results = await searchWeb({ query: "test", locale: "zh-CN", smart: true });
 
     // 两路返回相同 URL，去重后仅剩 5 条
     expect(results).toHaveLength(5);
@@ -221,7 +219,7 @@ describe("searchWeb (smart)", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const results = await searchWeb("test", "zh-CN", undefined, true);
+    const results = await searchWeb({ query: "test", locale: "zh-CN", smart: true });
 
     expect(results.map((result) => result.title)).toEqual(["local-0", "local-1", "local-2"]);
   });
@@ -235,7 +233,7 @@ describe("searchWeb (smart)", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const results = await searchWeb("test", "zh-CN", undefined, true);
+    const results = await searchWeb({ query: "test", locale: "zh-CN", smart: true });
 
     expect(results.map((result) => result.title)).toEqual(["intl-0", "intl-1"]);
   });
@@ -246,7 +244,7 @@ describe("searchWeb (smart)", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const results = await searchWeb("test", "zh-CN", undefined, false);
+    const results = await searchWeb({ query: "test", locale: "zh-CN", smart: false });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(results.map((result) => result.title)).toEqual([
@@ -256,5 +254,53 @@ describe("searchWeb (smart)", () => {
       "local-3",
       "local-4",
     ]);
+  });
+});
+
+describe("searchWeb (multi-query)", () => {
+  function rssWith(prefix: string, count: number): string {
+    const items = Array.from({ length: count }, (_unused, index) => {
+      const url = `https://${prefix}${index}.test/${index}`;
+      return `<item><title>${prefix}-${index}</title><link>${url}</link><description>${prefix}</description></item>`;
+    });
+    return `<rss version="2.0"><channel>${items.join("")}</channel></rss>`;
+  }
+
+  it("executes multiple queries concurrently and merges via round-robin", async () => {
+    const fetchMock = vi.fn<(input: string, init?: RequestInit) => Promise<Response>>(
+      async (input) => {
+        if (input.includes(encodeURIComponent("DeepSeek V4"))) {
+          return new Response(rssWith("ds", 3), { status: 200 });
+        }
+        return new Response(rssWith("claude", 3), { status: 200 });
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const results = await searchWeb({ query: ["DeepSeek V4", "Claude 3.7"], locale: "zh-CN", smart: false });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(results.map((r) => r.title)).toEqual([
+      "ds-0",
+      "claude-0",
+      "ds-1",
+      "claude-1",
+      "ds-2",
+    ]);
+  });
+
+  it("deduplicates identical queries in the input array", async () => {
+    const fetchMock = vi.fn<(input: string, init?: RequestInit) => Promise<Response>>(
+      async () => new Response(rssWith("res", 3), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await searchWeb({ query: ["上海天气", "上海天气", "  上海天气  "] });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns empty array when queries array is empty or only whitespace", async () => {
+    await expect(searchWeb({ query: [] })).resolves.toEqual([]);
+    await expect(searchWeb({ query: ["  ", ""] })).resolves.toEqual([]);
   });
 });
