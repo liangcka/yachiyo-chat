@@ -236,10 +236,6 @@ try {
 
 分别把摘要和签名密钥写入 `ACCESS_CODE_SHA256`、`SESSION_SIGNING_SECRET` Secret。访问码至少应包含 16 个随机字符，签名密钥不得与访问码或 StepFun Key 复用。
 
-### 上线前密钥处理
-
-**此前粘贴到聊天中的 StepFun API Key 已视为泄露，必须先在 StepFun 控制台撤销。不要测试、保存或部署该旧 Key；只把新生成的 Key 写入 Cloudflare 的 `STEPFUN_API_KEY` Secret。**
-
 部署后检查：
 
 1. 新设备无法跳过访问码门禁，错误码不会泄露内部信息。
