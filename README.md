@@ -7,6 +7,28 @@ Yachiyo Chat 是一个手机优先的 AI 角色扮演聊天应用，以 Cloudfla
 
 > **English Overview**: Yachiyo Chat is a mobile-first Progressive Web App (PWA) for roleplay chat with Tsukimi Yachiyo, featuring a starfield frosted glass UI, multi-provider LLM settings (StepFun / DeepSeek / GLM / OpenAI / Claude / Gemini), a composable skill system, user memory, cascading web search, image capture & vision, bilingual support (zh-CN / ja-JP), local IndexedDB conversation storage, and offline capabilities. Powered by React 19, TypeScript, and Cloudflare Pages Functions.
 
+## 灵感来源与项目概念
+
+本项目高度还原了动画电影《**超时空辉夜姬**》（《超かぐや姫！》/ *Chou Kaguya-hime!*）官方 **ray MV 0分52秒** 中出现的经典彩页场景——**拿出手机打开聊天软件，与月见八千代（八七）进行跨越次元的日常 LINE 聊天陪伴**。
+
+<div align="center">
+  <table>
+    <tr>
+      <td align="center" width="55%">
+        <b>《超かぐや姬！》ray MV 0:52 彩页场景</b><br><br>
+        <img src="docs/images/ray_mv_0m52s.png" alt="超时空辉夜姬 ray MV 0分52秒彩页" width="100%" />
+      </td>
+      <td align="center" width="45%">
+        <b>Yachiyo Chat 实际界面还原（识图与角色对话）</b><br><br>
+        <img src="docs/images/chat-mobile-main.png" alt="Yachiyo Chat 聊天界面" width="75%" />
+      </td>
+    </tr>
+  </table>
+</div>
+
+> [!WARNING]
+> **当前项目缺陷 / 待改进项**：目前项目的主要缺陷是没有官方授权或制作的 **Live2D 动态形象**（当前主要采用星空磨砂玻璃、头像与动作气泡交互），期待后续社区创作者或官方 Live2D 模型的接入与支持！
+
 ## 核心特性
 
 - **角色聊天**：月见八千代人设，流式输出，回复带括号动作描写，可随时停止生成并保留已生成内容。
@@ -236,7 +258,7 @@ try {
 
 分别把摘要和签名密钥写入 `ACCESS_CODE_SHA256`、`SESSION_SIGNING_SECRET` Secret。访问码至少应包含 16 个随机字符，签名密钥不得与访问码或 StepFun Key 复用。
 
-部署后检查：
+### 部署后检查
 
 1. 新设备无法跳过访问码门禁，错误码不会泄露内部信息。
 2. 中文和日文文字请求均能流式返回，角色为月见八千代且带括号动作。

@@ -618,9 +618,13 @@
   align-items: center;
   justify-content: center;
   gap: 0.45rem;
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-control);
   color: #163d72;
   background: var(--glass-strong);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 13%);
+  backdrop-filter: blur(18px) saturate(118%);
+  -webkit-backdrop-filter: blur(18px) saturate(118%);
   font-size: 0.82rem;
   font-weight: 760;
   letter-spacing: 0.025em;

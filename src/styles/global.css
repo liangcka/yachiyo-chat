@@ -46,6 +46,7 @@ dialog {
 }
 
 button {
+  border: 0;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
 }
