@@ -15,7 +15,7 @@ Yachiyo Chat 是一个手机优先的 AI 角色扮演聊天应用，以 Cloudfla
   <table>
     <tr>
       <td align="center" width="55%">
-        <b>《超かぐや姬！》ray MV 0:52 彩页场景</b><br><br>
+        <b>《超かぐや姬！》ray MV 0:52 彩叶场景</b><br><br>
         <img src="docs/images/ray_mv_0m52s.png" alt="超时空辉夜姬 ray MV 0分52秒彩页" width="100%" />
       </td>
       <td align="center" width="45%">
