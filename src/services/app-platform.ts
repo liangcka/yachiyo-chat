@@ -11,7 +11,7 @@ export function apiOrigin(): string {
   return currentApiOrigin();
 }
 
-/** fetch 凭据模式：APK 跨源需 include 才能携带会话 cookie，网页同源保持 same-origin */
+/** fetch 凭据模式：APK 跨源需 include 才能携带会话 cookie，网页版保持 same-origin */
 export function apiCredentials(): RequestCredentials {
   return isNativeApp() ? "include" : "same-origin";
 }

@@ -1,5 +1,5 @@
 import { Copy, RotateCcw, RotateCw } from "lucide-react";
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage, Locale } from "../domain/chat";
 import { copyFor } from "../i18n/messages";
 
@@ -25,6 +25,13 @@ function stripCitationMarkers(text: string): string {
   return text.replace(/\[(\d{1,2})\]/gu, "");
 }
 
+function formatMessageText(text: string): string[] {
+  return text
+    .split(/\n\s*\n/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+}
+
 /** memo 化：流式期间只有最后一条消息变化，其余气泡跳过重渲（配合上游稳定回调引用） */
 export const MessageBubble = memo(function MessageBubble({
   imageUrl,
@@ -47,6 +54,7 @@ export const MessageBubble = memo(function MessageBubble({
   const hideCitations = showSources === false && message.sources !== undefined && message.sources.length > 0;
   const strippedText = hideCitations ? stripCitationMarkers(message.text) : message.text;
   const displayText = strippedText.trim().length > 0 ? strippedText : message.text;
+  const paragraphs = useMemo(() => formatMessageText(displayText), [displayText]);
 
   const hasText = displayText.trim().length > 0;
   const hasImage = message.imageId !== undefined;
@@ -168,6 +176,11 @@ export const MessageBubble = memo(function MessageBubble({
       aria-label={messageLabel(message.role, locale)}
       className={`message-bubble message-bubble--${message.role}${isTyping ? " message-bubble--typing" : ""}${menuOpen ? " message-bubble--menu-open" : ""}`}
       data-status={message.status}
+      onContextMenu={hasMenuOptions ? handleContextMenu : undefined}
+      onPointerCancel={handlePointerUp}
+      onPointerDown={hasMenuOptions ? handlePointerDown : undefined}
+      onPointerMove={hasMenuOptions ? handlePointerMove : undefined}
+      onPointerUp={handlePointerUp}
       onClick={(e) => {
         if (ignoreNextClickRef.current) {
           e.preventDefault();
@@ -175,11 +188,6 @@ export const MessageBubble = memo(function MessageBubble({
           ignoreNextClickRef.current = false;
         }
       }}
-      onContextMenu={hasMenuOptions ? handleContextMenu : undefined}
-      onPointerCancel={handlePointerUp}
-      onPointerDown={hasMenuOptions ? handlePointerDown : undefined}
-      onPointerMove={hasMenuOptions ? handlePointerMove : undefined}
-      onPointerUp={handlePointerUp}
     >
       {hasImage ? (
         imageUrl !== undefined ? (
@@ -196,7 +204,9 @@ export const MessageBubble = memo(function MessageBubble({
         </span>
       ) : hasText ? (
         <>
-          <p>{displayText}</p>
+          {paragraphs.map((p, idx) => (
+            <p key={idx}>{p}</p>
+          ))}
           {message.truncated === true ? (
             <span className="message-bubble__truncated">{copyFor(locale).truncated}</span>
           ) : null}

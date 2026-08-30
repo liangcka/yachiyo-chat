@@ -93,11 +93,12 @@ export class LlmSettingsService {
     model: string,
     options: { activate?: boolean } = {},
   ): Promise<LlmSettingsRecord> {
+    const trimmedKey = apiKey.trim();
     const meta = getProviderMeta(provider);
     const validModel = meta.models.includes(model) ? model : meta.defaultModel;
     const record: LlmSettingsRecord = {
       provider,
-      apiKey: apiKey.trim(),
+      apiKey: trimmedKey,
       model: validModel,
       updatedAt: Date.now(),
     };

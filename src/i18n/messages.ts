@@ -107,6 +107,9 @@ export interface UiCopy {
   readonly webSearchSmart: string;
   readonly webSearchSmartDescription: string;
   readonly sourcesLabel: string;
+  readonly workspaceEntry: string;
+  readonly workspaceTitle: string;
+  readonly workspaceDescription: string;
 }
 
 const chinese = Object.freeze({
@@ -217,6 +220,9 @@ const chinese = Object.freeze({
   webSearchSmart: "智能搜索",
   webSearchSmartDescription: "同时检索国际市场近30天结果，提升时效信息的准确性",
   sourcesLabel: "参考来源",
+  workspaceEntry: "工作区 & Agent",
+  workspaceTitle: "工作区 & Agent 终端",
+  workspaceDescription: "配置本地 Agent 工具的运行目录，支持安全文件读写与终端命令执行。",
 } satisfies UiCopy);
 
 const japanese = Object.freeze({
@@ -328,6 +334,9 @@ const japanese = Object.freeze({
   webSearchSmart: "スマート検索",
   webSearchSmartDescription: "国際市場の直近30日間の結果も同時に検索し、最新情報の正確性を高めます",
   sourcesLabel: "参考ソース",
+  workspaceEntry: "ワークスペース & Agent",
+  workspaceTitle: "ワークスペース & Agent ターミナル",
+  workspaceDescription: "ローカルAgentツールの実行ディレクトリを設定し、安全なファイル読み書きとターミナルコマンド実行をサポートします。",
 } satisfies UiCopy);
 
 const dictionaries: Readonly<Record<Locale, UiCopy>> = Object.freeze({

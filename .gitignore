@@ -6,7 +6,7 @@ coverage/
 .wrangler/
 .wrangler-home/
 .wrangler-local/
-.agents/
+.agents/worktrees/
 functions/_generated/
 
 .dev.vars

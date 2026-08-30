@@ -27,6 +27,8 @@
     "test:perf": "npm run build && playwright test --config playwright.perf.config.ts",
     "mob:sync": "npm run build && cap sync android",
     "mob:build": "npm run mob:sync && cd android && gradlew.bat assembleRelease",
+    "relay:dev": "npm --prefix relay-worker run dev",
+    "relay:deploy": "npm --prefix relay-worker run deploy",
     "cf:types": "wrangler types --path=./types/runtime-types.d.ts"
   },
   "dependencies": {
@@ -42,6 +44,7 @@
   "devDependencies": {
     "@capacitor/cli": "^8.5.0",
     "@cloudflare/vitest-pool-workers": "^0.22.0",
+    "@emnapi/runtime": "^1.11.3",
     "@eslint/js": "^9.39.5",
     "@playwright/test": "^1.61.1",
     "@testing-library/jest-dom": "^6.9.1",

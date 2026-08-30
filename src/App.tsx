@@ -1,18 +1,8 @@
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
-import { Sparkles } from "lucide-react";
 import { useChatController, type ChatRepository, type StreamChatFunction } from "./app/use-chat-controller";
 import { AccessGate } from "./components/AccessGate";
-import { Composer } from "./components/Composer";
-import { ControlDock } from "./components/ControlDock";
-import { ConversationView } from "./components/ConversationView";
-import { HistoryPanel } from "./components/HistoryPanel";
-import { LlmSettingsPanel, type LlmProviderEntry } from "./components/LlmSettingsPanel";
-import { MenuDrawer } from "./components/MenuDrawer";
-import { SkillsPanel } from "./components/SkillsPanel";
-import { UserMemoryPanel } from "./components/UserMemoryPanel";
 import { StarfieldCanvas } from "./components/StarfieldCanvas";
 import { ToastRegion } from "./components/ToastRegion";
-import { TopControls } from "./components/TopControls";
 import { ConversationRepository } from "./data/conversation-repository";
 import { YachiyoDatabase } from "./data/db";
 import type { Conversation, Locale, StoredImage } from "./domain/chat";
@@ -25,17 +15,22 @@ import {
 } from "./features/capture/image-processor";
 import { copyFor, type UiCopy } from "./i18n/messages";
 import { UpdatePrompt } from "./pwa/UpdatePrompt";
-import { usePwaUpdate } from "./pwa/use-pwa-update";
-import { useAndroidBack } from "./app/use-android-back";
 import { useOnlineStatus } from "./pwa/use-online-status";
+import { usePwaUpdate } from "./pwa/use-pwa-update";
 import { clearWebCaches } from "./services/api-origins";
 import { isNativeApp } from "./services/app-platform";
-import { isRetryableChatErrorCode, streamChat } from "./services/chat-client";
+import { streamChat } from "./services/chat-client";
 import { LlmSettingsService } from "./services/llm-settings";
 import { SessionClient } from "./services/session-client";
 import { SkillSettingsService } from "./services/skill-settings";
-import { WebSearchSettingsService, defaultWebSearchSettings, type WebSearchSettings } from "./services/web-search-settings";
+import {
+  WebSearchSettingsService,
+  defaultWebSearchSettings,
+  type WebSearchSettings,
+} from "./services/web-search-settings";
 import { SKILLS } from "./skills";
+import type { SharedViewProps } from "./views/layout-types";
+import { MobileLayout } from "./views/mobile/MobileLayout";
 
 export interface AppRepository extends ChatRepository {
   renameConversation(id: string, title: string): Promise<void>;
@@ -107,20 +102,16 @@ export function App({ services }: AppProps) {
   const webSearchService = activeServices.webSearchSettings ?? productionWebSearchService;
   const { isOnline } = useOnlineStatus();
   const pwa = usePwaUpdate();
+
   const [authentication, setAuthentication] = useState<AuthenticationState>(() =>
     navigator.onLine ? "checking" : "authenticated",
   );
   const [composerValue, setComposerValue] = useState("");
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [historyOpen, setHistoryOpen] = useState(false);
   const [imageUrls, setImageUrls] = useState<ReadonlyMap<string, string>>(new Map());
   const [llmActiveProvider, setLlmActiveProvider] = useState<ProviderId>();
-  const [llmEntries, setLlmEntries] = useState<readonly LlmProviderEntry[]>([]);
-  const [llmOpen, setLlmOpen] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [llmEntries, setLlmEntries] = useState<readonly { provider: ProviderId; apiKey: string; model: string }[]>([]);
   const [pendingImageDataUrl, setPendingImageDataUrl] = useState<string>();
-  const [skillsOpen, setSkillsOpen] = useState(false);
-  const [memoryOpen, setMemoryOpen] = useState(false);
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
   const [webSearchSettings, setWebSearchSettings] = useState<WebSearchSettings>(defaultWebSearchSettings);
   const [toast, setToast] = useState<ToastState>();
@@ -166,29 +157,7 @@ export function App({ services }: AppProps) {
     setToast({ id: ++toastSequenceRef.current, message, tone });
   }, []);
   const showSessionFailure = useEffectEvent(() => showToast(copy.genericFailure, "error"));
-  // APK 原生壳：返回键先关弹层，2 秒内再按一次才退出
-  useAndroidBack(
-    () => {
-      if (llmOpen) {
-        setLlmOpen(false);
-        return true;
-      }
-      if (skillsOpen) {
-        setSkillsOpen(false);
-        return true;
-      }
-      if (historyOpen) {
-        setHistoryOpen(false);
-        return true;
-      }
-      if (menuOpen) {
-        setMenuOpen(false);
-        return true;
-      }
-      return false;
-    },
-    () => showToast(copy.exitHint),
-  );
+
   const readLlmSettings = useCallback(async () => {
     const [records, active] = await Promise.all([
       llmService.list(),
@@ -260,54 +229,10 @@ export function App({ services }: AppProps) {
     return () => clearTimeout(timeout);
   }, [isOnline, setControllerOnline]);
 
-  // 原生壳启动自愈：清掉旧版 APK 可能残留的 Service Worker 与缓存，防止脏缓存劫持请求。
-  // 仅原生壳执行——网页 PWA 的离线缓存不能在每次启动时清空。
+  // 原生壳启动自愈：清掉旧版 APK 可能残留的 Service Worker 与缓存
   useEffect(() => {
     if (isNativeApp()) void clearWebCaches();
   }, []);
-
-  // 移动端与软键盘适配：实时同步 visualViewport 高度至 CSS 变量
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.visualViewport) return;
-    const vv = window.visualViewport;
-
-    const handleViewportChange = () => {
-      const height = vv.height;
-      document.documentElement.style.setProperty("--visual-viewport-height", `${height}px`);
-    };
-
-    handleViewportChange();
-    vv.addEventListener("resize", handleViewportChange);
-    vv.addEventListener("scroll", handleViewportChange);
-
-    return () => {
-      vv.removeEventListener("resize", handleViewportChange);
-      vv.removeEventListener("scroll", handleViewportChange);
-      document.documentElement.style.removeProperty("--visual-viewport-height");
-    };
-  }, []);
-
-  const chatBottomRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const bottomEl = chatBottomRef.current;
-    if (!bottomEl || typeof ResizeObserver === "undefined") return;
-
-    const updateHeight = () => {
-      const height = bottomEl.getBoundingClientRect().height;
-      if (height > 0) {
-        document.documentElement.style.setProperty("--chat-bottom-height", `${height + 20}px`);
-      }
-    };
-
-    updateHeight();
-    const observer = new ResizeObserver(updateHeight);
-    observer.observe(bottomEl);
-    return () => {
-      observer.disconnect();
-      document.documentElement.style.removeProperty("--chat-bottom-height");
-    };
-  }, [authentication]);
 
   useEffect(() => {
     if (toast === undefined) return;
@@ -332,11 +257,6 @@ export function App({ services }: AppProps) {
       showToast(copy.genericFailure, "error");
     }
   }, [copy.genericFailure, readLlmSettings, showToast]);
-
-  const openLlmSettings = useCallback(async () => {
-    await refreshLlm();
-    setLlmOpen(true);
-  }, [refreshLlm]);
 
   const handleLlmSave = useCallback(
     async (provider: ProviderId, apiKey: string, model: string) => {
@@ -399,8 +319,7 @@ export function App({ services }: AppProps) {
 
   const blobUrlsRef = useRef<Map<string, string>>(new Map());
 
-  // 稳定签名：只有 imageId 集合变化时才触发 Blob 加载 effect，
-  // 流式期间 messages 每帧变化不再引起全量 diff
+  // 稳定签名：只有 imageId 集合变化时才触发 Blob 加载 effect
   const messageImageIdsKey = useMemo(
     () =>
       controller.messages.flatMap(({ imageId }) => (imageId === undefined ? [] : [imageId]))
@@ -489,26 +408,29 @@ export function App({ services }: AppProps) {
     setAuthentication("authenticated");
   };
 
-  const handleImage = (image: ProcessedImage) => {
-    const conversationId = controller.activeConversation?.id;
-    if (conversationId === undefined) return;
-    const imageId = crypto.randomUUID();
-    const storedImage: StoredImage = {
-      blob: image.blob,
-      conversationId,
-      height: image.height,
-      id: imageId,
-      mimeType: image.mimeType,
-      width: image.width,
-    };
-    if (typeof URL.createObjectURL === "function") {
-      const url = URL.createObjectURL(image.blob);
-      blobUrlsRef.current.set(imageId, url);
-      setImageUrls(new Map(blobUrlsRef.current));
-    }
-    controller.setPendingImage(storedImage);
-    setPendingImageDataUrl(image.dataUrl);
-  };
+  const handleImage = useCallback(
+    (image: ProcessedImage) => {
+      const conversationId = controller.activeConversation?.id;
+      if (conversationId === undefined) return;
+      const imageId = crypto.randomUUID();
+      const storedImage: StoredImage = {
+        blob: image.blob,
+        conversationId,
+        height: image.height,
+        id: imageId,
+        mimeType: image.mimeType,
+        width: image.width,
+      };
+      if (typeof URL.createObjectURL === "function") {
+        const url = URL.createObjectURL(image.blob);
+        blobUrlsRef.current.set(imageId, url);
+        setImageUrls(new Map(blobUrlsRef.current));
+      }
+      controller.setPendingImage(storedImage);
+      setPendingImageDataUrl(image.dataUrl);
+    },
+    [controller],
+  );
 
   const handleSend = (value: string) => {
     void controller.send(value);
@@ -549,7 +471,6 @@ export function App({ services }: AppProps) {
 
   const handleLocale = async (locale: Locale) => {
     await controller.setLocale(locale);
-    setMenuOpen(false);
     await refreshHistory();
   };
 
@@ -618,9 +539,6 @@ export function App({ services }: AppProps) {
       ) {
         return;
       }
-      if (llmOpen || skillsOpen || historyOpen || menuOpen || memoryOpen) {
-        return;
-      }
       const target = event.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) {
         return;
@@ -668,14 +586,47 @@ export function App({ services }: AppProps) {
     authentication,
     controller.phase,
     copy,
-    historyOpen,
+    handleImage,
     isOnline,
-    llmOpen,
-    memoryOpen,
-    menuOpen,
     showToast,
-    skillsOpen,
   ]);
+
+  const sharedProps: SharedViewProps = {
+    activeProviderSupportsImage,
+    activeSkillIds,
+    composerValue,
+    controller,
+    conversations,
+    copy,
+    imageUrls,
+    isOnline,
+    llmActiveProvider,
+    llmEntries,
+    onClearData: handleClearData,
+    onDelete: handleDelete,
+    onImage: handleImage,
+    onLlmActivate: handleLlmActivate,
+    onLlmClear: handleLlmClear,
+    onLlmSave: handleLlmSave,
+    onLocale: handleLocale,
+    onNewChat: handleNewChat,
+    onRecall: handleRecall,
+    onRegenerate: handleRegenerate,
+    onRename: handleRename,
+    onSend: handleSend,
+    onSignOut: handleSignOut,
+    onSkillToggle: handleSkillToggle,
+    onWebSearchSettingsChange: handleWebSearchSettingsChange,
+    pendingImageDataUrl,
+    processImage: activeServices.processImage,
+    pwa,
+    refreshHistory,
+    refreshLlm,
+    setComposerValue,
+    setPendingImageDataUrl,
+    showToast,
+    webSearchSettings,
+  };
 
   const authenticatedContent =
     controller.phase === "loading" ? (
@@ -685,184 +636,7 @@ export function App({ services }: AppProps) {
         <span />
       </div>
     ) : (
-      <>
-        <TopControls
-          captureDisabled={!isOnline || controller.phase === "streaming" || controller.phase === "compressing" || controller.phase === "offline" || !activeProviderSupportsImage}
-          copy={copy}
-          onCaptureError={(code) => showToast(imageErrorMessage(code, copy), "error")}
-          onImage={handleImage}
-          onMenu={() => {
-            void refreshHistory();
-            setMenuOpen(true);
-          }}
-          processImage={activeServices.processImage}
-        />
-        {controller.phase === "compressing" ? (
-          <div aria-live="polite" className="compressing-pill" role="status">
-            <Sparkles aria-hidden="true" className="compressing-pill__icon" size={16} />
-            <span>{copy.compressingContext}</span>
-          </div>
-        ) : null}
-        <ConversationView
-          hasMoreHistory={controller.hasMoreHistory}
-          imageUrls={imageUrls}
-          key={controller.activeConversation?.id}
-          locale={controller.locale}
-          messages={controller.messages}
-          onLoadEarlier={() => void controller.loadEarlier()}
-          onRecall={handleRecall}
-          onRegenerate={
-            !isOnline || controller.phase === "streaming" || controller.phase === "compressing" || controller.phase === "offline"
-              ? undefined
-              : handleRegenerate
-          }
-          onToast={showToast}
-          showSources={webSearchSettings.showSources}
-          summary={controller.activeConversation?.summary}
-        />
-        <div ref={chatBottomRef} className="chat-bottom">
-          <UpdatePrompt
-            copy={copy}
-            needRefresh={pwa.needRefresh}
-            offlineReady={pwa.offlineReady}
-            onConfirmOfflineReady={() => pwa.setOfflineReady(false)}
-            onDismissUpdate={() => pwa.setNeedRefresh(false)}
-            onUpdate={() => void pwa.updateServiceWorker(true)}
-          />
-          {!isOnline || controller.phase === "offline" ? <p className="status-banner">{copy.offline}</p> : null}
-          {controller.phase === "error" &&
-          controller.errorCode !== "DAILY_QUOTA_EXCEEDED" &&
-          controller.errorCode !== "SESSION_REQUIRED" ? (
-            <div className="status-banner status-banner--error">
-              <span>{controllerErrorMessage(controller.errorCode ?? "", copy)}</span>
-              {isRetryableChatErrorCode(controller.errorCode) ? (
-                <button onClick={() => void controller.retry()} type="button">
-                  {copy.retry}
-                </button>
-              ) : null}
-            </div>
-          ) : null}
-          <ControlDock
-            copy={copy}
-            onSettings={() => {
-              void refreshHistory();
-              setMenuOpen(true);
-            }}
-            onUnavailable={(message) => showToast(message)}
-          />
-          <Composer
-            copy={copy}
-            imageDisabled={
-              !isOnline ||
-              controller.phase === "streaming" ||
-              controller.phase === "compressing" ||
-              controller.phase === "offline" ||
-              !activeProviderSupportsImage
-            }
-            onChange={setComposerValue}
-            onError={(code) => showToast(imageErrorMessage(code, copy), "error")}
-            onFocus={() => {
-              setTimeout(() => {
-                const chatView = document.querySelector(".conversation-view");
-                if (chatView) {
-                  chatView.scrollTop = chatView.scrollHeight;
-                }
-              }, 120);
-            }}
-            onImage={handleImage}
-            onImageDisabled={() => {
-              if (!activeProviderSupportsImage) {
-                showToast(copy.llmNoImageSupport, "error");
-              }
-            }}
-            onRemoveImage={() => {
-              controller.setPendingImage(undefined);
-              setPendingImageDataUrl(undefined);
-            }}
-            onSend={handleSend}
-            onStop={controller.stop}
-            pendingImageDataUrl={pendingImageDataUrl}
-            phase={isOnline ? controller.phase : "offline"}
-            processImage={activeServices.processImage}
-            value={composerValue}
-          />
-        </div>
-        <MenuDrawer
-          copy={copy}
-          locale={controller.locale}
-          onClearData={handleClearData}
-          onClose={() => setMenuOpen(false)}
-          onCompress={async () => {
-            if (controller.messages.length <= 1 && !controller.activeConversation?.summary) {
-              showToast(copy.noNeedToCompress, "info");
-              return;
-            }
-            const success = await controller.compressConversation(true);
-            if (success) {
-              showToast(copy.compressSuccess, "info");
-              await refreshHistory();
-            } else if (controller.errorCode) {
-              showToast(copy.compressFailed, "error");
-            }
-          }}
-          onHistory={() => setHistoryOpen(true)}
-          onLocale={handleLocale}
-          onLlmSettings={() => {
-            void openLlmSettings();
-          }}
-          onNewChat={handleNewChat}
-          onSignOut={handleSignOut}
-          onSkills={() => setSkillsOpen(true)}
-          onUserMemory={() => setMemoryOpen(true)}
-          open={menuOpen}
-        />
-        <HistoryPanel
-          activeId={controller.activeConversation?.id}
-          conversations={conversations}
-          copy={copy}
-          onClose={() => setHistoryOpen(false)}
-          onDelete={handleDelete}
-          onRename={handleRename}
-          onSelect={controller.selectConversation}
-          open={historyOpen}
-        />
-        <LlmSettingsPanel
-          activeProvider={llmActiveProvider}
-          copy={copy}
-          entries={llmEntries}
-          onActivate={handleLlmActivate}
-          onClear={handleLlmClear}
-          onClose={() => setLlmOpen(false)}
-          onSave={handleLlmSave}
-          open={llmOpen}
-        />
-        <SkillsPanel
-          activeIds={activeSkillIds}
-          copy={copy}
-          onClose={() => setSkillsOpen(false)}
-          onToggle={(id, next) => void handleSkillToggle(id, next)}
-          onWebSearchSettingsChange={handleWebSearchSettingsChange}
-          open={skillsOpen}
-          skills={SKILLS}
-          webSearchSettings={webSearchSettings}
-        />
-        <UserMemoryPanel
-          copy={copy}
-          memory={controller.userMemory ?? ""}
-          onClose={() => setMemoryOpen(false)}
-          onSave={async (memory) => {
-            const saved = await controller.updateUserMemory(memory);
-            if (saved) {
-              showToast(copy.userMemorySaved, "info");
-              setMemoryOpen(false);
-            } else {
-              showToast(copy.userMemorySaveFailed, "error");
-            }
-            return saved;
-          }}
-          open={memoryOpen}
-        />
-      </>
+      <MobileLayout {...sharedProps} />
     );
 
   return (
