@@ -143,13 +143,14 @@ describe("LlmSettingsPanel", () => {
     expect(input.type).toBe("password");
   });
 
-  it("warns when the selected provider does not support images", async () => {
+  it("warns when the selected model does not support images", async () => {
     const user = userEvent.setup();
     mount();
 
     expect(screen.queryByText("该厂商暂不支持图片输入")).not.toBeInTheDocument();
 
     await user.selectOptions(screen.getByLabelText("厂商"), "deepseek");
+    await user.selectOptions(screen.getByLabelText("模型"), "deepseek-v4-pro");
 
     expect(screen.getByText("该厂商暂不支持图片输入")).toBeInTheDocument();
   });

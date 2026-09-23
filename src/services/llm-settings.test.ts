@@ -56,7 +56,7 @@ describe("LlmSettingsService", () => {
   it("falls back to default model when given an unknown model", async () => {
     const record = await service.saveProvider("gemini", VALID_KEY, "gemini-nonexistent");
 
-    expect(record.model).toBe("gemini-3.7-flash");
+    expect(record.model).toBe("gemini-3.8-flash");
   });
 
   it("getActiveConfig returns undefined when active provider has no record", async () => {

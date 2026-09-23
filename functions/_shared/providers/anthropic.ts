@@ -12,9 +12,11 @@ import type {
 const ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
 const ALLOWED_MODELS = [
-  "claude-fable-5",
-  "claude-opus-5",
   "claude-sonnet-5",
+  "claude-opus-5-5",
+  "claude-fable-5-1",
+  "claude-opus-5",
+  "claude-fable-5",
   "claude-haiku-4-5",
 ] as const;
 

@@ -32,7 +32,8 @@ describe("PROVIDERS registry", () => {
   });
 
   it("exposes per-model image support aligned with the frontend", () => {
-    expect(PROVIDERS.deepseek.imageModels).toEqual(["deepseek-v4-flash-vision-exp"]);
+    expect(PROVIDERS.stepfun.imageModels).toEqual(["step-5-preview", "step-3.7-flash"]);
+    expect(PROVIDERS.deepseek.imageModels).toEqual(["deepseek-flash", "deepseek-v4-flash-vision-exp"]);
     expect(PROVIDERS.glm.imageModels).toEqual(["glm-5.3-flash", "glm-4.6v-flash", "glm-4v-flash"]);
     for (const id of PROVIDER_IDS) {
       for (const model of PROVIDERS[id].imageModels) {

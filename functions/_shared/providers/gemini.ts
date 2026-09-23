@@ -11,6 +11,7 @@ import type {
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const ALLOWED_MODELS = [
+  "gemini-3.8-flash",
   "gemini-3.7-flash",
   "gemini-3.6-flash",
   "gemini-3.5-flash",
@@ -250,7 +251,7 @@ export function buildGeminiAdapter(): ProviderAdapter {
     hasNativeWebSearch: true,
     supportsImage: true,
     imageModels: [...ALLOWED_MODELS],
-    defaultModel: "gemini-3.7-flash",
+    defaultModel: "gemini-3.8-flash",
     allowedModels: ALLOWED_MODELS,
     buildRequest(input: ProviderRequestInput): BuiltProviderRequest {
       const body = buildGeminiBody(input.request);

@@ -52,17 +52,17 @@ const openaiCompatProviders = {
   stepfun: {
     endpoint: "https://api.stepfun.com/step_plan/v1/chat/completions",
     defaultModel: "step-3.7-flash",
-    allowedModels: ["step-3.7-flash", "step-3.5-flash", "step-3.5-flash-2603"],
+    allowedModels: ["step-5-preview", "step-3.7-flash", "step-3.5-flash", "step-3.5-flash-2603"],
     supportsImage: true,
-    imageModels: ["step-3.7-flash"],
+    imageModels: ["step-5-preview", "step-3.7-flash"],
     reasoningEffort: true,
   },
   deepseek: {
     endpoint: "https://api.deepseek.com/v1/chat/completions",
-    defaultModel: "deepseek-v4-flash",
-    allowedModels: ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"],
+    defaultModel: "deepseek-flash",
+    allowedModels: ["deepseek-flash", "deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"],
     supportsImage: true,
-    imageModels: ["deepseek-v4-flash-vision-exp"],
+    imageModels: ["deepseek-flash", "deepseek-v4-flash-vision-exp"],
   },
   glm: {
     endpoint: "https://open.bigmodel.cn/api/paas/v4/chat/completions",
@@ -73,10 +73,10 @@ const openaiCompatProviders = {
   },
   openai: {
     endpoint: "https://api.openai.com/v1/chat/completions",
-    defaultModel: "gpt-5.6-luna",
-    allowedModels: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-4.1", "gpt-4.1-mini"],
+    defaultModel: "gpt-6-luna",
+    allowedModels: ["gpt-6-luna", "gpt-6-sol", "gpt-6-astra", "gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.5", "gpt-4.1", "gpt-4.1-mini"],
     supportsImage: true,
-    imageModels: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-4.1", "gpt-4.1-mini"],
+    imageModels: ["gpt-6-luna", "gpt-6-sol", "gpt-6-astra", "gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.5", "gpt-4.1", "gpt-4.1-mini"],
   },
 } as const;
 

@@ -208,7 +208,8 @@ describe("buildGeminiAdapter", () => {
     expect(adapter.isOpenAICompat).toBe(false);
     expect(adapter.hasNativeWebSearch).toBe(true);
     expect(adapter.supportsImage).toBe(true);
-    expect(adapter.defaultModel).toBe("gemini-3.7-flash");
+    expect(adapter.defaultModel).toBe("gemini-3.8-flash");
+    expect(adapter.allowedModels).toContain("gemini-3.8-flash");
     expect(adapter.allowedModels).toContain("gemini-3.5-flash");
   });
 
