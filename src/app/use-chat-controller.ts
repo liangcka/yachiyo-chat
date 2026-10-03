@@ -747,11 +747,25 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
           servicesRef.current.now(),
           stateRef.current.locale,
         );
+        const eligibleHistory = history.filter(isHistoryMessage);
+        const currentMsg = eligibleHistory.at(-1);
+        const previousMsg = eligibleHistory.at(-2);
+        const lastMessageIntervalMs =
+          currentMsg !== undefined && previousMsg !== undefined
+            ? Math.max(0, currentMsg.createdAt - previousMsg.createdAt)
+            : undefined;
+        const previousTime =
+          previousMsg !== undefined
+            ? formatClientTimestamp(previousMsg.createdAt, stateRef.current.locale)
+            : undefined;
+
         const result = await servicesRef.current.streamChat(
           {
             locale: stateRef.current.locale,
             messages: requestMessages,
             currentTime,
+            ...(previousTime !== undefined ? { previousTime } : {}),
+            ...(lastMessageIntervalMs !== undefined ? { lastMessageIntervalMs } : {}),
             ...(activeConfig !== undefined
               ? { provider: activeConfig.provider, apiKey: activeConfig.apiKey, model: activeConfig.model }
               : {}),

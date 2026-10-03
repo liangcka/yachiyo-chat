@@ -247,6 +247,44 @@ describe("streamChat", () => {
     });
   });
 
+  it("serializes lastMessageIntervalMs in request body when provided", async () => {
+    serverFetch.mockResolvedValue(
+      sseResponse('event: done\ndata: {"truncated":false}\n\n'),
+    );
+
+    await streamChat(
+      { ...sampleRequest, lastMessageIntervalMs: 120_000 },
+      { fetcher: serverFetch, onDelta: vi.fn() },
+    );
+
+    expect(serverFetch).toHaveBeenCalledWith("/api/chat", {
+      body: JSON.stringify({ ...sampleRequest, lastMessageIntervalMs: 120_000 }),
+      credentials: "same-origin",
+      headers: { accept: "text/event-stream", "content-type": "application/json" },
+      method: "POST",
+      signal: undefined,
+    });
+  });
+
+  it("serializes previousTime in request body when provided", async () => {
+    serverFetch.mockResolvedValue(
+      sseResponse('event: done\ndata: {"truncated":false}\n\n'),
+    );
+
+    await streamChat(
+      { ...sampleRequest, previousTime: "2026-10-03 23:28:00 星期六" },
+      { fetcher: serverFetch, onDelta: vi.fn() },
+    );
+
+    expect(serverFetch).toHaveBeenCalledWith("/api/chat", {
+      body: JSON.stringify({ ...sampleRequest, previousTime: "2026-10-03 23:28:00 星期六" }),
+      credentials: "same-origin",
+      headers: { accept: "text/event-stream", "content-type": "application/json" },
+      method: "POST",
+      signal: undefined,
+    });
+  });
+
   it("distinguishes offline and aborted requests", async () => {
     serverFetch.mockRejectedValueOnce(new TypeError("Failed to fetch"));
     await expect(

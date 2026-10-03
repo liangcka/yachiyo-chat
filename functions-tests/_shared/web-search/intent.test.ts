@@ -81,6 +81,7 @@ describe("shouldSearchWeb", () => {
     expect(shouldSearchWeb([{ role: "user", text: "什么是管理式民主" }])).toBe(true);
     expect(shouldSearchWeb([{ role: "user", text: "管理式民主怎么回事" }])).toBe(true);
     expect(shouldSearchWeb([{ role: "user", text: "ヘルダイバー2とは" }])).toBe(true);
+    expect(shouldSearchWeb([{ role: "user", text: "oi你知道魔法少女的魔女审判吗" }])).toBe(true);
   });
 
   it("searches when chatty prefixes precede substantive content", () => {

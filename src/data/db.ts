@@ -9,7 +9,8 @@ export type AppSetting =
   | { key: "webSearchEnabled"; value: boolean }
   | { key: "webSearchShowSources"; value: boolean }
   | { key: "webSearchSmart"; value: boolean }
-  | { key: "userMemory"; value: string };
+  | { key: "userMemory"; value: string }
+  | { key: "multiBubble"; value: boolean };
 
 export class YachiyoDatabase extends Dexie {
   conversations!: Table<Conversation, string>;

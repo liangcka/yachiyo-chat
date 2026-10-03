@@ -5,6 +5,10 @@ describe("copyFor", () => {
   it("returns localized reference controls", () => {
     expect(copyFor("zh-CN").capture).toBe("拍摄");
     expect(copyFor("ja-JP").capture).toBe("撮影");
+    expect(copyFor("zh-CN").captureCamera).toBe("相机");
+    expect(copyFor("ja-JP").captureCamera).toBe("カメラ");
+    expect(copyFor("zh-CN").captureAlbum).toBe("相册");
+    expect(copyFor("ja-JP").captureAlbum).toBe("アルバム");
     expect(copyFor("zh-CN").voiceSoon).not.toBe(copyFor("ja-JP").voiceSoon);
   });
 

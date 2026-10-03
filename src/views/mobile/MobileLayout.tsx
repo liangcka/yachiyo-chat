@@ -47,6 +47,8 @@ export function MobileLayout({
   onLlmActivate,
   onSkillToggle,
   onWebSearchSettingsChange,
+  multiBubble,
+  onMultiBubbleChange,
   showToast,
   refreshHistory,
   refreshLlm,
@@ -163,6 +165,7 @@ export function MobileLayout({
         key={controller.activeConversation?.id}
         locale={controller.locale}
         messages={controller.messages}
+        multiBubble={multiBubble}
         onLoadEarlier={() => void controller.loadEarlier()}
         onRecall={onRecall}
         onRegenerate={
@@ -303,7 +306,9 @@ export function MobileLayout({
       <SkillsPanel
         activeIds={activeSkillIds}
         copy={copy}
+        multiBubble={multiBubble}
         onClose={() => setSkillsOpen(false)}
+        onMultiBubbleChange={onMultiBubbleChange}
         onToggle={(id, next) => void onSkillToggle(id, next)}
         onWebSearchSettingsChange={onWebSearchSettingsChange}
         open={skillsOpen}

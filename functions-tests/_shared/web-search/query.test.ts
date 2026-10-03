@@ -170,6 +170,10 @@ describe("buildSearchQuery", () => {
     expect(buildSearchQuery([{ role: "user", text: "怎么样？" }])).toBe("怎么样？");
   });
 
+  it("strips conversational inquiry prefixes like oi你知道...吗", () => {
+    expect(buildSearchQuery([{ role: "user", text: "oi你知道魔法少女的魔女审判吗" }])).toBe("魔法少女魔女审判");
+  });
+
   it("truncates to 100 Unicode characters without splitting surrogate pairs", () => {
     expect(buildSearchQuery([{ role: "user", text: "月".repeat(150) }])).toBe("月".repeat(100));
     expect(buildSearchQuery([{ role: "user", text: "🌈".repeat(120) }])).toBe("🌈".repeat(100));

@@ -36,6 +36,8 @@ export interface AppRepository extends ChatRepository {
   renameConversation(id: string, title: string): Promise<void>;
   deleteConversation(id: string): Promise<void>;
   clearAll(): Promise<void>;
+  getMultiBubble?(): Promise<boolean>;
+  setMultiBubble?(multiBubble: boolean): Promise<void>;
 }
 
 export interface SessionService {
@@ -115,6 +117,7 @@ export function App({ services }: AppProps) {
   const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
   const [webSearchSettings, setWebSearchSettings] = useState<WebSearchSettings>(defaultWebSearchSettings);
   const [toast, setToast] = useState<ToastState>();
+  const [multiBubble, setMultiBubble] = useState(true);
 
   const activeLlmConfig = useMemo<ActiveLlmConfig | undefined>(() => {
     if (llmActiveProvider === undefined) return undefined;
@@ -239,6 +242,29 @@ export function App({ services }: AppProps) {
     const timeout = setTimeout(() => setToast(undefined), 5_200);
     return () => clearTimeout(timeout);
   }, [toast]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void activeServices.repository
+      .getMultiBubble?.()
+      .then((saved) => {
+        if (typeof saved === "boolean" && !cancelled) {
+          setMultiBubble(saved);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [activeServices.repository]);
+
+  const handleMultiBubbleChange = useCallback(
+    async (enabled: boolean) => {
+      setMultiBubble(enabled);
+      await activeServices.repository.setMultiBubble?.(enabled).catch(() => undefined);
+    },
+    [activeServices.repository],
+  );
 
   const refreshHistory = useCallback(async () => {
     try {
@@ -510,6 +536,8 @@ export function App({ services }: AppProps) {
     await skillService.clear();
     setWebSearchSettings(defaultWebSearchSettings);
     await webSearchService.clear().catch(() => undefined);
+    setMultiBubble(true);
+    await activeServices.repository.setMultiBubble?.(true).catch(() => undefined);
     setLlmEntries([]);
     setLlmActiveProvider(undefined);
     await controller.newConversation();
@@ -617,6 +645,8 @@ export function App({ services }: AppProps) {
     onSignOut: handleSignOut,
     onSkillToggle: handleSkillToggle,
     onWebSearchSettingsChange: handleWebSearchSettingsChange,
+    multiBubble,
+    onMultiBubbleChange: handleMultiBubbleChange,
     pendingImageDataUrl,
     processImage: activeServices.processImage,
     pwa,

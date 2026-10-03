@@ -93,6 +93,38 @@ describe("reference chat components", () => {
     );
   });
 
+  it("renders markdown bold syntax as strong element without showing raw asterisks and strips them on copy", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, {
+      clipboard: { writeText },
+    });
+
+    const messages: ChatMessage[] = [
+      {
+        conversationId: "one",
+        createdAt: 1,
+        id: "assistant-bold",
+        role: "assistant",
+        status: "complete",
+        text: "一句话概括：**能跑酷的FPS+会说话的机甲**！",
+      },
+    ];
+    render(<ConversationView locale="zh-CN" messages={messages} />);
+
+    const article = screen.getByRole("article", { name: "八千代的回复" });
+    const boldEl = article.querySelector("strong.message-bubble__bold");
+    expect(boldEl).not.toBeNull();
+    expect(boldEl).toHaveTextContent("能跑酷的FPS+会说话的机甲");
+    expect(article).not.toHaveTextContent("**");
+    expect(article).toHaveTextContent("一句话概括：能跑酷的FPS+会说话的机甲！");
+
+    fireEvent.contextMenu(article);
+    const copyButton = screen.getByRole("menuitem", { name: "复制" });
+    fireEvent.click(copyButton);
+
+    expect(writeText).toHaveBeenCalledWith("一句话概括：能跑酷的FPS+会说话的机甲！");
+  });
+
   it("follows streaming updates only while the reader stays near the bottom", () => {
     const scrollIntoView = vi.mocked(Element.prototype.scrollIntoView);
     scrollIntoView.mockClear();
@@ -645,5 +677,65 @@ describe("reference chat components", () => {
     expect(onImageDisabled).toHaveBeenCalledOnce();
     expect(process).not.toHaveBeenCalled();
   });
+
+  it("renders multi-bubble assistant messages as separate articles and copies individual bubble content", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+
+    const messages: ChatMessage[] = [
+      {
+        conversationId: "one",
+        createdAt: 1,
+        id: "assistant-multi",
+        role: "assistant",
+        status: "complete",
+        text:
+          "哦~八千代知道哦（托腮，眼睛亮起来）\n" +
+          "怎么突然聊这个？大半夜的，彩叶该不会正窝在被窝里看吧？www\n" +
+          "是剧情太虐了，还是喜欢上哪个魔女了呀？说来听听嘛~",
+      },
+    ];
+
+    render(<ConversationView locale="zh-CN" messages={messages} />);
+
+    const bubbles = screen.getAllByRole("article", { name: "八千代的回复" });
+    expect(bubbles).toHaveLength(3);
+    expect(bubbles[0]).toHaveTextContent("哦~八千代知道哦（托腮，眼睛亮起来）");
+    expect(bubbles[1]).toHaveTextContent("怎么突然聊这个？大半夜的，彩叶该不会正窝在被窝里看吧？www");
+    expect(bubbles[2]).toHaveTextContent("是剧情太虐了，还是喜欢上哪个魔女了呀？说来听听嘛~");
+
+    // Context menu on the second bubble only copies the second bubble
+    fireEvent.contextMenu(bubbles[1]!);
+    const copyButton = screen.getByRole("menuitem", { name: "复制" });
+    fireEvent.click(copyButton);
+
+    expect(writeText).toHaveBeenCalledWith(
+      "怎么突然聊这个？大半夜的，彩叶该不会正窝在被窝里看吧？www",
+    );
+  });
+
+  it("shows an in-progress typing bubble when streaming assistant message ends with a newline", () => {
+    const messages: ChatMessage[] = [
+      {
+        conversationId: "one",
+        createdAt: 1,
+        id: "assistant-streaming",
+        role: "assistant",
+        status: "streaming",
+        text: "第一句已经说完\n",
+      },
+    ];
+
+    render(<ConversationView locale="zh-CN" messages={messages} />);
+
+    const bubbles = screen.getAllByRole("article", { name: "八千代的回复" });
+    expect(bubbles).toHaveLength(2);
+    expect(bubbles[0]).toHaveTextContent("第一句已经说完");
+    expect(bubbles[1]).toHaveClass("message-bubble--typing");
+  });
 });
+
 

@@ -15,25 +15,82 @@ const processed: ProcessedImage = {
 };
 
 describe("CaptureButton", () => {
-  it("uses a real localized button to open an environment camera input", async () => {
+  it("opens a menu to select camera or album and triggers respective inputs", async () => {
     const user = userEvent.setup();
-    const { container } = render(
+    render(
       <CaptureButton copy={copyFor("ja-JP")} onError={vi.fn()} onImage={vi.fn()} />,
     );
 
     const button = screen.getByRole("button", { name: "撮影" });
     expect(button).toBeEnabled();
-    const input = container.querySelector<HTMLInputElement>('input[type="file"]');
-    expect(input).not.toBeNull();
-    expect(input).toHaveAttribute("type", "file");
-    expect(input).toHaveAttribute("accept", "image/*");
-    expect(input).toHaveAttribute("capture", "environment");
-    expect(input).toHaveAttribute("aria-hidden", "true");
-    expect(input).toHaveAttribute("tabindex", "-1");
+    expect(button).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
 
-    const openFilePicker = vi.spyOn(input!, "click").mockImplementation(() => undefined);
+    const cameraInput = screen.getByTestId("capture-camera-input") as HTMLInputElement;
+    const albumInput = screen.getByTestId("capture-album-input") as HTMLInputElement;
+
+    expect(cameraInput).toHaveAttribute("type", "file");
+    expect(cameraInput).toHaveAttribute("accept", "image/*");
+    expect(cameraInput).toHaveAttribute("capture", "environment");
+    expect(cameraInput).toHaveAttribute("aria-hidden", "true");
+    expect(cameraInput).toHaveAttribute("tabindex", "-1");
+
+    expect(albumInput).toHaveAttribute("type", "file");
+    expect(albumInput).toHaveAttribute("accept", "image/*");
+    expect(albumInput).not.toHaveAttribute("capture");
+    expect(albumInput).toHaveAttribute("aria-hidden", "true");
+    expect(albumInput).toHaveAttribute("tabindex", "-1");
+
+    const cameraClick = vi.spyOn(cameraInput, "click").mockImplementation(() => undefined);
+    const albumClick = vi.spyOn(albumInput, "click").mockImplementation(() => undefined);
+
+    // 打开菜单
     await user.click(button);
-    expect(openFilePicker).toHaveBeenCalledOnce();
+    expect(button).toHaveAttribute("aria-expanded", "true");
+    const menu = screen.getByRole("menu", { name: "撮影" });
+    expect(menu).toBeInTheDocument();
+
+    const cameraOption = screen.getByRole("menuitem", { name: "カメラ" });
+    const albumOption = screen.getByRole("menuitem", { name: "アルバム" });
+    expect(cameraOption).toBeInTheDocument();
+    expect(albumOption).toBeInTheDocument();
+
+    // 点击相机选项触发相机 input
+    await user.click(cameraOption);
+    expect(cameraClick).toHaveBeenCalledOnce();
+    expect(albumClick).not.toHaveBeenCalled();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+
+    // 重新打开并点击相册选项触发相册 input
+    await user.click(button);
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    await user.click(screen.getByRole("menuitem", { name: "アルバム" }));
+    expect(albumClick).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("closes the menu on outside click or escape key", async () => {
+    const user = userEvent.setup();
+    render(
+      <div>
+        <button type="button">外部区域</button>
+        <CaptureButton copy={copyFor("zh-CN")} onError={vi.fn()} onImage={vi.fn()} />
+      </div>,
+    );
+
+    const button = screen.getByRole("button", { name: "拍摄" });
+
+    // 打开后按 Escape 键关闭
+    await user.click(button);
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+
+    // 打开后点击外部区域关闭
+    await user.click(button);
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    fireEvent.pointerDown(screen.getByRole("button", { name: "外部区域" }));
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
   it("processes one selected image and resets the input for same-file reselection", async () => {

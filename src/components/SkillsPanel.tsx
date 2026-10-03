@@ -16,6 +16,10 @@ export interface SkillsPanelProps {
   webSearchSettings: WebSearchSettings;
   /** 切换联网搜索设置 */
   onWebSearchSettingsChange: (partial: Partial<WebSearchSettings>) => void;
+  /** 多气泡消息开关状态，默认开启 */
+  multiBubble?: boolean;
+  /** 切换多气泡消息设置 */
+  onMultiBubbleChange?: (enabled: boolean) => void;
 }
 
 interface WebSearchItemProps {
@@ -79,6 +83,8 @@ export function SkillsPanel({
   onToggle,
   webSearchSettings,
   onWebSearchSettingsChange,
+  multiBubble = true,
+  onMultiBubbleChange,
 }: SkillsPanelProps) {
   const closeRef = useRef<HTMLButtonElement>(null);
   const [expandedId, setExpandedId] = useState<string>();
@@ -150,6 +156,15 @@ export function SkillsPanel({
           })}
         </ul>
         <ul className="skills-panel__list skills-panel__web-search">
+          <WebSearchItem
+            active={multiBubble}
+            disableLabel={copy.skillDisable}
+            description={copy.multiBubbleDescription}
+            enableLabel={copy.skillEnable}
+            onToggle={() => onMultiBubbleChange?.(!multiBubble)}
+            title={copy.multiBubbleTitle}
+            toggleLabel={copy.skillToggleLabel}
+          />
           <WebSearchItem
             active={enabled}
             disableLabel={copy.skillDisable}

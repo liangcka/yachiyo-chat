@@ -15,6 +15,10 @@ export interface StreamChatRequest {
   mode?: "chat" | "summary";
   /** 发送消息时的客户端本地格式化时间戳 */
   currentTime?: string;
+  /** 上一条历史消息的客户端本地格式化时间戳 */
+  previousTime?: string;
+  /** 距离上一条消息的毫秒间隔（用于分析对话时态与回复节奏） */
+  lastMessageIntervalMs?: number;
   /** 用户自带 Key 路径：三者必须同时存在，否则走服务端 fallback */
   provider?: ProviderId;
   apiKey?: string;

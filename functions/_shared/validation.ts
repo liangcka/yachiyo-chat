@@ -4,6 +4,8 @@ export interface ClientHistoryMessage {
   role: "user" | "assistant";
   text: string;
   imageDataUrl?: string;
+  /** 消息发送时的客户端毫秒时间戳 */
+  createdAt?: number;
 }
 
 export type ProviderId = "stepfun" | "deepseek" | "glm" | "openai" | "claude" | "gemini";
@@ -35,6 +37,10 @@ export interface ClientChatRequest {
   smartSearch?: boolean;
   /** 发送消息时的客户端本地格式化时间戳 */
   currentTime?: string;
+  /** 上一条历史消息的客户端本地格式化时间戳（用于日期跨度与相对时态判断） */
+  previousTime?: string;
+  /** 距离上一条消息的毫秒间隔（用于分析对话时态与回复节奏） */
+  lastMessageIntervalMs?: number;
 }
 
 export class ChatValidationError extends Error {
@@ -63,8 +69,10 @@ const allowedTopLevelKeys = new Set([
   "webSearch",
   "smartSearch",
   "currentTime",
+  "previousTime",
+  "lastMessageIntervalMs",
 ]);
-const allowedMessageKeys = new Set(["role", "text", "imageDataUrl"]);
+const allowedMessageKeys = new Set(["role", "text", "imageDataUrl", "createdAt"]);
 
 function invalid(): never {
   throw new ChatValidationError();
@@ -189,13 +197,28 @@ export function validateChatRequest(value: unknown): ClientChatRequest {
       imageDataUrl = validateImageDataUrl(message.imageDataUrl);
     }
 
+    let createdAt: number | undefined;
+    if (message.createdAt !== undefined) {
+      if (
+        typeof message.createdAt !== "number" ||
+        !Number.isSafeInteger(message.createdAt) ||
+        message.createdAt <= 0
+      ) {
+        return invalid();
+      }
+      createdAt = message.createdAt;
+    }
+
     if (message.text.trim().length === 0 && imageDataUrl === undefined) {
       return invalid();
     }
 
-    return imageDataUrl === undefined
-      ? { role: message.role, text: message.text }
-      : { role: message.role, text: message.text, imageDataUrl };
+    return {
+      role: message.role,
+      text: message.text,
+      ...(imageDataUrl !== undefined ? { imageDataUrl } : {}),
+      ...(createdAt !== undefined ? { createdAt } : {}),
+    };
   });
 
   if (messages.at(-1)?.role !== "user") {
@@ -227,6 +250,25 @@ export function validateChatRequest(value: unknown): ClientChatRequest {
     return invalid();
   }
   const currentTime = value.currentTime as string | undefined;
+  if (
+    value.previousTime !== undefined &&
+    (typeof value.previousTime !== "string" ||
+      value.previousTime.trim().length === 0 ||
+      value.previousTime.length > 100)
+  ) {
+    return invalid();
+  }
+  const previousTime = value.previousTime as string | undefined;
+
+  if (
+    value.lastMessageIntervalMs !== undefined &&
+    (typeof value.lastMessageIntervalMs !== "number" ||
+      !Number.isSafeInteger(value.lastMessageIntervalMs) ||
+      value.lastMessageIntervalMs < 0)
+  ) {
+    return invalid();
+  }
+  const lastMessageIntervalMs = value.lastMessageIntervalMs as number | undefined;
 
   const hasProvider = value.provider !== undefined;
   const hasApiKey = value.apiKey !== undefined;
@@ -243,6 +285,8 @@ export function validateChatRequest(value: unknown): ClientChatRequest {
       ...(webSearch !== undefined ? { webSearch } : {}),
       ...(smartSearch !== undefined ? { smartSearch } : {}),
       ...(currentTime !== undefined ? { currentTime: currentTime.trim() } : {}),
+      ...(previousTime !== undefined ? { previousTime: previousTime.trim() } : {}),
+      ...(lastMessageIntervalMs !== undefined ? { lastMessageIntervalMs } : {}),
     };
   }
 
@@ -267,6 +311,8 @@ export function validateChatRequest(value: unknown): ClientChatRequest {
     ...(webSearch !== undefined ? { webSearch } : {}),
     ...(smartSearch !== undefined ? { smartSearch } : {}),
     ...(currentTime !== undefined ? { currentTime: currentTime.trim() } : {}),
+    ...(previousTime !== undefined ? { previousTime: previousTime.trim() } : {}),
+    ...(lastMessageIntervalMs !== undefined ? { lastMessageIntervalMs } : {}),
     provider: value.provider,
     apiKey: value.apiKey,
     model: value.model,

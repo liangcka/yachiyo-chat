@@ -1,7 +1,8 @@
 import { Copy, RotateCcw, RotateCw } from "lucide-react";
-import { memo, useEffect, useMemo, useRef, useState } from "react";
-import type { ChatMessage, Locale } from "../domain/chat";
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import type { ChatMessage, Locale, MessageStatus } from "../domain/chat";
 import { copyFor } from "../i18n/messages";
+import { splitAssistantMessage } from "./message-splitter";
 
 export interface MessageBubbleProps {
   locale: Locale;
@@ -9,6 +10,8 @@ export interface MessageBubbleProps {
   imageUrl?: string;
   /** "显示引用来源"开关；false 时不渲染 assistant 消息的参考来源列表 */
   showSources?: boolean;
+  /** 是否允许分条消息气泡，默认开启 */
+  multiBubble?: boolean;
   onRecall?: () => void;
   onRegenerate?: () => void;
   onToast?: (message: string) => void;
@@ -25,6 +28,46 @@ function stripCitationMarkers(text: string): string {
   return text.replace(/\[(\d{1,2})\]/gu, "");
 }
 
+/** 去除 Markdown 加粗标记（仅复制纯文本时使用） */
+function stripMarkdownBold(text: string): string {
+  return text.replace(/\*\*(.+?)\*\*/gu, "$1");
+}
+
+/**
+ * 将包含 **加粗** 的段落渲染为 React 元素，未闭合的星号保持原样
+ */
+function renderFormattedParagraph(text: string): ReactNode {
+  if (!text.includes("**")) {
+    return text;
+  }
+  const parts: ReactNode[] = [];
+  const regex = /\*\*(.+?)\*\*/gu;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null = null;
+  let key = 0;
+
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+    const boldText = match[1];
+    if (boldText.length > 0) {
+      parts.push(
+        <strong key={`bold-${key++}`} className="message-bubble__bold">
+          {boldText}
+        </strong>,
+      );
+    }
+    lastIndex = regex.lastIndex;
+  }
+
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+
+  return parts.length > 0 ? parts : text;
+}
+
 function formatMessageText(text: string): string[] {
   return text
     .split(/\n\s*\n/)
@@ -32,17 +75,35 @@ function formatMessageText(text: string): string[] {
     .filter((p) => p.length > 0);
 }
 
-/** memo 化：流式期间只有最后一条消息变化，其余气泡跳过重渲（配合上游稳定回调引用） */
-export const MessageBubble = memo(function MessageBubble({
+interface SingleBubbleProps {
+  messageRole: "user" | "assistant";
+  locale: Locale;
+  text: string;
+  status: MessageStatus;
+  isTyping?: boolean;
+  truncated?: boolean;
+  imageUrl?: string;
+  sources?: ReadonlyArray<{ title: string; url: string }>;
+  onRecall?: () => void;
+  onRegenerate?: () => void;
+  onToast?: (message: string) => void;
+  onImageLoad?: () => void;
+}
+
+const SingleBubble = memo(function SingleBubble({
   imageUrl,
+  isTyping = false,
   locale,
-  message,
+  messageRole,
   onImageLoad,
   onRecall,
   onRegenerate,
   onToast,
-  showSources,
-}: MessageBubbleProps) {
+  sources,
+  status,
+  text,
+  truncated = false,
+}: SingleBubbleProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [placement, setPlacement] = useState<"top" | "bottom">("top");
   const bubbleRef = useRef<HTMLElement>(null);
@@ -50,22 +111,11 @@ export const MessageBubble = memo(function MessageBubble({
   const pointerStartPosRef = useRef<{ x: number; y: number } | null>(null);
   const ignoreNextClickRef = useRef(false);
 
-  // 关闭"显示引用来源"时，联网回复正文中的 [n] 引用标记一并隐藏（仅展示层）
-  const hideCitations = showSources === false && message.sources !== undefined && message.sources.length > 0;
-  const strippedText = hideCitations ? stripCitationMarkers(message.text) : message.text;
-  const displayText = strippedText.trim().length > 0 ? strippedText : message.text;
+  const displayText = text.trim();
   const paragraphs = useMemo(() => formatMessageText(displayText), [displayText]);
-
-  const hasText = displayText.trim().length > 0;
-  const hasImage = message.imageId !== undefined;
-  const isTyping = message.text.length === 0 && message.status === "streaming";
-  // 仅 assistant 消息渲染联网搜索的参考来源，且受"显示引用来源"开关控制；
-  // 正文到达前（搜索与模型等待期）不渲染来源区块，保持三点等待动画
-  const visibleSources =
-    message.role === "assistant" && showSources !== false && hasText
-      ? message.sources?.filter(({ title, url }) => title.length > 0 && url.length > 0)
-      : undefined;
-  const hasVisibleSources = visibleSources !== undefined && visibleSources.length > 0;
+  const hasText = displayText.length > 0;
+  const hasImage = imageUrl !== undefined;
+  const hasVisibleSources = sources !== undefined && sources.length > 0;
 
   const openMenu = () => {
     if (bubbleRef.current) {
@@ -144,7 +194,7 @@ export const MessageBubble = memo(function MessageBubble({
     if (e) e.stopPropagation();
     setMenuOpen(false);
     try {
-      await navigator.clipboard.writeText(displayText);
+      await navigator.clipboard.writeText(stripMarkdownBold(displayText));
       onToast?.(copyFor(locale).copied);
     } catch {
       // Ignore clipboard write failures
@@ -173,9 +223,9 @@ export const MessageBubble = memo(function MessageBubble({
     // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions
     <article
       ref={bubbleRef}
-      aria-label={messageLabel(message.role, locale)}
-      className={`message-bubble message-bubble--${message.role}${isTyping ? " message-bubble--typing" : ""}${menuOpen ? " message-bubble--menu-open" : ""}`}
-      data-status={message.status}
+      aria-label={messageLabel(messageRole, locale)}
+      className={`message-bubble message-bubble--${messageRole}${isTyping ? " message-bubble--typing" : ""}${menuOpen ? " message-bubble--menu-open" : ""}`}
+      data-status={status}
       onContextMenu={hasMenuOptions ? handleContextMenu : undefined}
       onPointerCancel={handlePointerUp}
       onPointerDown={hasMenuOptions ? handlePointerDown : undefined}
@@ -196,7 +246,7 @@ export const MessageBubble = memo(function MessageBubble({
           <div aria-hidden="true" className="message-bubble__image message-bubble__image--loading" />
         )
       ) : null}
-      {message.text.length === 0 && message.status === "streaming" && !hasImage ? (
+      {isTyping ? (
         <span aria-hidden="true" className="message-bubble__typing">
           <i />
           <i />
@@ -205,22 +255,16 @@ export const MessageBubble = memo(function MessageBubble({
       ) : hasText ? (
         <>
           {paragraphs.map((p, idx) => (
-            <p key={idx}>{p}</p>
+            <p key={idx}>{renderFormattedParagraph(p)}</p>
           ))}
-          {message.truncated === true ? (
+          {truncated ? (
             <span className="message-bubble__truncated">{copyFor(locale).truncated}</span>
           ) : null}
         </>
-      ) : message.status === "streaming" ? (
-        <span aria-hidden="true" className="message-bubble__typing">
-          <i />
-          <i />
-          <i />
-        </span>
       ) : null}
-      {hasVisibleSources && visibleSources !== undefined ? (
+      {hasVisibleSources && sources !== undefined ? (
         <div aria-label={copyFor(locale).sourcesLabel} className="message-bubble__sources">
-          {visibleSources.map((source) => (
+          {sources.map((source) => (
             <a
               href={source.url}
               key={source.url}
@@ -235,7 +279,7 @@ export const MessageBubble = memo(function MessageBubble({
       {menuOpen && (
         <div
           aria-label={copyFor(locale).appName}
-          className={`message-bubble__context-menu message-bubble__context-menu--${message.role} message-bubble__context-menu--${placement}`}
+          className={`message-bubble__context-menu message-bubble__context-menu--${messageRole} message-bubble__context-menu--${placement}`}
           role="menu"
         >
           {onRegenerate !== undefined ? (
@@ -277,5 +321,95 @@ export const MessageBubble = memo(function MessageBubble({
         </div>
       )}
     </article>
+  );
+});
+
+/** memo 化：流式期间只有最后一条消息变化，其余气泡跳过重渲（配合上游稳定回调引用） */
+export const MessageBubble = memo(function MessageBubble({
+  imageUrl,
+  locale,
+  message,
+  multiBubble = true,
+  onImageLoad,
+  onRecall,
+  onRegenerate,
+  onToast,
+  showSources,
+}: MessageBubbleProps) {
+  // 关闭"显示引用来源"时，联网回复正文中的 [n] 引用标记一并隐藏（仅展示层）
+  const hideCitations = showSources === false && message.sources !== undefined && message.sources.length > 0;
+  const strippedText = hideCitations ? stripCitationMarkers(message.text) : message.text;
+  const displayText = strippedText.trim().length > 0 ? strippedText : message.text;
+
+  // 用户消息直接渲染单气泡
+  if (message.role === "user") {
+    return (
+      <SingleBubble
+        imageUrl={imageUrl}
+        locale={locale}
+        messageRole="user"
+        onImageLoad={onImageLoad}
+        onRecall={onRecall}
+        onRegenerate={onRegenerate}
+        onToast={onToast}
+        status={message.status}
+        text={displayText}
+      />
+    );
+  }
+
+  // 仅 assistant 消息渲染联网搜索的参考来源，且受"显示引用来源"开关控制；
+  // 正文到达前（搜索与模型等待期）不渲染来源区块，保持三点等待动画
+  const visibleSources =
+    showSources !== false && displayText.trim().length > 0
+      ? message.sources?.filter(({ title, url }) => title.length > 0 && url.length > 0)
+      : undefined;
+
+  const isStreaming = message.status === "streaming";
+  const pieces = splitAssistantMessage(displayText, isStreaming, multiBubble);
+
+  if (pieces.length === 0) {
+    return null;
+  }
+
+  if (pieces.length === 1) {
+    const piece = pieces[0];
+    return (
+      <SingleBubble
+        isTyping={piece?.isTyping}
+        locale={locale}
+        messageRole="assistant"
+        onRecall={onRecall}
+        onRegenerate={onRegenerate}
+        onToast={onToast}
+        sources={visibleSources}
+        status={message.status}
+        text={piece?.text ?? ""}
+        truncated={message.truncated}
+      />
+    );
+  }
+
+  return (
+    <div className="message-bubble-group" data-role="assistant">
+      {pieces.map((piece, index) => {
+        const isLast = index === pieces.length - 1;
+        return (
+          <SingleBubble
+            key={piece.id}
+            isTyping={piece.isTyping}
+            locale={locale}
+            messageRole="assistant"
+            onRecall={onRecall}
+            onRegenerate={onRegenerate}
+            onToast={onToast}
+            sources={isLast ? visibleSources : undefined}
+            status={message.status}
+            text={piece.text}
+            truncated={isLast ? message.truncated : undefined}
+          />
+        );
+      })}
+    </div>
   );
 });

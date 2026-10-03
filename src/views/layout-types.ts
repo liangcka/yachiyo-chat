@@ -40,6 +40,8 @@ export interface SharedViewProps {
   onLlmActivate: (provider: ProviderId) => Promise<void>;
   onSkillToggle: (id: string, next: boolean) => Promise<void>;
   onWebSearchSettingsChange: (partial: Partial<WebSearchSettings>) => void;
+  multiBubble?: boolean;
+  onMultiBubbleChange?: (enabled: boolean) => void;
   showToast: (message: string, tone?: "info" | "error") => void;
   refreshHistory: () => Promise<void>;
   refreshLlm: () => Promise<void>;

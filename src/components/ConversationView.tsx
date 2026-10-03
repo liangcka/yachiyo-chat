@@ -36,6 +36,8 @@ export interface ConversationViewProps {
   summary?: string;
   /** "显示引用来源"开关，向下传递给消息气泡 */
   showSources?: boolean;
+  /** 是否允许分条消息气泡，默认开启 */
+  multiBubble?: boolean;
   onRecall?: () => void;
   onRegenerate?: (messageId?: string) => void;
   /** 点击后向上翻页加载更早历史（UI 窗口化） */
@@ -50,6 +52,7 @@ export function ConversationView({
   imageUrls,
   locale,
   messages,
+  multiBubble,
   onRecall,
   onRegenerate,
   onLoadEarlier,
@@ -140,6 +143,7 @@ export function ConversationView({
           imageUrl={message.imageId === undefined ? undefined : imageUrls?.get(message.imageId)}
           locale={locale}
           message={message}
+          multiBubble={multiBubble}
           onImageLoad={handleImageLoad}
           showSources={showSources}
           onRecall={message.role === "user" && index === lastUserMessageIndex ? onRecall : undefined}
@@ -154,7 +158,7 @@ export function ConversationView({
         />
       </li>
     ),
-    [handleImageLoad, imageUrls, lastAssistantMessageIndex, lastUserMessageIndex, locale, onRecall, onRegenerate, onToast, showSources],
+    [handleImageLoad, imageUrls, lastAssistantMessageIndex, lastUserMessageIndex, locale, multiBubble, onRecall, onRegenerate, onToast, showSources],
   );
 
   const memoryCard = summary ? (

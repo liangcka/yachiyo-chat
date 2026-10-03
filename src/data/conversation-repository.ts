@@ -185,6 +185,17 @@ export class ConversationRepository {
     return record !== undefined && record.key === "locale" ? record.value : "zh-CN";
   }
 
+  async setMultiBubble(multiBubble: boolean): Promise<void> {
+    await this.db.settings.put({ key: "multiBubble", value: multiBubble });
+  }
+
+  async getMultiBubble(): Promise<boolean> {
+    const record = await this.db.settings.get("multiBubble");
+    return record !== undefined && record.key === "multiBubble" && typeof record.value === "boolean"
+      ? record.value
+      : true;
+  }
+
   async clearAll(): Promise<void> {
     await this.db.transaction(
       "rw",

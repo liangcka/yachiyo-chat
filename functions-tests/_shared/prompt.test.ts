@@ -183,4 +183,70 @@ describe("buildSystemPrompt", () => {
     expect(prompt).not.toContain("1000个Unicode字符");
     expect(prompt).not.toContain("当前现实时间");
   });
+
+  it("calculates short message interval for rapid back-and-forth chat", () => {
+    const baseTime = 1727980000000;
+    const prompt = buildSystemPrompt("zh-CN", "chat", {
+      currentTime: "2026-10-04 05:30:00 星期日",
+      messages: [
+        { role: "assistant", text: "晚安啦彩叶~", createdAt: baseTime },
+        { role: "user", text: "你玩过崩坏三吗", createdAt: baseTime + 120_000 },
+      ],
+    });
+
+    expect(prompt).toContain("作息与生活时态关怀：严禁仅因时段深夜就机械催睡");
+    expect(prompt).toContain("距离上一条对话仅过去约2分钟（处于实时连续热聊中）");
+  });
+
+  it("calculates long message interval when hours have passed", () => {
+    const baseTime = 1727960000000;
+    const prompt = buildSystemPrompt("zh-CN", "chat", {
+      currentTime: "2026-10-04 05:30:00 星期日",
+      messages: [
+        { role: "assistant", text: "好哦，快去睡~", createdAt: baseTime },
+        { role: "user", text: "你玩过崩坏三吗", createdAt: baseTime + 4 * 3600_000 },
+      ],
+    });
+
+    expect(prompt).toContain("距离上一条对话过去约4小时");
+    expect(prompt).toContain("彩叶可能中途休息、睡了一觉刚醒、或去忙了其他事情");
+  });
+
+  it("renders Japanese sleep and interval guidance when locale is ja-JP", () => {
+    const baseTime = 1727980000000;
+    const prompt = buildSystemPrompt("ja-JP", "chat", {
+      currentTime: "2026-10-04 05:30:00 日曜日",
+      messages: [
+        { role: "assistant", text: "おやすみ~", createdAt: baseTime },
+        { role: "user", text: "起きてる？", createdAt: baseTime + 60_000 },
+      ],
+    });
+
+    expect(prompt).toContain("生活リズムと睡眠への配慮：時間帯のみを理由に機械的に就寝を催促しないでください");
+    expect(prompt).toContain("直前の会話から約1分しか経っていません（リアルタイムで連続対話中）");
+  });
+
+  it("formats previousTime and recognizes overnight cross-day difference", () => {
+    const prompt = buildSystemPrompt("zh-CN", "chat", {
+      currentTime: "2026-10-04 05:30:00 星期日",
+      previousTime: "2026-10-03 23:28:00 星期六",
+      lastMessageIntervalMs: 6 * 3600_000 + 2 * 60_000,
+    });
+
+    expect(prompt).toContain("当前现实时间：2026-10-04 05:30:00 星期日");
+    expect(prompt).toContain("上一条对话时间：2026-10-03 23:28:00 星期六（跨天隔夜（上一条为昨天/昨晚，当前为今天））");
+    expect(prompt).toContain("距离上一条对话过去约6小时2分钟");
+    expect(prompt).toContain("清晰分辨彩叶是在聊「今天」还是「昨天/昨晚」的事");
+  });
+
+  it("formats previousTime and recognizes same-day difference", () => {
+    const prompt = buildSystemPrompt("zh-CN", "chat", {
+      currentTime: "2026-10-04 05:30:00 星期日",
+      previousTime: "2026-10-04 05:28:00 星期日",
+      lastMessageIntervalMs: 120_000,
+    });
+
+    expect(prompt).toContain("上一条对话时间：2026-10-04 05:28:00 星期日（同一天（今天））");
+    expect(prompt).toContain("距离上一条对话仅过去约2分钟（处于实时连续热聊中）");
+  });
 });

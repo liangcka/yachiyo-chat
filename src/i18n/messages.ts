@@ -5,6 +5,8 @@ export interface UiCopy {
   readonly menu: string;
   readonly closeMenu: string;
   readonly capture: string;
+  readonly captureCamera: string;
+  readonly captureAlbum: string;
   readonly inputHint: string;
   readonly send: string;
   readonly stop: string;
@@ -107,6 +109,8 @@ export interface UiCopy {
   readonly webSearchSmart: string;
   readonly webSearchSmartDescription: string;
   readonly sourcesLabel: string;
+  readonly multiBubbleTitle: string;
+  readonly multiBubbleDescription: string;
   readonly workspaceEntry: string;
   readonly workspaceTitle: string;
   readonly workspaceDescription: string;
@@ -117,6 +121,8 @@ const chinese = Object.freeze({
   menu: "菜单",
   closeMenu: "关闭菜单",
   capture: "拍摄",
+  captureCamera: "相机",
+  captureAlbum: "相册",
   inputHint: "什么都可以告诉我",
   send: "发送",
   stop: "停止",
@@ -220,6 +226,8 @@ const chinese = Object.freeze({
   webSearchSmart: "智能搜索",
   webSearchSmartDescription: "同时检索国际市场近30天结果，提升时效信息的准确性",
   sourcesLabel: "参考来源",
+  multiBubbleTitle: "分条发送消息",
+  multiBubbleDescription: "像真人日常聊天一样，允许八千代根据语境自主决定单条或分多条气泡回复",
   workspaceEntry: "工作区 & Agent",
   workspaceTitle: "工作区 & Agent 终端",
   workspaceDescription: "配置本地 Agent 工具的运行目录，支持安全文件读写与终端命令执行。",
@@ -230,6 +238,8 @@ const japanese = Object.freeze({
   menu: "メニュー",
   closeMenu: "メニューを閉じる",
   capture: "撮影",
+  captureCamera: "カメラ",
+  captureAlbum: "アルバム",
   inputHint: "何でも話してね",
   send: "送信",
   stop: "停止",
@@ -334,6 +344,8 @@ const japanese = Object.freeze({
   webSearchSmart: "スマート検索",
   webSearchSmartDescription: "国際市場の直近30日間の結果も同時に検索し、最新情報の正確性を高めます",
   sourcesLabel: "参考ソース",
+  multiBubbleTitle: "メッセージ分割送信",
+  multiBubbleDescription: "日常チャットのように、八千代が状況に応じて1通または複数通の吹き出しに分けて返信します",
   workspaceEntry: "ワークスペース & Agent",
   workspaceTitle: "ワークスペース & Agent ターミナル",
   workspaceDescription: "ローカルAgentツールの実行ディレクトリを設定し、安全なファイル読み書きとターミナルコマンド実行をサポートします。",

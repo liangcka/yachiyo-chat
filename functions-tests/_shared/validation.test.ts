@@ -193,4 +193,96 @@ describe("validateChatRequest", () => {
       validateChatRequest({ ...(validRequest() as object), currentTime: "a".repeat(101) }),
     ).toThrow(ChatValidationError);
   });
+
+  it("accepts an optional createdAt timestamp on messages and rejects invalid numbers", () => {
+    const validWithTime = {
+      locale: "zh-CN",
+      messages: [
+        { role: "assistant", text: "晚安啦彩叶~", createdAt: 1727980000000 },
+        { role: "user", text: "你玩过崩坏三吗", createdAt: 1727980120000 },
+      ],
+    };
+
+    const parsed = validateChatRequest(validWithTime);
+    expect(parsed.messages[0]).toMatchObject({ createdAt: 1727980000000 });
+    expect(parsed.messages[1]).toMatchObject({ createdAt: 1727980120000 });
+
+    expect(() =>
+      validateChatRequest({
+        locale: "zh-CN",
+        messages: [{ role: "user", text: "测试", createdAt: "1727980000000" }],
+      }),
+    ).toThrow(ChatValidationError);
+
+    expect(() =>
+      validateChatRequest({
+        locale: "zh-CN",
+        messages: [{ role: "user", text: "测试", createdAt: -100 }],
+      }),
+    ).toThrow(ChatValidationError);
+
+    expect(() =>
+      validateChatRequest({
+        locale: "zh-CN",
+        messages: [{ role: "user", text: "测试", createdAt: 123.456 }],
+      }),
+    ).toThrow(ChatValidationError);
+  });
+
+  it("accepts an optional lastMessageIntervalMs number and rejects invalid values", () => {
+    expect(
+      validateChatRequest({
+        ...(validRequest() as object),
+        lastMessageIntervalMs: 120_000,
+      }),
+    ).toMatchObject({ lastMessageIntervalMs: 120_000 });
+
+    expect(
+      validateChatRequest({
+        ...(validRequest() as object),
+        lastMessageIntervalMs: 0,
+      }),
+    ).toMatchObject({ lastMessageIntervalMs: 0 });
+
+    expect(validateChatRequest(validRequest())).not.toHaveProperty("lastMessageIntervalMs");
+
+    expect(() =>
+      validateChatRequest({ ...(validRequest() as object), lastMessageIntervalMs: "120000" }),
+    ).toThrow(ChatValidationError);
+
+    expect(() =>
+      validateChatRequest({ ...(validRequest() as object), lastMessageIntervalMs: -1 }),
+    ).toThrow(ChatValidationError);
+
+    expect(() =>
+      validateChatRequest({ ...(validRequest() as object), lastMessageIntervalMs: 1.5 }),
+    ).toThrow(ChatValidationError);
+  });
+
+  it("accepts an optional previousTime string and rejects invalid values", () => {
+    expect(
+      validateChatRequest({
+        ...(validRequest() as object),
+        previousTime: "2026-10-03 23:28:00 星期六",
+      }),
+    ).toMatchObject({ previousTime: "2026-10-03 23:28:00 星期六" });
+
+    expect(validateChatRequest(validRequest())).not.toHaveProperty("previousTime");
+
+    expect(() =>
+      validateChatRequest({ ...(validRequest() as object), previousTime: 123456 }),
+    ).toThrow(ChatValidationError);
+
+    expect(() =>
+      validateChatRequest({ ...(validRequest() as object), previousTime: "" }),
+    ).toThrow(ChatValidationError);
+
+    expect(() =>
+      validateChatRequest({ ...(validRequest() as object), previousTime: "   " }),
+    ).toThrow(ChatValidationError);
+
+    expect(() =>
+      validateChatRequest({ ...(validRequest() as object), previousTime: "a".repeat(101) }),
+    ).toThrow(ChatValidationError);
+  });
 });
