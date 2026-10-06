@@ -27,6 +27,8 @@ export interface StreamChatRequest {
   webSearch?: boolean;
   /** 智能搜索：联网搜索开启时启用双市场并行检索（结果更多、带发布日期） */
   smartSearch?: boolean;
+  /** 是否允许分条消息（默认 true，关闭后服务端 Prompt 不注入分条指令） */
+  multiBubble?: boolean;
 }
 
 export interface StreamChatResult {

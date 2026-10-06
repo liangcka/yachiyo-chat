@@ -54,6 +54,27 @@ describe("buildOpenAICompatBody", () => {
     expect(imageBody.reasoning_effort).toBe("medium");
   });
 
+  it("injects thinking enabled and reasoning_effort for deepseekThinking providers", () => {
+    const textBody = buildOpenAICompatBody(textRequest, "deepseek-flash", true, false, true) as {
+      thinking?: { type: string };
+      reasoning_effort?: string;
+    };
+    expect(textBody.thinking).toEqual({ type: "enabled" });
+    expect(textBody.reasoning_effort).toBe("high");
+
+    const imageDataUrl = "data:image/webp;base64,UklGRgAAAABXRUJQ";
+    const imageRequest: ClientChatRequest = {
+      locale: "zh-CN",
+      messages: [{ role: "user", text: "看图", imageDataUrl }],
+    };
+    const imageBody = buildOpenAICompatBody(imageRequest, "deepseek-flash", true, false, true) as {
+      thinking?: { type: string };
+      reasoning_effort?: string;
+    };
+    expect(imageBody.thinking).toEqual({ type: "enabled" });
+    expect(imageBody.reasoning_effort).toBe("medium");
+  });
+
   it("keeps a smaller token budget for summary mode", () => {
     const body = buildOpenAICompatBody({ ...textRequest, mode: "summary" }, "gpt-5.6-luna", true) as {
       max_tokens: number;
@@ -195,5 +216,97 @@ describe("buildOpenAICompatAdapter", () => {
     const body = JSON.parse(built.body) as { model: string; stream: boolean };
     expect(body.model).toBe("gpt-5.6-luna");
     expect(body.stream).toBe(true);
+  });
+
+  it("handles deepseekThinking adapter request and explicitly disables thinking for judge", () => {
+    const deepseekAdapter = buildOpenAICompatAdapter("deepseek", {
+      endpoint: "https://api.deepseek.com/chat/completions",
+      defaultModel: "deepseek-flash",
+      allowedModels: ["deepseek-flash", "deepseek-v4-pro"],
+      supportsImage: true,
+      imageModels: ["deepseek-flash"],
+      deepseekThinking: true,
+    });
+
+    const streamReq = deepseekAdapter.buildRequest({
+      request: textRequest,
+      apiKey: "sk-" + "b".repeat(40),
+      model: "deepseek-flash",
+    });
+    const streamBody = JSON.parse(streamReq.body) as {
+      thinking?: { type: string };
+      reasoning_effort?: string;
+    };
+    expect(streamBody.thinking).toEqual({ type: "enabled" });
+    expect(streamBody.reasoning_effort).toBe("high");
+
+    const judgeReq = deepseekAdapter.buildJudgeRequest({
+      apiKey: "sk-" + "b".repeat(40),
+      model: "deepseek-flash",
+      systemPrompt: "YES/NO",
+      messages: [{ role: "user", text: "测试" }],
+    });
+    const judgeBody = JSON.parse(judgeReq.body) as {
+      thinking?: { type: string };
+      reasoning_effort?: string;
+    };
+    expect(judgeBody.thinking).toEqual({ type: "disabled" });
+    expect(judgeBody.reasoning_effort).toBe("low");
+  });
+
+  it("handles glmThinking adapter routing thinking to supported models and sets roleplay temperature", () => {
+    const glmAdapter = buildOpenAICompatAdapter("glm", {
+      endpoint: "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+      defaultModel: "charglm-4",
+      allowedModels: ["charglm-4", "glm-5.3"],
+      supportsImage: true,
+      imageModels: ["glm-5.3"],
+      glmThinking: true,
+      defaultTemperature: 0.8,
+    });
+
+    // 1. charglm-4 角色扮演专属模型：不应包含 thinking，携带 0.8 温度
+    const charReq = glmAdapter.buildRequest({
+      request: textRequest,
+      apiKey: "sk-" + "c".repeat(40),
+      model: "charglm-4",
+    });
+    const charBody = JSON.parse(charReq.body) as {
+      thinking?: unknown;
+      reasoning_effort?: unknown;
+      temperature?: number;
+    };
+    expect(charBody.thinking).toBeUndefined();
+    expect(charBody.reasoning_effort).toBeUndefined();
+    expect(charBody.temperature).toBe(0.8);
+
+    // 2. glm-5.3 深度思考模型：注入 thinking 与 reasoning_effort，并携带温度
+    const thinkingReq = glmAdapter.buildRequest({
+      request: textRequest,
+      apiKey: "sk-" + "c".repeat(40),
+      model: "glm-5.3",
+    });
+    const thinkingBody = JSON.parse(thinkingReq.body) as {
+      thinking?: { type: string };
+      reasoning_effort?: string;
+      temperature?: number;
+    };
+    expect(thinkingBody.thinking).toEqual({ type: "enabled" });
+    expect(thinkingBody.reasoning_effort).toBe("high");
+    expect(thinkingBody.temperature).toBe(0.8);
+
+    // 3. GLM judge 请求：对思考模型降低开销并固定 0.1 低温
+    const judgeReq = glmAdapter.buildJudgeRequest({
+      apiKey: "sk-" + "c".repeat(40),
+      model: "glm-5.3",
+      systemPrompt: "YES/NO",
+      messages: [{ role: "user", text: "测试" }],
+    });
+    const judgeBody = JSON.parse(judgeReq.body) as {
+      reasoning_effort?: string;
+      temperature?: number;
+    };
+    expect(judgeBody.reasoning_effort).toBe("low");
+    expect(judgeBody.temperature).toBe(0.1);
   });
 });

@@ -233,7 +233,7 @@ describe("judgeSearchNeed (gemini & claude adapters)", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      judgeSearchNeed(PROVIDERS.claude, "sk-ant-" + "a".repeat(40), "claude-sonnet-5", [{ role: "user", text: "最新新闻" }], undefined),
+      judgeSearchNeed(PROVIDERS.claude, "sk-ant-" + "a".repeat(40), "claude-sonnet-5-5", [{ role: "user", text: "最新新闻" }], undefined),
     ).resolves.toBe(true);
 
     const [url, init] = fetchMock.mock.calls[0] ?? [];

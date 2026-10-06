@@ -16,6 +16,8 @@ export interface SystemPromptOptions {
   messages?: readonly ClientHistoryMessage[];
   /** 距离上一条消息的毫秒间隔 */
   lastMessageIntervalMs?: number;
+  /** 是否允许分条消息（默认 true；关闭时不注入多气泡拆分提示词） */
+  multiBubble?: boolean;
 }
 
 const localeSuffix: Record<ChatLocale, string> = {
@@ -42,6 +44,7 @@ export function formatRelativeDateDescription(
   locale: ChatLocale,
   currentTime?: string,
   previousTime?: string,
+  intervalMs?: number,
 ): string {
   if (currentTime === undefined || previousTime === undefined) {
     return "";
@@ -61,6 +64,11 @@ export function formatRelativeDateDescription(
     return locale === "ja-JP" ? "同日（本日）" : "同一天（今天）";
   }
   if (diffDays === 1) {
+    if (intervalMs !== undefined && intervalMs < 3.5 * 3600_000) {
+      return locale === "ja-JP"
+        ? "日付変更線をまたいだ深夜の連続対話（就寝を挟んだ隔夜ではない）"
+        : "跨越零点的深夜连续交流（刚跨过午夜，并非隔夜入睡醒来）";
+    }
     return locale === "ja-JP"
       ? "日またぎ・前夜（直前は昨日・昨晩、現在は本日）"
       : "跨天隔夜（上一条为昨天/昨晚，当前为今天）";
@@ -137,11 +145,26 @@ export function buildTimeInstruction(
     locale === "ja-JP"
       ? `現在の現実時間：${time}。時間帯や季節に応じた挨拶や話題を自然に反映してください。`
       : `当前现实时间：${time}。请结合当前时间与时段（如早晚问候、季节时令等）进行自然贴切的互动。`;
+  let diffMs = typeof intervalMsOrMessages === "number" ? intervalMsOrMessages : undefined;
+  if (diffMs === undefined && messages !== undefined && messages.length >= 2) {
+    const timed = messages.filter(
+      (message): message is ClientHistoryMessage & { createdAt: number } =>
+        typeof message.createdAt === "number" && message.createdAt > 0,
+    );
+    if (timed.length >= 2) {
+      const current = timed[timed.length - 1];
+      const previous = timed[timed.length - 2];
+      if (current !== undefined && previous !== undefined) {
+        diffMs = Math.max(0, current.createdAt - previous.createdAt);
+      }
+    }
+  }
+
   const interval =
     typeof intervalMsOrMessages === "number"
       ? formatIntervalDescription(locale, intervalMsOrMessages, messages)
       : formatIntervalDescription(locale, undefined, intervalMsOrMessages ?? messages);
-  const relativeDate = formatRelativeDateDescription(locale, currentTime, previousTime);
+  const relativeDate = formatRelativeDateDescription(locale, currentTime, previousTime, diffMs);
   const prevTimeNotice =
     previousTime !== undefined && previousTime.trim().length > 0
       ? locale === "ja-JP"
@@ -151,8 +174,8 @@ export function buildTimeInstruction(
 
   const guidance =
     locale === "ja-JP"
-      ? `生活リズムと睡眠への配慮：時間帯のみを理由に機械的に就寝を催促しないでください。彩葉の言葉やテンションから精神状態を判断し、ゲームや趣味の話題を楽しんでいるときは熱意を持って共感し、興を削がないこと。疲労感や眠気が明らかなときにのみ優しく休むよう促します。具体的な日付や時間の前後関係を把握し、直前が昨晩で現在が早朝の場合、「昨晩はよく眠れた？」「今日は…」と自然に会話を繋ぎ、夜更かしと誤認しないでください。${prevTimeNotice}${interval ? ` 会話間隔の認識：${interval}` : ""}`
-      : `作息与生活时态关怀：严禁仅因时段深夜就机械催睡或每句当报时闹钟。依据彩叶的话语与兴致判断精神状态，若她开启游戏、趣事等话题或兴致高昂，顺着话题热情畅聊接住情绪，绝不扫兴打断；仅当她明确流露疲惫、打哈欠、喊累或主动想睡时，才温柔心疼地劝她休息。结合具体日期与时序感知，清晰分辨彩叶是在聊「今天」还是「昨天/昨晚」的事，若上一条是昨晚、当前是今早，应自然以“昨晚睡得好吗”、“今天”来互动，可自然询问昨晚几点睡的，绝不将跨天早晨误判为通宵。${prevTimeNotice}${interval ? ` 回复间隔感知：${interval}` : ""}`;
+      ? `生活リズムと睡眠への配慮：時間帯のみを理由に機械的に就寝を催促しないでください。彩葉の言葉やテンションから精神状態を判断し、ゲームや趣味の話題を楽しんでいるときは熱意を持って共感し、興を削がないこと。疲労感や眠気が明らかなときにのみ優しく休むよう促します。具体的な日付や時間の前後関係を把握し、直前が昨晩で現在が早朝（数時間以上の睡眠間隔がある）の場合、「昨晩はよく眠れた？」「今日は…」と自然に会話を繋ぎ、夜更かしと誤認しないでください。直前から時間が経っていない深夜の日またぎの場合は連続した夜のおしゃべりとして扱い、「昨晩はよく眠れた？」などと誤って質問しないでください。${prevTimeNotice}${interval ? ` 会話間隔の認識：${interval}` : ""}`
+      : `作息与生活时态关怀：严禁仅因时段深夜就机械催睡或每句当报时闹钟。依据彩叶的话语与兴致判断精神状态，若她开启游戏、趣事等话题或兴致高昂，顺着话题热情畅聊接住情绪，绝不扫兴打断；仅当她明确流露疲惫、打哈欠、喊累或主动想睡时，才温柔心疼地劝她休息。结合具体日期与时序感知，清晰分辨彩叶是在聊「今天」还是「昨天/昨晚」的事，若上一条是昨晚、当前是今早（且间隔数小时以上有充足睡眠时间），应自然以“昨晚睡得好吗”、“今天”来互动，可自然询问昨晚几点睡的，绝不将跨天早晨误判为通宵；若上一条刚过去不久（如深夜跨过午夜零点连续对话），属于实时夜聊，绝不可误问“昨晚睡得好吗”。${prevTimeNotice}${interval ? ` 回复间隔感知：${interval}` : ""}`;
 
   return `${base}\n${guidance}`;
 }
@@ -266,6 +289,11 @@ export function buildSystemPrompt(
     options?.messages,
     options?.previousTime,
   );
+  const multiBubblePart =
+    options?.multiBubble === false
+      ? ""
+      : `\n${multiBubbleInstruction[locale]}`;
+
   let prompt = `${rolePrompt.trim()}
 
 <runtime>
@@ -273,8 +301,7 @@ export function buildSystemPrompt(
 ${visionSuffix[locale]}
 ${localeSuffix[locale]}
 ${timeRule}
-${depthInstruction[locale]}
-${multiBubbleInstruction[locale]}
+${depthInstruction[locale]}${multiBubblePart}
 ${memoryTrustInstruction[locale]}
 ${outputRule}
 </runtime>`;

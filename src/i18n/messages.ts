@@ -65,6 +65,10 @@ export interface UiCopy {
   readonly llmModel: string;
   readonly llmApiKeyHint: (hint: string) => string;
   readonly llmNoImageSupport: string;
+  readonly llmModelNoImageSupport: string;
+  readonly llmRecommended: string;
+  readonly llmFree: string;
+  readonly llmVisionTag: string;
   readonly llmShowKey: string;
   readonly llmHideKey: string;
   readonly llmSave: string;
@@ -181,6 +185,10 @@ const chinese = Object.freeze({
   llmModel: "模型",
   llmApiKeyHint: (hint) => hint,
   llmNoImageSupport: "该厂商暂不支持图片输入",
+  llmModelNoImageSupport: "当前模型为纯文本对话，不支持图片输入（如需识图请选择带有「识图」标签的模型，如 glm-4v-plus）",
+  llmRecommended: "推荐",
+  llmFree: "免费",
+  llmVisionTag: "识图",
   llmShowKey: "显示",
   llmHideKey: "隐藏",
   llmSave: "保存",
@@ -298,6 +306,10 @@ const japanese = Object.freeze({
   llmModel: "モデル",
   llmApiKeyHint: (hint) => hint,
   llmNoImageSupport: "このプロバイダは画像入力に対応していません",
+  llmModelNoImageSupport: "選択中のモデルはテキスト専用です（画像認識には「識図」タグ付きのモデルを選択してください）",
+  llmRecommended: "おすすめ",
+  llmFree: "無料",
+  llmVisionTag: "画像",
   llmShowKey: "表示",
   llmHideKey: "非表示",
   llmSave: "保存",

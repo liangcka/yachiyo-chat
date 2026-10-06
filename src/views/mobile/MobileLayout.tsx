@@ -58,6 +58,16 @@ export function MobileLayout({
   const [menuOpen, setMenuOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
+  const [dockCollapsed, setDockCollapsed] = useState(false);
+  const [prevConversationId, setPrevConversationId] = useState(controller.activeConversation?.id);
+
+  if (controller.activeConversation?.id !== prevConversationId) {
+    setPrevConversationId(controller.activeConversation?.id);
+    setDockCollapsed(false);
+  }
+
+  // 无历史消息时不可收缩（确保新建对话/空会话始终展示四格操作入口）
+  const isDockCollapsed = dockCollapsed && controller.messages.length > 0;
 
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
@@ -82,7 +92,9 @@ export function MobileLayout({
     };
   }, []);
 
-  // 动态测量底部输入区域高度以保持消息滚动间距
+  const lastExpandedHeightRef = useRef(0);
+
+  // 动态测量底部输入区域高度以保持消息滚动间距，防止收缩时底部留白塌陷遮挡消息
   useEffect(() => {
     const bottomEl = chatBottomRef.current;
     if (!bottomEl || typeof ResizeObserver === "undefined") return;
@@ -90,7 +102,17 @@ export function MobileLayout({
     const updateHeight = () => {
       const height = bottomEl.getBoundingClientRect().height;
       if (height > 0) {
-        document.documentElement.style.setProperty("--chat-bottom-height", `${height + 20}px`);
+        if (!isDockCollapsed) {
+          lastExpandedHeightRef.current = height;
+        }
+        const targetHeight =
+          isDockCollapsed && lastExpandedHeightRef.current > 0
+            ? lastExpandedHeightRef.current
+            : height;
+        document.documentElement.style.setProperty(
+          "--chat-bottom-height",
+          `${Math.round(targetHeight)}px`,
+        );
       }
     };
 
@@ -101,7 +123,7 @@ export function MobileLayout({
       observer.disconnect();
       document.documentElement.style.removeProperty("--chat-bottom-height");
     };
-  }, []);
+  }, [isDockCollapsed]);
 
   // APK 原生壳：返回键先关弹层，2 秒内再按一次才退出
   useAndroidBack(
@@ -125,6 +147,20 @@ export function MobileLayout({
       return false;
     },
     () => showToast(copy.exitHint),
+  );
+
+  const handleNewChat = useCallback(async () => {
+    setDockCollapsed(false);
+    await onNewChat();
+  }, [onNewChat]);
+
+  const selectConversation = controller.selectConversation;
+  const handleSelectConversation = useCallback(
+    async (id: string) => {
+      setDockCollapsed(false);
+      await selectConversation(id);
+    },
+    [selectConversation],
   );
 
   const openLlmSettings = useCallback(async () => {
@@ -176,12 +212,16 @@ export function MobileLayout({
             ? undefined
             : onRegenerate
         }
+        onBottomDockCollapseChange={setDockCollapsed}
         onToast={showToast}
         showSources={webSearchSettings.showSources}
         summary={controller.activeConversation?.summary}
       />
 
-      <div ref={chatBottomRef} className="chat-bottom">
+      <div
+        ref={chatBottomRef}
+        className={`chat-bottom${isDockCollapsed ? " chat-bottom--collapsed" : ""}`}
+      >
         <UpdatePrompt
           copy={copy}
           needRefresh={pwa.needRefresh}
@@ -274,7 +314,7 @@ export function MobileLayout({
         onLlmSettings={() => {
           void openLlmSettings();
         }}
-        onNewChat={onNewChat}
+        onNewChat={handleNewChat}
         onSignOut={onSignOut}
         onSkills={() => setSkillsOpen(true)}
         onUserMemory={() => setMemoryOpen(true)}
@@ -288,7 +328,7 @@ export function MobileLayout({
         onClose={() => setHistoryOpen(false)}
         onDelete={onDelete}
         onRename={onRename}
-        onSelect={controller.selectConversation}
+        onSelect={handleSelectConversation}
         open={historyOpen}
       />
 

@@ -41,6 +41,8 @@ export interface ClientChatRequest {
   previousTime?: string;
   /** 距离上一条消息的毫秒间隔（用于分析对话时态与回复节奏） */
   lastMessageIntervalMs?: number;
+  /** 是否允许分条消息（默认 true，关闭后服务端 Prompt 不注入分条指令） */
+  multiBubble?: boolean;
 }
 
 export class ChatValidationError extends Error {
@@ -71,6 +73,7 @@ const allowedTopLevelKeys = new Set([
   "currentTime",
   "previousTime",
   "lastMessageIntervalMs",
+  "multiBubble",
 ]);
 const allowedMessageKeys = new Set(["role", "text", "imageDataUrl", "createdAt"]);
 
@@ -270,6 +273,11 @@ export function validateChatRequest(value: unknown): ClientChatRequest {
   }
   const lastMessageIntervalMs = value.lastMessageIntervalMs as number | undefined;
 
+  if (value.multiBubble !== undefined && typeof value.multiBubble !== "boolean") {
+    return invalid();
+  }
+  const multiBubble = value.multiBubble as boolean | undefined;
+
   const hasProvider = value.provider !== undefined;
   const hasApiKey = value.apiKey !== undefined;
   const hasModel = value.model !== undefined;
@@ -287,6 +295,7 @@ export function validateChatRequest(value: unknown): ClientChatRequest {
       ...(currentTime !== undefined ? { currentTime: currentTime.trim() } : {}),
       ...(previousTime !== undefined ? { previousTime: previousTime.trim() } : {}),
       ...(lastMessageIntervalMs !== undefined ? { lastMessageIntervalMs } : {}),
+      ...(multiBubble !== undefined ? { multiBubble } : {}),
     };
   }
 
@@ -313,6 +322,7 @@ export function validateChatRequest(value: unknown): ClientChatRequest {
     ...(currentTime !== undefined ? { currentTime: currentTime.trim() } : {}),
     ...(previousTime !== undefined ? { previousTime: previousTime.trim() } : {}),
     ...(lastMessageIntervalMs !== undefined ? { lastMessageIntervalMs } : {}),
+    ...(multiBubble !== undefined ? { multiBubble } : {}),
     provider: value.provider,
     apiKey: value.apiKey,
     model: value.model,

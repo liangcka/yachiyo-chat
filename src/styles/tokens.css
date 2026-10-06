@@ -15,7 +15,7 @@
   --radius-control: 999px;
   --app-width: 26.875rem;
   --safe-bottom: max(0.75rem, env(safe-area-inset-bottom));
-  --safe-top: max(1rem, env(safe-area-inset-top));
+  --safe-top: max(1.25rem, env(safe-area-inset-top));
   --motion-duration-press: 80ms;
   --motion-duration-fast: 120ms;
   --motion-duration-base: 200ms;

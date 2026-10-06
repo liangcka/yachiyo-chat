@@ -140,6 +140,7 @@ export function App({ services }: AppProps) {
     streamChat: activeServices.streamChat,
     activeLlmConfig,
     activeSkills,
+    multiBubble,
     webSearchEnabled: webSearchSettings.enabled,
     webSearchSmart: webSearchSettings.smart,
   });

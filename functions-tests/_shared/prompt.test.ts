@@ -249,4 +249,27 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("上一条对话时间：2026-10-04 05:28:00 星期日（同一天（今天））");
     expect(prompt).toContain("距离上一条对话仅过去约2分钟（处于实时连续热聊中）");
   });
+
+  it("recognizes continuous late-night chat across midnight without sleep-care false positive", () => {
+    const prompt = buildSystemPrompt("zh-CN", "chat", {
+      currentTime: "2026-10-04 00:05:00 星期日",
+      previousTime: "2026-10-03 23:55:00 星期六",
+      lastMessageIntervalMs: 10 * 60_000,
+    });
+
+    expect(prompt).toContain("上一条对话时间：2026-10-03 23:55:00 星期六（跨越零点的深夜连续交流（刚跨过午夜，并非隔夜入睡醒来））");
+    expect(prompt).toContain("距离上一条对话过去约10分钟");
+    expect(prompt).toContain("若上一条刚过去不久（如深夜跨过午夜零点连续对话），属于实时夜聊，绝不可误问“昨晚睡得好吗”");
+  });
+
+  it("omits multiBubbleInstruction when multiBubble is false", () => {
+    const zhPromptWithBubble = buildSystemPrompt("zh-CN", "chat", { multiBubble: true });
+    expect(zhPromptWithBubble).toContain("消息发送形式：日常手机即时聊天");
+
+    const zhPromptWithoutBubble = buildSystemPrompt("zh-CN", "chat", { multiBubble: false });
+    expect(zhPromptWithoutBubble).not.toContain("消息发送形式：日常手机即时聊天");
+
+    const jaPromptWithoutBubble = buildSystemPrompt("ja-JP", "chat", { multiBubble: false });
+    expect(jaPromptWithoutBubble).not.toContain("送信形式：日常のスマートフォンチャットです");
+  });
 });

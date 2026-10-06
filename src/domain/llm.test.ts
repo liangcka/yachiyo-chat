@@ -4,6 +4,7 @@ import {
   INTERNATIONAL_PROVIDERS,
   PROVIDER_IDS,
   PROVIDER_METADATA,
+  formatModelDisplayName,
   getProviderMeta,
   isProviderId,
   isValidApiKey,
@@ -57,15 +58,19 @@ describe("PROVIDER_METADATA", () => {
 
   it("limits imageModels to the models that actually accept images", () => {
     expect(PROVIDER_METADATA.stepfun.imageModels).toEqual(["step-5-preview", "step-3.7-flash"]);
-    expect(PROVIDER_METADATA.deepseek.imageModels).toEqual(["deepseek-flash", "deepseek-v4-flash-vision-exp"]);
-    expect(PROVIDER_METADATA.glm.imageModels).toEqual([
-      "glm-5.3-flash",
-      "glm-4.6v-flash",
-      "glm-4v-flash",
-    ]);
+    expect(PROVIDER_METADATA.deepseek.imageModels).toEqual(["deepseek-flash"]);
+    expect(PROVIDER_METADATA.glm.imageModels).toEqual(["glm-5.3-flash", "glm-4.6v-flash"]);
     for (const id of PROVIDER_IDS) {
       for (const model of PROVIDER_METADATA[id].imageModels) {
         expect(PROVIDER_METADATA[id].models).toContain(model);
+      }
+      if (PROVIDER_METADATA[id].recommendedModel !== undefined) {
+        expect(PROVIDER_METADATA[id].models).toContain(PROVIDER_METADATA[id].recommendedModel);
+      }
+      if (PROVIDER_METADATA[id].freeModels !== undefined) {
+        for (const model of PROVIDER_METADATA[id].freeModels!) {
+          expect(PROVIDER_METADATA[id].models).toContain(model);
+        }
       }
     }
   });
@@ -89,3 +94,46 @@ describe("isValidApiKey", () => {
     expect(isValidApiKey("  " + "a".repeat(20) + "  ")).toBe(true);
   });
 });
+
+describe("formatModelDisplayName", () => {
+  it("formats GLM models in uppercase and charGLM-4 with GLM uppercase", () => {
+    expect(formatModelDisplayName("glm-5.3")).toBe("GLM-5.3");
+    expect(formatModelDisplayName("glm-5.3-flash")).toBe("GLM-5.3-flash");
+    expect(formatModelDisplayName("glm-4.6v-flash")).toBe("GLM-4.6v-flash");
+    expect(formatModelDisplayName("charglm-4")).toBe("charGLM-4");
+  });
+
+  it("formats Gemini models with capitalized first letter", () => {
+    expect(formatModelDisplayName("gemini-3.8-flash")).toBe("Gemini-3.8-flash");
+    expect(formatModelDisplayName("gemini-3.7-flash")).toBe("Gemini-3.7-flash");
+    expect(formatModelDisplayName("gemini-3.1-pro")).toBe("Gemini-3.1-pro");
+  });
+
+  it("formats Claude models with capitalized first letter", () => {
+    expect(formatModelDisplayName("claude-sonnet-5-5")).toBe("Claude-sonnet-5-5");
+    expect(formatModelDisplayName("claude-opus-5-5")).toBe("Claude-opus-5-5");
+    expect(formatModelDisplayName("claude-haiku-5")).toBe("Claude-haiku-5");
+  });
+
+  it("formats GPT models in uppercase GPT with lowercase model suffix", () => {
+    expect(formatModelDisplayName("gpt-6-luna")).toBe("GPT-6-luna");
+    expect(formatModelDisplayName("gpt-5.6-sol")).toBe("GPT-5.6-sol");
+    expect(formatModelDisplayName("gpt-6.1-sol")).toBe("GPT-6.1-sol");
+  });
+
+  it("keeps step, deepseek and other models in lowercase", () => {
+    expect(formatModelDisplayName("step-3.7-flash")).toBe("step-3.7-flash");
+    expect(formatModelDisplayName("step-5-preview")).toBe("step-5-preview");
+    expect(formatModelDisplayName("deepseek-flash")).toBe("deepseek-flash");
+    expect(formatModelDisplayName("deepseek-v4-pro")).toBe("deepseek-v4-pro");
+  });
+
+  it("normalizes uppercase inputs according to formatting rules", () => {
+    expect(formatModelDisplayName("GLM-5.3")).toBe("GLM-5.3");
+    expect(formatModelDisplayName("GEMINI-3.8-FLASH")).toBe("Gemini-3.8-flash");
+    expect(formatModelDisplayName("CLAUDE-SONNET-5-5")).toBe("Claude-sonnet-5-5");
+    expect(formatModelDisplayName("GPT-6-LUNA")).toBe("GPT-6-luna");
+    expect(formatModelDisplayName("STEP-3.7-FLASH")).toBe("step-3.7-flash");
+  });
+});
+

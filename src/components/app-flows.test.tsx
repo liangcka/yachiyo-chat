@@ -497,7 +497,17 @@ describe("App flows", () => {
     const user = userEvent.setup();
     const services = fakeServices();
     render(<App services={services} />);
-    await screen.findByPlaceholderText("什么都可以告诉我");
+    const composer = await screen.findByPlaceholderText("什么都可以告诉我");
+
+    // 未输入内容时再次新建对话直接保留当前对话，不创建重复空记录
+    await user.click(screen.getByRole("button", { name: "菜单" }));
+    await user.click(screen.getByRole("button", { name: "新建对话" }));
+    expect(services.repository.conversations).toHaveLength(1);
+
+    // 输入并发送内容后，新建对话会创建新对话分支
+    await user.type(composer, "第一段对话的内容");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+    await screen.findByText("第一段对话的内容");
 
     await user.click(screen.getByRole("button", { name: "菜单" }));
     await user.click(screen.getByRole("button", { name: "新建对话" }));
@@ -592,7 +602,12 @@ describe("App flows", () => {
     const user = userEvent.setup();
     const services = fakeServices();
     render(<App services={services} />);
-    await screen.findByPlaceholderText("什么都可以告诉我");
+    const composer = await screen.findByPlaceholderText("什么都可以告诉我");
+
+    await user.type(composer, "准备新建对话的内容");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+    await screen.findByText("准备新建对话的内容");
+
     vi.spyOn(services.repository, "createConversation").mockRejectedValue(
       new Error("conversation limit reached"),
     );

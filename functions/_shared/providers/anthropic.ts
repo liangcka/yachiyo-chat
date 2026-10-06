@@ -12,12 +12,9 @@ import type {
 const ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
 const ALLOWED_MODELS = [
-  "claude-sonnet-5",
+  "claude-sonnet-5-5",
   "claude-opus-5-5",
-  "claude-fable-5-1",
-  "claude-opus-5",
-  "claude-fable-5",
-  "claude-haiku-4-5",
+  "claude-haiku-5",
 ] as const;
 
 interface AnthropicTextBlock {
@@ -132,6 +129,7 @@ export function buildAnthropicBody(request: EnrichedChatRequest, model: string):
       previousTime: request.previousTime,
       lastMessageIntervalMs: request.lastMessageIntervalMs,
       messages: request.messages,
+      multiBubble: request.multiBubble,
     }),
     messages: buildAnthropicMessages(request.messages, request.locale),
     stream: true,
@@ -212,7 +210,7 @@ export function buildAnthropicAdapter(): ProviderAdapter {
     isOpenAICompat: false,
     supportsImage: true,
     imageModels: [...ALLOWED_MODELS],
-    defaultModel: "claude-sonnet-5",
+    defaultModel: "claude-sonnet-5-5",
     allowedModels: ALLOWED_MODELS,
     buildRequest(input: ProviderRequestInput): BuiltProviderRequest {
       const body = buildAnthropicBody(input.request, input.model);

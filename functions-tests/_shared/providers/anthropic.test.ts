@@ -17,7 +17,7 @@ const textRequest: ClientChatRequest = {
 
 describe("buildAnthropicBody", () => {
   it("drops leading assistant message so history starts with user and lifts system prompt", () => {
-    const body = buildAnthropicBody(textRequest, "claude-sonnet-5") as {
+    const body = buildAnthropicBody(textRequest, "claude-sonnet-5-5") as {
       model: string;
       system: string;
       messages: Array<{ role: string; content: unknown }>;
@@ -25,7 +25,7 @@ describe("buildAnthropicBody", () => {
       max_tokens: number;
     };
 
-    expect(body.model).toBe("claude-sonnet-5");
+    expect(body.model).toBe("claude-sonnet-5-5");
     expect(body.stream).toBe(true);
     expect(body.max_tokens).toBe(2048);
     expect(typeof body.system).toBe("string");
@@ -46,7 +46,7 @@ describe("buildAnthropicBody", () => {
         { role: "user", text: "第二句" },
       ],
     };
-    const body = buildAnthropicBody(request, "claude-sonnet-5") as {
+    const body = buildAnthropicBody(request, "claude-sonnet-5-5") as {
       messages: Array<{ role: string; content: unknown }>;
     };
 
@@ -66,7 +66,7 @@ describe("buildAnthropicBody", () => {
         { role: "user", text: "好看吗？" },
       ],
     };
-    const body = buildAnthropicBody(request, "claude-sonnet-5") as {
+    const body = buildAnthropicBody(request, "claude-sonnet-5-5") as {
       messages: Array<{ role: string; content: unknown }>;
     };
 
@@ -89,7 +89,7 @@ describe("buildAnthropicBody", () => {
         { title: "上海天气", url: "https://weather.example.cn/", snippet: "今日多云，24至30度。" },
       ],
     };
-    const body = buildAnthropicBody(request, "claude-sonnet-5") as { system: string };
+    const body = buildAnthropicBody(request, "claude-sonnet-5-5") as { system: string };
 
     expect(body.system).toContain("<web_search_results>");
     expect(body.system).toContain("[1] 上海天气（https://weather.example.cn/）");
@@ -103,7 +103,7 @@ describe("buildAnthropicBody", () => {
       ...textRequest,
       currentTime: "2026-08-27 11:09:37 星期四",
     };
-    const body = buildAnthropicBody(request, "claude-sonnet-5") as { system: string };
+    const body = buildAnthropicBody(request, "claude-sonnet-5-5") as { system: string };
     expect(body.system).toContain("当前现实时间：2026-08-27 11:09:37 星期四");
   });
 });
@@ -161,17 +161,18 @@ describe("buildAnthropicAdapter", () => {
     expect(adapter.id).toBe("claude");
     expect(adapter.isOpenAICompat).toBe(false);
     expect(adapter.supportsImage).toBe(true);
-    expect(adapter.defaultModel).toBe("claude-sonnet-5");
+    expect(adapter.defaultModel).toBe("claude-sonnet-5-5");
+    expect(adapter.allowedModels).toContain("claude-sonnet-5-5");
     expect(adapter.allowedModels).toContain("claude-opus-5-5");
-    expect(adapter.allowedModels).toContain("claude-fable-5-1");
-    expect(adapter.allowedModels).toContain("claude-opus-5");
+    expect(adapter.allowedModels).toContain("claude-haiku-5");
+    expect(adapter.allowedModels).toHaveLength(3);
   });
 
   it("builds an x-api-key authenticated request with anthropic-version", () => {
     const built = adapter.buildRequest({
       request: textRequest,
       apiKey: "sk-ant-" + "a".repeat(40),
-      model: "claude-sonnet-5",
+      model: "claude-sonnet-5-5",
     });
 
     expect(built.url).toBe("https://api.anthropic.com/v1/messages");
@@ -179,7 +180,7 @@ describe("buildAnthropicAdapter", () => {
     expect(built.headers["anthropic-version"]).toBe("2023-06-01");
     expect(built.headers["content-type"]).toBe("application/json");
     const body = JSON.parse(built.body) as { model: string; stream: boolean; system: string };
-    expect(body.model).toBe("claude-sonnet-5");
+    expect(body.model).toBe("claude-sonnet-5-5");
     expect(body.stream).toBe(true);
     expect(typeof body.system).toBe("string");
   });

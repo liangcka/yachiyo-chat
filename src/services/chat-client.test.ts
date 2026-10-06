@@ -93,6 +93,25 @@ describe("streamChat", () => {
     }));
   });
 
+  it("serializes multiBubble in request body when provided", async () => {
+    serverFetch.mockResolvedValue(
+      sseResponse('event: done\ndata: {"truncated":false}\n\n'),
+    );
+    const requestWithBubble: StreamChatRequest = {
+      ...sampleRequest,
+      multiBubble: false,
+    };
+
+    await streamChat(requestWithBubble, {
+      fetcher: serverFetch,
+      onDelta: () => undefined,
+    });
+
+    expect(serverFetch).toHaveBeenCalledWith("/api/chat", expect.objectContaining({
+      body: JSON.stringify(requestWithBubble),
+    }));
+  });
+
   it.each([
     [problem("SESSION_REQUIRED", 401), "SESSION_REQUIRED"],
     [problem("DAILY_QUOTA_EXCEEDED", 429), "DAILY_QUOTA_EXCEEDED"],

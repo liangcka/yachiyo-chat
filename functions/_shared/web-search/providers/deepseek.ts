@@ -48,7 +48,7 @@ export class DeepSeekWebSearchProvider extends BaseWebSearchProvider {
     const baseURL =
       (env?.DEEPSEEK_BASE_URL as string | undefined) || "https://api.deepseek.com";
     const model =
-      (env?.DEEPSEEK_SEARCH_MODEL as string | undefined) || "deepseek-v4-flash";
+      (env?.DEEPSEEK_SEARCH_MODEL as string | undefined) || "deepseek-flash";
     const maxResults = request.maxResults ?? 5;
 
     const endpoint = baseURL.endsWith("/")
@@ -78,6 +78,7 @@ export class DeepSeekWebSearchProvider extends BaseWebSearchProvider {
               { role: "user", content: queryStr },
             ],
             response_format: { type: "json_object" },
+            thinking: { type: "disabled" },
             temperature: 0.1,
           }),
         },

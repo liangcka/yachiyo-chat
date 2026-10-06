@@ -62,6 +62,8 @@ export interface ChatControllerOptions {
   webSearchEnabled?: boolean;
   /** 智能搜索开关，开启后普通聊天请求携带 smartSearch: true（需联网搜索同时开启） */
   webSearchSmart?: boolean;
+  /** 分条消息发送开关，关闭后普通聊天请求携带 multiBubble: false */
+  multiBubble?: boolean;
   now?: () => number;
   id?: () => string;
 }
@@ -368,10 +370,15 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
   useEffect(() => {
     webSearchSmartRef.current = options.webSearchSmart ?? false;
   }, [options.webSearchSmart]);
+  const multiBubbleRef = useRef<boolean>(options.multiBubble ?? true);
+  useEffect(() => {
+    multiBubbleRef.current = options.multiBubble ?? true;
+  }, [options.multiBubble]);
   const [state, dispatch] = useReducer(chatReducer, initialChatState);
   const stateRef = useRef<ChatState>(initialChatState);
   const activeRef = useRef<ActiveRun | undefined>(undefined);
   const compressControllerRef = useRef<AbortController | undefined>(undefined);
+  const lastCompressionAttemptRef = useRef<{ timestamp: number; failed: boolean }>({ failed: false, timestamp: 0 });
   const initializationRef = useRef<Promise<InitialData> | undefined>(undefined);
   const mountedRef = useRef(false);
   const persistQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -773,6 +780,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
             ...(webSearchEnabledRef.current === true && webSearchSmartRef.current === true
               ? { smartSearch: true }
               : {}),
+            ...(multiBubbleRef.current === false ? { multiBubble: false } : {}),
           },
           {
             onDelta(text) {
@@ -1014,15 +1022,26 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       const currentMessages = snapshot.messages;
       sendingRef.current = true;
         try {
-        // 未压缩历史达到阈值时先增量压缩，再发送（为摘要/长期记忆前缀预留槽位）
+        // 未压缩历史达到阈值且非失败冷却期时先增量压缩，再发送（为摘要/长期记忆前缀预留槽位）
+        const lastAttempt = lastCompressionAttemptRef.current;
+        const failureCooldown = 120_000;
+        const isCooldown =
+          lastAttempt.failed &&
+          servicesRef.current.now() - lastAttempt.timestamp < failureCooldown;
+
         if (
+          !isCooldown &&
           countUncompressedMessages(
             currentMessages,
             snapshot.activeConversation.compressedUpTo,
           ) >= compressionTriggerUncompressedMessages
         ) {
           sendingRef.current = false;
-          await compressConversation();
+          const success = await compressConversation();
+          lastCompressionAttemptRef.current = {
+            failed: !success,
+            timestamp: servicesRef.current.now(),
+          };
           sendingRef.current = true;
 
           const currentSnapshot = stateRef.current;
@@ -1256,6 +1275,27 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
 
   const newConversation = useCallback(async (): Promise<void> => {
     await stopAndWait();
+    const currentActive = stateRef.current.activeConversation;
+    if (
+      currentActive !== undefined &&
+      stateRef.current.messages.length === 0 &&
+      !stateRef.current.hasMoreHistory
+    ) {
+      try {
+        const existing = await servicesRef.current.repository.getConversation(currentActive.id);
+        if (existing !== undefined) {
+          if (stateRef.current.pendingImage !== undefined) {
+            emit({ type: "pending-image-changed", image: undefined });
+          }
+          if (stateRef.current.errorCode !== undefined) {
+            emit({ type: "clear-error" });
+          }
+          return;
+        }
+      } catch {
+        // 存储查询异常时降级走新建路径
+      }
+    }
     try {
       const loaded = await createConversation(stateRef.current.locale);
       emit({

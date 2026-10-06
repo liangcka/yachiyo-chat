@@ -17,6 +17,19 @@ export interface OpenAICompatConfig {
   readonly imageModels: readonly string[];
   /** 该 provider 的模型为推理型且支持 OpenAI 风格 reasoning_effort 参数（思考 token 计入 max_tokens，需显式控制） */
   readonly reasoningEffort?: boolean;
+  /** 该 provider 支持 DeepSeek 原生思考协议（thinking: { type: "enabled"|"disabled" } 与 reasoning_effort 控制） */
+  readonly deepseekThinking?: boolean;
+  /** 该 provider 支持智谱 GLM 思考协议与模型分流（对支持的模型启用 thinking，并在 judge 时抑制） */
+  readonly glmThinking?: boolean;
+  /** 显式采样 temperature（智谱角色扮演推荐 0.8，范围 [0.0, 1.0]；若未配置则使用上游默认） */
+  readonly defaultTemperature?: number;
+}
+
+const GLM_THINKING_MODEL_PREFIXES = ["glm-5", "glm-4.7", "glm-4.6", "glm-4.5"];
+
+/** 智谱 GLM 系列中支持深度思考（Thinking）协议的模型代号前缀判断 */
+export function isGlmThinkingModel(model: string): boolean {
+  return GLM_THINKING_MODEL_PREFIXES.some((prefix) => model.startsWith(prefix));
 }
 
 interface OpenAITextPart {
@@ -64,8 +77,13 @@ export function buildOpenAICompatBody(
   model: string,
   supportsImage: boolean,
   reasoningEffort = false,
+  deepseekThinking = false,
+  glmThinking = false,
+  defaultTemperature?: number,
 ): unknown {
   const containsImage = request.messages.some((message) => message.imageDataUrl !== undefined);
+  const enableGlmThinking = glmThinking && isGlmThinkingModel(model);
+  const enableThinking = deepseekThinking || enableGlmThinking;
   return {
     model,
     messages: [
@@ -79,6 +97,7 @@ export function buildOpenAICompatBody(
           previousTime: request.previousTime,
           lastMessageIntervalMs: request.lastMessageIntervalMs,
           messages: request.messages,
+          multiBubble: request.multiBubble,
         }),
       },
       ...request.messages.map((message) => mapHistoryMessage(message, request.locale, supportsImage)),
@@ -88,6 +107,13 @@ export function buildOpenAICompatBody(
     // 推理模型的思考 token 计入 max_tokens 预算，过小会被思考耗尽导致正文为空
     max_tokens: request.mode === "summary" ? 4096 : 8192,
     ...(reasoningEffort ? { reasoning_effort: containsImage ? "medium" : "low" } : {}),
+    ...(enableThinking
+      ? {
+          thinking: { type: "enabled" as const },
+          reasoning_effort: containsImage ? "medium" : "high",
+        }
+      : {}),
+    ...(typeof defaultTemperature === "number" ? { temperature: defaultTemperature } : {}),
   };
 }
 
@@ -190,6 +216,9 @@ export function buildOpenAICompatAdapter(
         input.model,
         config.supportsImage,
         config.reasoningEffort === true,
+        config.deepseekThinking === true,
+        config.glmThinking === true,
+        config.defaultTemperature,
       );
       return {
         url: config.endpoint,
@@ -203,6 +232,7 @@ export function buildOpenAICompatAdapter(
     },
     extractDeltaText: extractOpenAIDeltaText,
     buildJudgeRequest(input: JudgeRequestInput): BuiltProviderRequest {
+      const isGlmThinking = config.glmThinking === true && isGlmThinkingModel(input.model);
       const body = {
         model: input.model,
         messages: [
@@ -213,6 +243,15 @@ export function buildOpenAICompatAdapter(
         // 推理模型的思考 token 计入 max_tokens 预算，512 足够 YES/NO 输出
         max_tokens: 512,
         ...(config.reasoningEffort === true ? { reasoning_effort: "low" as const } : {}),
+        ...(config.deepseekThinking === true
+          ? {
+              thinking: { type: "disabled" as const },
+              reasoning_effort: "low" as const,
+            }
+          : {}),
+        ...(isGlmThinking ? { reasoning_effort: "low" as const } : {}),
+        // 判断类请求固定使用低温度保证判定稳定性
+        temperature: 0.1,
       };
       return {
         url: config.endpoint,

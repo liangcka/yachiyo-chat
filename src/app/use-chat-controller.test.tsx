@@ -98,6 +98,84 @@ describe("useChatController", () => {
     expect(result.current.messages).toEqual([]);
   });
 
+  it("reuses the current empty conversation when newConversation is requested without messages", async () => {
+    const emptyConversation = { ...conversation, id: "empty-conv", title: "新的对话" };
+    const repository = repositoryWith({
+      createConversation: vi.fn(),
+      getConversation: vi.fn(async (id: string) => (id === emptyConversation.id ? emptyConversation : undefined)),
+      listConversations: vi.fn(async () => [emptyConversation]),
+      listMessages: vi.fn(async () => []),
+    });
+
+    const { result } = renderHook(() =>
+      useChatController({
+        repository,
+        streamChat: vi.fn<StreamChatFunction>(),
+      }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+    expect(result.current.activeConversation?.id).toBe(emptyConversation.id);
+    expect(result.current.messages).toHaveLength(0);
+
+    await act(async () => {
+      await result.current.newConversation();
+    });
+
+    expect(repository.createConversation).not.toHaveBeenCalled();
+    expect(result.current.activeConversation?.id).toBe(emptyConversation.id);
+  });
+
+  it("creates a new conversation on newConversation when the current conversation has messages", async () => {
+    const secondConversation = { ...conversation, id: "conv-2", title: "新的对话 2" };
+    const repository = repositoryWith({
+      createConversation: vi.fn(async () => secondConversation),
+      listConversations: vi.fn(async () => [conversation]),
+      listMessages: vi.fn(async () => [greeting]),
+    });
+
+    const { result } = renderHook(() =>
+      useChatController({
+        repository,
+        streamChat: vi.fn<StreamChatFunction>(),
+      }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+    expect(result.current.messages).toHaveLength(1);
+
+    await act(async () => {
+      await result.current.newConversation();
+    });
+
+    expect(repository.createConversation).toHaveBeenCalledTimes(1);
+    expect(result.current.activeConversation?.id).toBe(secondConversation.id);
+    expect(result.current.messages).toHaveLength(0);
+  });
+
+  it("creates a new conversation on newConversation if the active empty conversation was deleted", async () => {
+    const recreated = { ...conversation, id: "recreated-conv", title: "新的对话" };
+    const repository = repositoryWith({
+      createConversation: vi.fn(async () => recreated),
+      getConversation: vi.fn(async () => undefined),
+      listConversations: vi.fn(async () => [conversation]),
+      listMessages: vi.fn(async () => []),
+    });
+
+    const { result } = renderHook(() =>
+      useChatController({
+        repository,
+        streamChat: vi.fn<StreamChatFunction>(),
+      }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    await act(async () => {
+      await result.current.newConversation();
+    });
+
+    expect(repository.createConversation).toHaveBeenCalledTimes(1);
+    expect(result.current.activeConversation?.id).toBe(recreated.id);
+  });
+
   it("persists the user before streaming and completes the assistant message", async () => {
     const repository = repositoryWith();
     const stream = vi.fn<StreamChatFunction>(async (_request, options) => {
@@ -1115,7 +1193,7 @@ describe("useChatController", () => {
 
     const { result } = renderHook(() =>
       useChatController({
-        activeLlmConfig: { apiKey: "sk-test-12345678901234567890", model: "claude-sonnet-5", provider: "claude" },
+        activeLlmConfig: { apiKey: "sk-test-12345678901234567890", model: "claude-sonnet-5-5", provider: "claude" },
         id: ids("user-1", "assistant-1"),
         now: () => 1000,
         repository,
@@ -1133,7 +1211,7 @@ describe("useChatController", () => {
     expect(assistantMsg?.text).toBe("这是最终回复");
     expect(assistantMsg?.thought).toBe("思考中...继续思考...");
     expect(assistantMsg?.provider).toBe("claude");
-    expect(assistantMsg?.model).toBe("claude-sonnet-5");
+    expect(assistantMsg?.model).toBe("claude-sonnet-5-5");
     expect(assistantMsg?.usage).toEqual({ promptTokens: 50, completionTokens: 20, totalTokens: 70 });
     expect(typeof assistantMsg?.latencyMs).toBe("number");
   });
@@ -1294,6 +1372,30 @@ describe("useChatController", () => {
       expect.objectContaining({
         currentTime: "2026-08-27 11:09:37 星期四",
         locale: "zh-CN",
+      }),
+      expect.anything(),
+    );
+  });
+
+  it("passes multiBubble: false to streamChat when multiBubble option is false", async () => {
+    const streamChat = vi.fn<StreamChatFunction>(async () => ({ truncated: false }));
+    const { result } = renderHook(() =>
+      useChatController({
+        id: () => "msg-1",
+        multiBubble: false,
+        repository: repositoryWith(),
+        streamChat,
+      }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    await act(async () => {
+      await result.current.send("你好");
+    });
+
+    expect(streamChat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        multiBubble: false,
       }),
       expect.anything(),
     );

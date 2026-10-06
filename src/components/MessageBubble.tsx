@@ -126,6 +126,14 @@ const SingleBubble = memo(function SingleBubble({
   };
 
   useEffect(() => {
+    return () => {
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     if (!menuOpen) return;
 
     const handlePointerDownDoc = (e: PointerEvent) => {

@@ -78,6 +78,7 @@ export function buildStepFunBody(
           previousTime: request.previousTime,
           lastMessageIntervalMs: request.lastMessageIntervalMs,
           messages: request.messages,
+          multiBubble: request.multiBubble,
         }),
       },
       ...request.messages.map((message) => mapHistoryMessage(message, request.locale)),

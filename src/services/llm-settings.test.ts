@@ -39,14 +39,14 @@ describe("LlmSettingsService", () => {
 
   it("does not auto-activate a subsequent provider save", async () => {
     await service.saveProvider("openai", VALID_KEY, "gpt-5.6-luna");
-    await service.saveProvider("claude", VALID_KEY, "claude-sonnet-5");
+    await service.saveProvider("claude", VALID_KEY, "claude-sonnet-5-5");
 
     expect(await service.getActiveProvider()).toBe("openai");
   });
 
   it("force-activates when activate option is true", async () => {
     await service.saveProvider("openai", VALID_KEY, "gpt-5.6-luna");
-    await service.saveProvider("claude", VALID_KEY, "claude-sonnet-5", {
+    await service.saveProvider("claude", VALID_KEY, "claude-sonnet-5-5", {
       activate: true,
     });
 
@@ -75,19 +75,19 @@ describe("LlmSettingsService", () => {
   });
 
   it("getActiveConfig returns trimmed key and configured model", async () => {
-    await service.saveProvider("claude", `  ${VALID_KEY}  `, "claude-sonnet-5");
+    await service.saveProvider("claude", `  ${VALID_KEY}  `, "claude-sonnet-5-5");
 
     const config = await service.getActiveConfig();
     expect(config).toEqual({
       provider: "claude",
       apiKey: VALID_KEY,
-      model: "claude-sonnet-5",
+      model: "claude-sonnet-5-5",
     });
   });
 
   it("clears the active pointer without touching other providers", async () => {
     await service.saveProvider("openai", VALID_KEY, "gpt-5.6-luna");
-    await service.saveProvider("claude", VALID_KEY, "claude-sonnet-5", {
+    await service.saveProvider("claude", VALID_KEY, "claude-sonnet-5-5", {
       activate: true,
     });
 
@@ -100,7 +100,7 @@ describe("LlmSettingsService", () => {
 
   it("clear removes a provider and resets activation when it was active", async () => {
     await service.saveProvider("openai", VALID_KEY, "gpt-5.6-luna");
-    await service.saveProvider("claude", VALID_KEY, "claude-sonnet-5", {
+    await service.saveProvider("claude", VALID_KEY, "claude-sonnet-5-5", {
       activate: true,
     });
 

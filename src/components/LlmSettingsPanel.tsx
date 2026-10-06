@@ -5,6 +5,7 @@ import {
   DOMESTIC_PROVIDERS,
   INTERNATIONAL_PROVIDERS,
   PROVIDER_METADATA,
+  formatModelDisplayName,
   getProviderMeta,
   isValidApiKey,
   type ProviderId,
@@ -145,6 +146,36 @@ export function LlmSettingsPanel({
 
   const handleActivate = () => runAction(() => onActivate(selectedProvider), copy.llmSaved);
 
+  const renderModelBadges = (model: string) => {
+    const isRecommended = (meta.recommendedModel ?? meta.defaultModel) === model;
+    const isFree = meta.freeModels?.includes(model);
+    const supportsVision = meta.imageModels.includes(model);
+
+    if (!isRecommended && !isFree && !supportsVision) {
+      return null;
+    }
+
+    return (
+      <span className="custom-select__badges">
+        {isRecommended && (
+          <span className="custom-select__tag custom-select__tag--recommend">
+            {copy.llmRecommended}
+          </span>
+        )}
+        {isFree && (
+          <span className="custom-select__tag custom-select__tag--free">
+            {copy.llmFree}
+          </span>
+        )}
+        {supportsVision && (
+          <span className="custom-select__tag custom-select__tag--vision">
+            {copy.llmVisionTag}
+          </span>
+        )}
+      </span>
+    );
+  };
+
   return (
     <div className={`overlay overlay--history ${closing ? "overlay--closing" : ""}`}>
       <section aria-label={copy.llmSettings} aria-modal="true" className={`llm-panel ${closing ? "llm-panel--closing" : ""}`} role="dialog">
@@ -197,7 +228,9 @@ export function LlmSettingsPanel({
                     }}
                   >
                     <span>{PROVIDER_METADATA[id].label}</span>
-                    {selectedProvider === id && <Check aria-hidden="true" size={16} />}
+                    <div className="custom-select__check-slot">
+                      {selectedProvider === id && <Check aria-hidden="true" size={16} />}
+                    </div>
                   </button>
                 ))}
                 <div className="custom-select__group-label">{copy.llmInternational}</div>
@@ -214,7 +247,9 @@ export function LlmSettingsPanel({
                     }}
                   >
                     <span>{PROVIDER_METADATA[id].label}</span>
-                    {selectedProvider === id && <Check aria-hidden="true" size={16} />}
+                    <div className="custom-select__check-slot">
+                      {selectedProvider === id && <Check aria-hidden="true" size={16} />}
+                    </div>
                   </button>
                 ))}
               </div>
@@ -282,7 +317,10 @@ export function LlmSettingsPanel({
               aria-expanded={modelOpen}
               aria-haspopup="listbox"
             >
-              <span className="custom-select__value">{modelInput}</span>
+              <span className="custom-select__value custom-select__value--model">
+                <span className="custom-select__model-name">{formatModelDisplayName(modelInput)}</span>
+                {renderModelBadges(modelInput)}
+              </span>
               <ChevronDown
                 aria-hidden="true"
                 className={`custom-select__chevron ${modelOpen ? "custom-select__chevron--open" : ""}`}
@@ -291,28 +329,27 @@ export function LlmSettingsPanel({
             </button>
             {modelOpen && (
               <div className="custom-select__menu" role="listbox">
-                {meta.models.map((model) => {
-                  const supportsImg = meta.imageModels.includes(model);
-                  return (
-                    <button
-                      key={model}
-                      type="button"
-                      role="option"
-                      aria-selected={modelInput === model}
-                      className={`custom-select__option ${modelInput === model ? "custom-select__option--selected" : ""}`}
-                      onClick={() => {
-                        setModelInput(model);
-                        setModelOpen(false);
-                      }}
-                    >
-                      <div className="custom-select__option-text">
-                        <span>{model}</span>
-                        {supportsImg && <span className="custom-select__tag">识图</span>}
-                      </div>
+                {meta.models.map((model) => (
+                  <button
+                    key={model}
+                    type="button"
+                    role="option"
+                    aria-selected={modelInput === model}
+                    className={`custom-select__option ${modelInput === model ? "custom-select__option--selected" : ""}`}
+                    onClick={() => {
+                      setModelInput(model);
+                      setModelOpen(false);
+                    }}
+                  >
+                    <div className="custom-select__option-content">
+                      <span className="custom-select__model-name">{formatModelDisplayName(model)}</span>
+                      {renderModelBadges(model)}
+                    </div>
+                    <div className="custom-select__check-slot">
                       {modelInput === model && <Check aria-hidden="true" size={16} />}
-                    </button>
-                  );
-                })}
+                    </div>
+                  </button>
+                ))}
               </div>
             )}
             <select
@@ -323,7 +360,7 @@ export function LlmSettingsPanel({
             >
               {meta.models.map((model) => (
                 <option key={model} value={model}>
-                  {model}
+                  {formatModelDisplayName(model)}
                 </option>
               ))}
             </select>

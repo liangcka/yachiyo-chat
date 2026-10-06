@@ -112,6 +112,7 @@ export function buildGeminiBody(request: EnrichedChatRequest): unknown {
             previousTime: request.previousTime,
             lastMessageIntervalMs: request.lastMessageIntervalMs,
             messages: request.messages,
+            multiBubble: request.multiBubble,
           }),
         },
       ],

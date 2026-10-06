@@ -217,6 +217,17 @@ describe("DeepSeekWebSearchProvider", () => {
         publishedAt: "2026-08-20",
       },
     ]);
+
+    expect(fetchMock).toHaveBeenCalled();
+    const callArgs = fetchMock.mock.calls[0] as [string, RequestInit];
+    const sentBody = JSON.parse(callArgs[1].body as string) as {
+      model: string;
+      thinking?: { type: string };
+      response_format?: { type: string };
+    };
+    expect(sentBody.model).toBe("deepseek-flash");
+    expect(sentBody.thinking).toEqual({ type: "disabled" });
+    expect(sentBody.response_format).toEqual({ type: "json_object" });
   });
 });
 

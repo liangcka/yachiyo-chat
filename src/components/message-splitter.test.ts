@@ -93,4 +93,31 @@ describe("splitAssistantMessage", () => {
       { id: "bubble-0", isTyping: false, text: "第一句\n第二句\n第三句" },
     ]);
   });
+
+  it("keeps code blocks intact within a single bubble rather than splitting lines", () => {
+    const text =
+      "看这段代码：\n" +
+      "```typescript\n" +
+      "const a = 1;\n" +
+      "const b = 2;\n" +
+      "```\n" +
+      "是不是很清晰？";
+    const result = splitAssistantMessage(text, false);
+    expect(result).toHaveLength(2);
+    expect(result[0]?.text).toBe("看这段代码：\n```typescript\nconst a = 1;\nconst b = 2;\n```");
+    expect(result[1]?.text).toBe("是不是很清晰？");
+  });
+
+  it("keeps lists and intro headers grouped in one bubble", () => {
+    const text =
+      "推荐清单：\n" +
+      "1. 魔法少女小圆\n" +
+      "2. 命运石之门\n" +
+      "3. 间谍过家家\n" +
+      "你最想看哪部呢？";
+    const result = splitAssistantMessage(text, false);
+    expect(result).toHaveLength(2);
+    expect(result[0]?.text).toBe("推荐清单：\n1. 魔法少女小圆\n2. 命运石之门\n3. 间谍过家家");
+    expect(result[1]?.text).toBe("你最想看哪部呢？");
+  });
 });

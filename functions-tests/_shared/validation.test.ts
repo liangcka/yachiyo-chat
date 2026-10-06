@@ -285,4 +285,31 @@ describe("validateChatRequest", () => {
       validateChatRequest({ ...(validRequest() as object), previousTime: "a".repeat(101) }),
     ).toThrow(ChatValidationError);
   });
+
+  it("accepts an optional boolean multiBubble flag on both return paths and rejects non-boolean", () => {
+    expect(
+      validateChatRequest({ ...(validRequest() as object), multiBubble: true }),
+    ).toMatchObject({ multiBubble: true });
+    expect(
+      validateChatRequest({ ...(validRequest() as object), multiBubble: false }),
+    ).toMatchObject({ multiBubble: false });
+    expect(validateChatRequest(validRequest())).not.toHaveProperty("multiBubble");
+
+    expect(
+      validateChatRequest({
+        ...(validRequest() as object),
+        provider: "openai",
+        apiKey: "sk-" + "a".repeat(40),
+        model: "gpt-5.6-luna",
+        multiBubble: false,
+      }),
+    ).toMatchObject({ multiBubble: false });
+
+    expect(() =>
+      validateChatRequest({ ...(validRequest() as object), multiBubble: "no" }),
+    ).toThrow(ChatValidationError);
+    expect(() =>
+      validateChatRequest({ ...(validRequest() as object), multiBubble: 0 }),
+    ).toThrow(ChatValidationError);
+  });
 });

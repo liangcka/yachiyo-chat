@@ -154,4 +154,42 @@ describe("LlmSettingsPanel", () => {
 
     expect(screen.getByText("该厂商暂不支持图片输入")).toBeInTheDocument();
   });
+
+  it("renders recommendation badge for recommended models", () => {
+    mount();
+    // 默认展示 stepfun，默认模型 step-3.7-flash 具有推荐徽标
+    expect(screen.getAllByText("推荐").length).toBeGreaterThan(0);
+  });
+
+  it("renders free badge for free models", async () => {
+    const user = userEvent.setup();
+    mount();
+    await user.selectOptions(screen.getByLabelText("厂商"), "glm");
+    await user.selectOptions(screen.getByLabelText("模型"), "glm-4.6v-flash");
+    expect(screen.getAllByText("免费").length).toBeGreaterThan(0);
+  });
+
+  it("renders model names according to display casing rules", async () => {
+    const user = userEvent.setup();
+    mount();
+
+    // 默认厂商 stepfun：step 全小写
+    expect(screen.getAllByText("step-3.7-flash").length).toBeGreaterThan(0);
+
+    // 切换至 glm：GLM 大写、charGLM-4 大写
+    await user.selectOptions(screen.getByLabelText("厂商"), "glm");
+    expect(screen.getAllByText("charGLM-4").length).toBeGreaterThan(0);
+
+    // 切换至 claude：Claude 首字母大写
+    await user.selectOptions(screen.getByLabelText("厂商"), "claude");
+    expect(screen.getAllByText("Claude-sonnet-5-5").length).toBeGreaterThan(0);
+
+    // 切换至 gemini：Gemini 首字母大写
+    await user.selectOptions(screen.getByLabelText("厂商"), "gemini");
+    expect(screen.getAllByText("Gemini-3.8-flash").length).toBeGreaterThan(0);
+
+    // 切换至 openai：GPT 全大写
+    await user.selectOptions(screen.getByLabelText("厂商"), "openai");
+    expect(screen.getAllByText("GPT-6-luna").length).toBeGreaterThan(0);
+  });
 });
