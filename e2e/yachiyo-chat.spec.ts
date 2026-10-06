@@ -148,11 +148,16 @@ test("switches language, exposes camera input, and becomes read-only offline", a
   await page.getByRole("button", { name: "日本語" }).click();
   await expect(page.getByPlaceholder("何でも話してね")).toBeVisible();
 
-  const camera = page.locator('input[type="file"]');
+  const camera = page.getByTestId("capture-camera-input");
   await expect(camera).toHaveAttribute("accept", "image/*");
   await expect(camera).toHaveAttribute("capture", "environment");
   await expect(camera).toHaveAttribute("aria-hidden", "true");
   await expect(camera).toHaveAttribute("tabindex", "-1");
+
+  const album = page.getByTestId("capture-album-input");
+  await expect(album).toHaveAttribute("accept", "image/*");
+  await expect(album).toHaveAttribute("aria-hidden", "true");
+  await expect(album).toHaveAttribute("tabindex", "-1");
   await expect(page.getByRole("button", { name: "マイク機能は近日公開です" })).toHaveAttribute(
     "aria-disabled",
     "true",
