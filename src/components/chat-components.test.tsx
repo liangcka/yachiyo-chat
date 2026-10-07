@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -1066,7 +1066,22 @@ describe("reference chat components", () => {
     expect(chatBottom).not.toHaveClass("chat-bottom--collapsed");
   });
 
-  it("automatically collapses control-dock on composer focus to optimize screen space", () => {
+  it("automatically collapses control-dock when keyboard opens to optimize screen space", () => {
+    const listeners: Record<string, (() => void)[]> = {};
+    const mockViewport = {
+      height: 800,
+      addEventListener: vi.fn((event: string, cb: () => void) => {
+        listeners[event] = listeners[event] ?? [];
+        listeners[event].push(cb);
+      }),
+      removeEventListener: vi.fn(),
+    };
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: mockViewport,
+      writable: true,
+    });
+
     const currentMessages: ChatMessage[] = [
       {
         conversationId: "c1",
@@ -1143,11 +1158,18 @@ describe("reference chat components", () => {
     const chatBottom = container.querySelector(".chat-bottom");
     expect(chatBottom).not.toHaveClass("chat-bottom--collapsed");
 
-    const textarea = screen.getByPlaceholderText("什么都可以告诉我");
-    fireEvent.focus(textarea);
+    // 模拟软键盘弹起（高度显著缩减）
+    mockViewport.height = 450;
+    act(() => {
+      listeners.resize?.forEach((cb) => cb());
+    });
     expect(chatBottom).toHaveClass("chat-bottom--collapsed");
 
-    fireEvent.blur(textarea);
+    // 模拟软键盘收起
+    mockViewport.height = 800;
+    act(() => {
+      listeners.resize?.forEach((cb) => cb());
+    });
     expect(chatBottom).not.toHaveClass("chat-bottom--collapsed");
   });
 

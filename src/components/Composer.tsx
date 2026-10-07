@@ -1,6 +1,5 @@
 import { Send, Square, X } from "lucide-react";
 import {
-  useEffect,
   useRef,
   type ClipboardEvent,
   type DragEvent,
@@ -88,15 +87,6 @@ export function Composer({
   const handleBlur = () => {
     onBlur?.();
   };
-
-  useEffect(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-    if (typeof CSS === "undefined" || !CSS.supports?.("field-sizing", "content")) {
-      el.style.height = "auto";
-      el.style.height = `${Math.min(el.scrollHeight, 112)}px`;
-    }
-  }, [value]);
 
   const handleImageFile = async (file: File) => {
     if (unavailable || streaming) return;

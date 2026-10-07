@@ -60,7 +60,6 @@ export function MobileLayout({
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [dockCollapsed, setDockCollapsed] = useState(false);
   const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
-  const [isFocused, setIsFocused] = useState(false);
   const [prevConversationId, setPrevConversationId] = useState(controller.activeConversation?.id);
   const baseViewportHeightRef = useRef(0);
 
@@ -69,9 +68,9 @@ export function MobileLayout({
     setDockCollapsed(false);
   }
 
-  // 软键盘弹起、输入框聚焦或历史消息上滑时收缩四格小组件，优先保证输入与阅读视野
+  // 软键盘弹起或历史消息上滑时收缩四格小组件，优先保证输入与阅读视野
   const isDockCollapsed =
-    (dockCollapsed || isKeyboardOpen || isFocused) && controller.messages.length > 0;
+    (dockCollapsed || isKeyboardOpen) && controller.messages.length > 0;
 
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
@@ -107,16 +106,9 @@ export function MobileLayout({
 
       if (keyboardOpen) {
         document.documentElement.classList.add("keyboard-open");
+        scrollChatToBottom(false);
       } else {
         document.documentElement.classList.remove("keyboard-open");
-      }
-
-      const isInputActive =
-        document.activeElement instanceof HTMLElement &&
-        (document.activeElement.tagName === "TEXTAREA" || document.activeElement.tagName === "INPUT");
-
-      if (keyboardOpen || isInputActive) {
-        scrollChatToBottom(false);
       }
     };
 
@@ -154,17 +146,14 @@ export function MobileLayout({
         // 键盘弹起时以实际收缩高度贴合；普通浏览上滑折叠时保留展开占位以防历史视口跳动
         const targetHeight =
           isDockCollapsed && lastExpandedHeightRef.current > 0
-            ? (isKeyboardOpen || isFocused ? height : lastExpandedHeightRef.current)
+            ? (isKeyboardOpen ? height : lastExpandedHeightRef.current)
             : height;
         document.documentElement.style.setProperty(
           "--chat-bottom-height",
           `${Math.round(targetHeight)}px`,
         );
 
-        const isInputActive =
-          document.activeElement instanceof HTMLElement &&
-          (document.activeElement.tagName === "TEXTAREA" || document.activeElement.tagName === "INPUT");
-        if (isInputActive) {
+        if (isKeyboardOpen) {
           scrollChatToBottom(false);
         }
       }
@@ -177,7 +166,7 @@ export function MobileLayout({
       observer.disconnect();
       document.documentElement.style.removeProperty("--chat-bottom-height");
     };
-  }, [isDockCollapsed, isFocused, isKeyboardOpen, scrollChatToBottom]);
+  }, [isDockCollapsed, isKeyboardOpen, scrollChatToBottom]);
 
   // APK 原生壳：返回键先关弹层，2 秒内再按一次才退出
   useAndroidBack(
@@ -319,15 +308,7 @@ export function MobileLayout({
           onChange={setComposerValue}
           onError={(code) => showToast(imageErrorMessage(code, copy), "error")}
           onFocus={() => {
-            setIsFocused(true);
-            scrollChatToBottom(false);
-            requestAnimationFrame(() => scrollChatToBottom(false));
-            setTimeout(() => scrollChatToBottom(false), 100);
-            setTimeout(() => scrollChatToBottom(false), 250);
-            setTimeout(() => scrollChatToBottom(false), 400);
-          }}
-          onBlur={() => {
-            setIsFocused(false);
+            setTimeout(() => scrollChatToBottom(false), 280);
           }}
           onImage={onImage}
           onImageDisabled={() => {

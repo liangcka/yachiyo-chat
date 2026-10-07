@@ -16,14 +16,16 @@ Status: implemented
    - 监听 `window.visualViewport` 的 `resize`、`scroll` 及 `orientationchange` 事件，跟踪各屏幕方向的基准最大视口高度。
    - 当视口高度因输入法展开缩减超过 120px 时，识别为软键盘弹起状态，并向根节点赋予 `.keyboard-open` 状态类；收起时精准还原。
 2. **打字与键盘展开时 ControlDock 智能收缩**：
-   - 当检测到键盘弹起（`isKeyboardOpen`）或输入框获得焦点（`isFocused`）且当前会话存在消息时，自动收缩折叠四格小组件（`isDockCollapsed = true`）。
+   - 依赖真实的 `window.visualViewport` 软键盘展开信号（`isKeyboardOpen`）或用户手势滑动判定收缩（`isDockCollapsed = true`），避免在输入框 `focus` 触发瞬间突变父容器几何尺寸，确保原生输入法管理器稳定唤起软键盘。
    - 折叠后底栏高度由 ~140px 缩减至 ~60px，将宝贵视野完整释放给聊天消息流。
    - 键盘弹起时，底部占位 spacer（`--chat-bottom-height`）以实际折叠高度为准，消除冗余留白；而在用户手动上滑浏览历史时维持展开高度占位，避免列表视口颠簸。
-3. **多阶段与 ResizeObserver 视口贴底校准**：
+3. **视口尺寸监听与温和贴底校准**：
    - 在 `ConversationView` 中通过 `ResizeObserver` 监听自身视口容器高度变化：每当输入法弹起或多行文本导致容器尺寸变动时，若用户处于底部或输入框处于激活状态，自动无损触发贴底滚动。
-   - 在 `Composer` 的 `onFocus` 阶段，采用多阶段定时器与 `requestAnimationFrame` 递进覆盖不同安卓机型的输入法弹出动画时长，确保键盘完全展开后最新消息稳稳停留在输入框正上方。
-4. **移动端触屏滑动手势收起键盘 (`ConversationView`)**：
-   - 在触屏设备（`(pointer: coarse)`）或键盘弹起模式下，用户滑动消息列表（`handleTouchMove`、`handleScroll` 超过阈值）或点击列表背景时，主动触发输入元素 `blur()`，顺畅收起键盘，恢复全屏浏览。
+   - 在输入框 `onFocus` 阶段，通过单一温和延时（280ms）辅助校准，避免多重密集高频滚动干扰输入法弹出生命周期。
+   - 输入框高度完全由标准 CSS 控制（`min-height: 1.5rem; max-height: 7rem;`），杜绝 JS 动态设置内联高度引发的高度坍塌风险。
+4. **移动端触屏滑动手势收起键盘与程序滚动解耦 (`ConversationView`)**：
+   - 严格限定仅在触屏手势真实移动（`handleTouchMove` 且位移阈值满足要求）时触发 `blur()` 收起软键盘。
+   - 坚决不在 `handleScroll`（程序性滚动与自动贴底）或全局容器点击事件中调用 `blur()`，杜绝点击聚焦时被误触收起键盘。
 5. **键盘弹起时消除安全区冗余 padding (`chat.css`)**：
    - 当 `.keyboard-open` 生效时，`.chat-bottom` 的 `padding-bottom` 自动收敛为 `0.65rem`，使输入框紧贴软键盘上沿。
 
