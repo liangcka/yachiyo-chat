@@ -600,6 +600,17 @@
 
 .keyboard-open .chat-bottom {
   padding-bottom: 0.65rem;
+  transition: none;
+}
+
+.keyboard-open .control-dock {
+  max-height: 0;
+  margin-bottom: 0;
+  opacity: 0;
+  transform: translateY(0.75rem) scale(0.96);
+  pointer-events: none;
+  visibility: hidden;
+  transition: none;
 }
 
 .chat-bottom--collapsed {

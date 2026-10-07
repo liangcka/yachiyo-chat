@@ -77,13 +77,16 @@ export function MobileLayout({
   const scrollChatToBottom = useCallback((smooth = false) => {
     const chatView = document.querySelector(".conversation-view");
     if (!chatView) return;
-    if (smooth && typeof chatView.scrollTo === "function") {
-      chatView.scrollTo({
-        top: chatView.scrollHeight,
-        behavior: "smooth",
-      });
-    } else {
-      chatView.scrollTop = chatView.scrollHeight;
+    const targetScroll = chatView.scrollHeight - chatView.clientHeight;
+    if (targetScroll > 0) {
+      if (smooth && typeof chatView.scrollTo === "function") {
+        chatView.scrollTo({
+          top: targetScroll,
+          behavior: "smooth",
+        });
+      } else {
+        chatView.scrollTop = targetScroll;
+      }
     }
   }, []);
 
@@ -102,19 +105,22 @@ export function MobileLayout({
 
       // 当视口高度比无键盘基准显著缩小（> 120px）时，判定为软键盘弹起
       const keyboardOpen = baseViewportHeightRef.current - height > 120;
-      setIsKeyboardOpen(keyboardOpen);
-
-      if (keyboardOpen) {
-        document.documentElement.classList.add("keyboard-open");
-        scrollChatToBottom(false);
-      } else {
-        document.documentElement.classList.remove("keyboard-open");
-      }
+      setIsKeyboardOpen((prev) => {
+        if (prev !== keyboardOpen) {
+          if (keyboardOpen) {
+            document.documentElement.classList.add("keyboard-open");
+            requestAnimationFrame(() => scrollChatToBottom(false));
+          } else {
+            document.documentElement.classList.remove("keyboard-open");
+          }
+          return keyboardOpen;
+        }
+        return prev;
+      });
     };
 
     handleViewportChange();
     vv.addEventListener("resize", handleViewportChange);
-    vv.addEventListener("scroll", handleViewportChange);
 
     const handleOrientationChange = () => {
       baseViewportHeightRef.current = 0;
@@ -123,50 +129,60 @@ export function MobileLayout({
 
     return () => {
       vv.removeEventListener("resize", handleViewportChange);
-      vv.removeEventListener("scroll", handleViewportChange);
       window.removeEventListener("orientationchange", handleOrientationChange);
       document.documentElement.style.removeProperty("--visual-viewport-height");
       document.documentElement.classList.remove("keyboard-open");
     };
   }, [scrollChatToBottom]);
 
+  const isDockCollapsedRef = useRef(isDockCollapsed);
+  const isKeyboardOpenRef = useRef(isKeyboardOpen);
   const lastExpandedHeightRef = useRef(0);
+
+  useEffect(() => {
+    isDockCollapsedRef.current = isDockCollapsed;
+    isKeyboardOpenRef.current = isKeyboardOpen;
+  }, [isDockCollapsed, isKeyboardOpen]);
+
+  const updateBottomHeight = useCallback(() => {
+    const bottomEl = chatBottomRef.current;
+    if (!bottomEl) return;
+    const height = bottomEl.getBoundingClientRect().height;
+    if (height > 0) {
+      const isCollapsed = isDockCollapsedRef.current;
+      const isKbd = isKeyboardOpenRef.current;
+      if (!isCollapsed) {
+        lastExpandedHeightRef.current = height;
+      }
+      // 键盘弹起时以实际收缩高度贴合；普通浏览上滑折叠时保留展开占位以防历史视口跳动
+      const targetHeight =
+        isCollapsed && lastExpandedHeightRef.current > 0
+          ? (isKbd ? height : lastExpandedHeightRef.current)
+          : height;
+      document.documentElement.style.setProperty(
+        "--chat-bottom-height",
+        `${Math.round(targetHeight)}px`,
+      );
+    }
+  }, []);
 
   // 动态测量底部输入区域高度以保持消息滚动间距，防止收缩时底部留白塌陷遮挡消息
   useEffect(() => {
     const bottomEl = chatBottomRef.current;
     if (!bottomEl || typeof ResizeObserver === "undefined") return;
 
-    const updateHeight = () => {
-      const height = bottomEl.getBoundingClientRect().height;
-      if (height > 0) {
-        if (!isDockCollapsed) {
-          lastExpandedHeightRef.current = height;
-        }
-        // 键盘弹起时以实际收缩高度贴合；普通浏览上滑折叠时保留展开占位以防历史视口跳动
-        const targetHeight =
-          isDockCollapsed && lastExpandedHeightRef.current > 0
-            ? (isKeyboardOpen ? height : lastExpandedHeightRef.current)
-            : height;
-        document.documentElement.style.setProperty(
-          "--chat-bottom-height",
-          `${Math.round(targetHeight)}px`,
-        );
-
-        if (isKeyboardOpen) {
-          scrollChatToBottom(false);
-        }
-      }
-    };
-
-    updateHeight();
-    const observer = new ResizeObserver(updateHeight);
+    updateBottomHeight();
+    const observer = new ResizeObserver(updateBottomHeight);
     observer.observe(bottomEl);
     return () => {
       observer.disconnect();
       document.documentElement.style.removeProperty("--chat-bottom-height");
     };
-  }, [isDockCollapsed, isKeyboardOpen, scrollChatToBottom]);
+  }, [updateBottomHeight]);
+
+  useEffect(() => {
+    updateBottomHeight();
+  }, [isDockCollapsed, isKeyboardOpen, updateBottomHeight]);
 
   // APK 原生壳：返回键先关弹层，2 秒内再按一次才退出
   useAndroidBack(

@@ -97,20 +97,34 @@ export function ConversationView({
 
   const scrollToBottom = useCallback(
     (smooth = true) => {
+      const isInputActive =
+        typeof document !== "undefined" &&
+        document.activeElement instanceof HTMLElement &&
+        (document.activeElement.tagName === "TEXTAREA" || document.activeElement.tagName === "INPUT");
+      const isKeyboardOpen =
+        typeof document !== "undefined" &&
+        document.documentElement.classList.contains("keyboard-open");
       const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      // 虚拟模式下占位层提供真实总高度，endRef 始终可达，两个分支共用同一逻辑
-      endRef.current?.scrollIntoView({
-        behavior: !smooth || reducedMotion ? "auto" : "smooth",
-        block: "end",
-      });
+
+      // 仅在非输入状态且软键盘未拉起时允许调用 scrollIntoView，
+      // 防止移动端唤起输入法时视口焦点被抢占导致系统软键盘闪退
+      if (!isInputActive && !isKeyboardOpen) {
+        endRef.current?.scrollIntoView({
+          behavior: !smooth || reducedMotion ? "auto" : "smooth",
+          block: "end",
+        });
+      }
+
       if (containerRef.current) {
         const target = containerRef.current;
         const targetScroll = target.scrollHeight - target.clientHeight;
         if (targetScroll > 0) {
-          if (typeof target.scrollTo === "function") {
+          if (!smooth || reducedMotion || isInputActive || isKeyboardOpen) {
+            target.scrollTop = targetScroll;
+          } else if (typeof target.scrollTo === "function") {
             target.scrollTo({
               top: targetScroll,
-              behavior: !smooth || reducedMotion ? "auto" : "smooth",
+              behavior: "smooth",
             });
           } else {
             target.scrollTop = targetScroll;
@@ -118,12 +132,11 @@ export function ConversationView({
         }
       }
       followingRef.current = true;
-      updateCollapseState(false);
       if (containerRef.current) {
         syncTopScrimOpacity(containerRef.current, onScrolledFromTopChange);
       }
     },
-    [onScrolledFromTopChange, updateCollapseState],
+    [onScrolledFromTopChange],
   );
 
   useEffect(() => {
@@ -157,25 +170,40 @@ export function ConversationView({
     if (!container || typeof ResizeObserver === "undefined") return;
 
     let previousHeight = container.clientHeight;
+    let rafId: number | null = null;
 
     const observer = new ResizeObserver(() => {
       const currentHeight = container.clientHeight;
-      const isInputActive =
-        typeof document !== "undefined" &&
-        document.activeElement instanceof HTMLElement &&
-        (document.activeElement.tagName === "TEXTAREA" || document.activeElement.tagName === "INPUT");
-
       if (currentHeight !== previousHeight) {
-        if (followingRef.current || isInputActive) {
-          scrollToBottom(false);
-        }
         previousHeight = currentHeight;
+
+        if (rafId !== null) cancelAnimationFrame(rafId);
+        rafId = requestAnimationFrame(() => {
+          const isInputActive =
+            typeof document !== "undefined" &&
+            document.activeElement instanceof HTMLElement &&
+            (document.activeElement.tagName === "TEXTAREA" || document.activeElement.tagName === "INPUT");
+
+          if (followingRef.current || isInputActive) {
+            // 直接设置容器 scrollTop 保证平滑贴底，绝不调用 scrollIntoView，绝不触发 React 状态更新
+            if (containerRef.current) {
+              const target = containerRef.current;
+              const targetScroll = target.scrollHeight - target.clientHeight;
+              if (targetScroll > 0) {
+                target.scrollTop = targetScroll;
+              }
+            }
+          }
+        });
       }
     });
 
     observer.observe(container);
-    return () => observer.disconnect();
-  }, [scrollToBottom]);
+    return () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      observer.disconnect();
+    };
+  }, []);
 
   let lastUserMessageIndex = -1;
   let lastAssistantMessageIndex = -1;
@@ -287,8 +315,15 @@ export function ConversationView({
         lastScrollTopRef.current = currentScrollTop;
       }
 
-      // 若滑回最底部附近，自动恢复展开
-      if (distanceFromBottom <= 32) {
+      // 若滑回最底部附近且当前非软键盘激活状态，自动恢复展开
+      const isInputActive =
+        typeof document !== "undefined" &&
+        document.activeElement instanceof HTMLElement &&
+        (document.activeElement.tagName === "TEXTAREA" || document.activeElement.tagName === "INPUT");
+      const isKeyboardOpen =
+        typeof document !== "undefined" &&
+        document.documentElement.classList.contains("keyboard-open");
+      if (distanceFromBottom <= 32 && !isInputActive && !isKeyboardOpen) {
         updateCollapseState(false);
       }
     },
@@ -309,7 +344,7 @@ export function ConversationView({
       const target = event.currentTarget;
       const maxScroll = target.scrollHeight - target.clientHeight;
 
-      if (maxScroll > 0 && Math.abs(deltaY) >= 16) {
+      if (maxScroll > 0 && Math.abs(deltaY) >= 20) {
         dismissKeyboardIfActive();
         if (deltaY < 0) {
           // 手势上滑（向上翻阅内容） -> 收缩四格
