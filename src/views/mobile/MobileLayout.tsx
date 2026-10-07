@@ -59,17 +59,34 @@ export function MobileLayout({
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [dockCollapsed, setDockCollapsed] = useState(false);
+  const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
   const [prevConversationId, setPrevConversationId] = useState(controller.activeConversation?.id);
+  const baseViewportHeightRef = useRef(0);
 
   if (controller.activeConversation?.id !== prevConversationId) {
     setPrevConversationId(controller.activeConversation?.id);
     setDockCollapsed(false);
   }
 
-  // 无历史消息时不可收缩（确保新建对话/空会话始终展示四格操作入口）
-  const isDockCollapsed = dockCollapsed && controller.messages.length > 0;
+  // 软键盘弹起、输入框聚焦或历史消息上滑时收缩四格小组件，优先保证输入与阅读视野
+  const isDockCollapsed =
+    (dockCollapsed || isKeyboardOpen || isFocused) && controller.messages.length > 0;
 
   const chatBottomRef = useRef<HTMLDivElement>(null);
+
+  const scrollChatToBottom = useCallback((smooth = false) => {
+    const chatView = document.querySelector(".conversation-view");
+    if (!chatView) return;
+    if (smooth && typeof chatView.scrollTo === "function") {
+      chatView.scrollTo({
+        top: chatView.scrollHeight,
+        behavior: "smooth",
+      });
+    } else {
+      chatView.scrollTop = chatView.scrollHeight;
+    }
+  }, []);
 
   // 移动端与软键盘适配：实时同步 visualViewport 高度至 CSS 变量
   useEffect(() => {
@@ -79,18 +96,47 @@ export function MobileLayout({
     const handleViewportChange = () => {
       const height = vv.height;
       document.documentElement.style.setProperty("--visual-viewport-height", `${height}px`);
+
+      if (height > baseViewportHeightRef.current) {
+        baseViewportHeightRef.current = height;
+      }
+
+      // 当视口高度比无键盘基准显著缩小（> 120px）时，判定为软键盘弹起
+      const keyboardOpen = baseViewportHeightRef.current - height > 120;
+      setIsKeyboardOpen(keyboardOpen);
+
+      if (keyboardOpen) {
+        document.documentElement.classList.add("keyboard-open");
+      } else {
+        document.documentElement.classList.remove("keyboard-open");
+      }
+
+      const isInputActive =
+        document.activeElement instanceof HTMLElement &&
+        (document.activeElement.tagName === "TEXTAREA" || document.activeElement.tagName === "INPUT");
+
+      if (keyboardOpen || isInputActive) {
+        scrollChatToBottom(false);
+      }
     };
 
     handleViewportChange();
     vv.addEventListener("resize", handleViewportChange);
     vv.addEventListener("scroll", handleViewportChange);
 
+    const handleOrientationChange = () => {
+      baseViewportHeightRef.current = 0;
+    };
+    window.addEventListener("orientationchange", handleOrientationChange);
+
     return () => {
       vv.removeEventListener("resize", handleViewportChange);
       vv.removeEventListener("scroll", handleViewportChange);
+      window.removeEventListener("orientationchange", handleOrientationChange);
       document.documentElement.style.removeProperty("--visual-viewport-height");
+      document.documentElement.classList.remove("keyboard-open");
     };
-  }, []);
+  }, [scrollChatToBottom]);
 
   const lastExpandedHeightRef = useRef(0);
 
@@ -105,14 +151,22 @@ export function MobileLayout({
         if (!isDockCollapsed) {
           lastExpandedHeightRef.current = height;
         }
+        // 键盘弹起时以实际收缩高度贴合；普通浏览上滑折叠时保留展开占位以防历史视口跳动
         const targetHeight =
           isDockCollapsed && lastExpandedHeightRef.current > 0
-            ? lastExpandedHeightRef.current
+            ? (isKeyboardOpen || isFocused ? height : lastExpandedHeightRef.current)
             : height;
         document.documentElement.style.setProperty(
           "--chat-bottom-height",
           `${Math.round(targetHeight)}px`,
         );
+
+        const isInputActive =
+          document.activeElement instanceof HTMLElement &&
+          (document.activeElement.tagName === "TEXTAREA" || document.activeElement.tagName === "INPUT");
+        if (isInputActive) {
+          scrollChatToBottom(false);
+        }
       }
     };
 
@@ -123,7 +177,7 @@ export function MobileLayout({
       observer.disconnect();
       document.documentElement.style.removeProperty("--chat-bottom-height");
     };
-  }, [isDockCollapsed]);
+  }, [isDockCollapsed, isFocused, isKeyboardOpen, scrollChatToBottom]);
 
   // APK 原生壳：返回键先关弹层，2 秒内再按一次才退出
   useAndroidBack(
@@ -265,12 +319,15 @@ export function MobileLayout({
           onChange={setComposerValue}
           onError={(code) => showToast(imageErrorMessage(code, copy), "error")}
           onFocus={() => {
-            setTimeout(() => {
-              const chatView = document.querySelector(".conversation-view");
-              if (chatView) {
-                chatView.scrollTop = chatView.scrollHeight;
-              }
-            }, 120);
+            setIsFocused(true);
+            scrollChatToBottom(false);
+            requestAnimationFrame(() => scrollChatToBottom(false));
+            setTimeout(() => scrollChatToBottom(false), 100);
+            setTimeout(() => scrollChatToBottom(false), 250);
+            setTimeout(() => scrollChatToBottom(false), 400);
+          }}
+          onBlur={() => {
+            setIsFocused(false);
           }}
           onImage={onImage}
           onImageDisabled={() => {

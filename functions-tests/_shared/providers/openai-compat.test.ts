@@ -5,6 +5,8 @@ import {
   buildOpenAICompatAdapter,
   buildOpenAICompatBody,
   extractOpenAIDeltaText,
+  resolveDeepSeekReasoningEffort,
+  type OpenAICompatBodyOptions,
 } from "../../../functions/_shared/providers/openai-compat";
 
 const textRequest: ClientChatRequest = {
@@ -15,9 +17,29 @@ const textRequest: ClientChatRequest = {
   ],
 };
 
+const openaiOptions: OpenAICompatBodyOptions = { provider: "openai", supportsImage: true };
+const stepfunOptions: OpenAICompatBodyOptions = {
+  provider: "stepfun",
+  supportsImage: true,
+  reasoningEffort: true,
+};
+const deepseekOptions: OpenAICompatBodyOptions = {
+  provider: "deepseek",
+  supportsImage: true,
+  deepseekThinking: true,
+  defaultTemperature: 1.0,
+  defaultFrequencyPenalty: 0.3,
+};
+
+const imageDataUrl = "data:image/webp;base64,UklGRgAAAABXRUJQ";
+const imageRequest: ClientChatRequest = {
+  locale: "zh-CN",
+  messages: [{ role: "user", text: "看图", imageDataUrl }],
+};
+
 describe("buildOpenAICompatBody", () => {
   it("maps history to OpenAI chat completions format with system prompt", () => {
-    const body = buildOpenAICompatBody(textRequest, "gpt-5.6-luna", true) as {
+    const body = buildOpenAICompatBody(textRequest, "gpt-5.6-luna", openaiOptions) as {
       model: string;
       messages: Array<{ role: string; content: unknown }>;
       stream: boolean;
@@ -38,57 +60,93 @@ describe("buildOpenAICompatBody", () => {
   });
 
   it("sets reasoning_effort low for reasoning-capable providers and lifts it for images", () => {
-    const imageDataUrl = "data:image/webp;base64,UklGRgAAAABXRUJQ";
-    const textBody = buildOpenAICompatBody(textRequest, "step-3.7-flash", true, true) as {
+    const textBody = buildOpenAICompatBody(textRequest, "step-3.7-flash", stepfunOptions) as {
       reasoning_effort?: string;
     };
     expect(textBody.reasoning_effort).toBe("low");
 
-    const imageRequest: ClientChatRequest = {
-      locale: "zh-CN",
-      messages: [{ role: "user", text: "看图", imageDataUrl }],
-    };
-    const imageBody = buildOpenAICompatBody(imageRequest, "step-3.7-flash", true, true) as {
+    const imageBody = buildOpenAICompatBody(imageRequest, "step-3.7-flash", stepfunOptions) as {
       reasoning_effort?: string;
     };
     expect(imageBody.reasoning_effort).toBe("medium");
   });
 
-  it("injects thinking enabled and reasoning_effort for deepseekThinking providers", () => {
-    const textBody = buildOpenAICompatBody(textRequest, "deepseek-flash", true, false, true) as {
+  it("keeps DeepSeek daily chat on the lowest thinking tier and injects roleplay sampling", () => {
+    const body = buildOpenAICompatBody(textRequest, "deepseek-flash", deepseekOptions) as {
       thinking?: { type: string };
       reasoning_effort?: string;
+      temperature?: number;
+      frequency_penalty?: number;
     };
-    expect(textBody.thinking).toEqual({ type: "enabled" });
-    expect(textBody.reasoning_effort).toBe("high");
 
-    const imageDataUrl = "data:image/webp;base64,UklGRgAAAABXRUJQ";
-    const imageRequest: ClientChatRequest = {
-      locale: "zh-CN",
-      messages: [{ role: "user", text: "看图", imageDataUrl }],
-    };
-    const imageBody = buildOpenAICompatBody(imageRequest, "deepseek-flash", true, false, true) as {
+    expect(body.thinking).toEqual({ type: "enabled" });
+    expect(body.reasoning_effort).toBe("low");
+    expect(body.temperature).toBe(1.0);
+    expect(body.frequency_penalty).toBe(0.3);
+  });
+
+  it("lifts DeepSeek thinking one tier for images, web search and long questions", () => {
+    const imageBody = buildOpenAICompatBody(imageRequest, "deepseek-flash", deepseekOptions) as {
       thinking?: { type: string };
       reasoning_effort?: string;
     };
     expect(imageBody.thinking).toEqual({ type: "enabled" });
     expect(imageBody.reasoning_effort).toBe("medium");
+
+    const searchBody = buildOpenAICompatBody(
+      { ...textRequest, webSearch: true },
+      "deepseek-flash",
+      deepseekOptions,
+    ) as { reasoning_effort?: string };
+    expect(searchBody.reasoning_effort).toBe("medium");
+
+    const longBody = buildOpenAICompatBody(
+      { ...textRequest, messages: [{ role: "user", text: "问".repeat(120) }] },
+      "deepseek-flash",
+      deepseekOptions,
+    ) as { reasoning_effort?: string };
+    expect(longBody.reasoning_effort).toBe("medium");
+  });
+
+  it("gives the DeepSeek pro model a higher baseline tier", () => {
+    const chatBody = buildOpenAICompatBody(textRequest, "deepseek-v4-pro", deepseekOptions) as {
+      reasoning_effort?: string;
+    };
+    expect(chatBody.reasoning_effort).toBe("medium");
+
+    const imageBody = buildOpenAICompatBody(imageRequest, "deepseek-v4-pro", deepseekOptions) as {
+      reasoning_effort?: string;
+    };
+    expect(imageBody.reasoning_effort).toBe("high");
+  });
+
+  it("injects the DeepSeek-specific vendor tightening block into the system prompt", () => {
+    const deepseekBody = buildOpenAICompatBody(textRequest, "deepseek-flash", deepseekOptions) as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    expect(deepseekBody.messages[0]?.content).toContain("厂商适配（DeepSeek）");
+
+    const openaiBody = buildOpenAICompatBody(textRequest, "gpt-5.6-luna", openaiOptions) as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    expect(openaiBody.messages[0]?.content).not.toContain("厂商适配（DeepSeek）");
   });
 
   it("keeps a smaller token budget for summary mode", () => {
-    const body = buildOpenAICompatBody({ ...textRequest, mode: "summary" }, "gpt-5.6-luna", true) as {
-      max_tokens: number;
-    };
+    const body = buildOpenAICompatBody(
+      { ...textRequest, mode: "summary" },
+      "gpt-5.6-luna",
+      openaiOptions,
+    ) as { max_tokens: number };
     expect(body.max_tokens).toBe(4096);
   });
 
   it("emits image content parts when the provider supports images", () => {
-    const imageDataUrl = "data:image/webp;base64,UklGRgAAAABXRUJQ";
     const request: ClientChatRequest = {
       locale: "ja-JP",
       messages: [{ role: "user", text: "これは何？", imageDataUrl }],
     };
-    const body = buildOpenAICompatBody(request, "gpt-5.6-luna", true) as {
+    const body = buildOpenAICompatBody(request, "gpt-5.6-luna", openaiOptions) as {
       messages: Array<{ role: string; content: unknown }>;
     };
 
@@ -106,7 +164,10 @@ describe("buildOpenAICompatBody", () => {
       locale: "zh-CN",
       messages: [{ role: "user", text: "看图", imageDataUrl: "data:image/png;base64,iVBORw0KGgo=" }],
     };
-    const body = buildOpenAICompatBody(request, "deepseek-chat", false) as {
+    const body = buildOpenAICompatBody(request, "deepseek-chat", {
+      provider: "deepseek",
+      supportsImage: false,
+    }) as {
       messages: Array<{ role: string; content: unknown }>;
     };
 
@@ -121,7 +182,7 @@ describe("buildOpenAICompatBody", () => {
         { title: "上海天气", url: "https://weather.example.cn/", snippet: "今日多云，24至30度。" },
       ],
     };
-    const body = buildOpenAICompatBody(request, "gpt-5.6-luna", true) as {
+    const body = buildOpenAICompatBody(request, "gpt-5.6-luna", openaiOptions) as {
       messages: Array<{ role: string; content: string }>;
     };
     const system = body.messages[0]?.content ?? "";
@@ -138,11 +199,28 @@ describe("buildOpenAICompatBody", () => {
       ...textRequest,
       currentTime: "2026-08-27 11:09:37 星期四",
     };
-    const body = buildOpenAICompatBody(request, "gpt-5.6-luna", true) as {
+    const body = buildOpenAICompatBody(request, "gpt-5.6-luna", openaiOptions) as {
       messages: Array<{ role: string; content: string }>;
     };
     const system = body.messages[0]?.content ?? "";
     expect(system).toContain("当前现实时间：2026-08-27 11:09:37 星期四");
+  });
+});
+
+describe("resolveDeepSeekReasoningEffort", () => {
+  it("pins summary mode to the lowest tier regardless of model", () => {
+    const request: EnrichedChatRequest = { ...textRequest, mode: "summary" };
+    expect(resolveDeepSeekReasoningEffort("deepseek-flash", request, false)).toBe("low");
+    expect(resolveDeepSeekReasoningEffort("deepseek-v4-pro", request, false)).toBe("low");
+  });
+
+  it("counts message length in Unicode code points, not UTF-16 units", () => {
+    // 60 个代理对字符 = 60 码点（120 UTF-16 单元），不应被误判为深度提问
+    const surrogateRequest: EnrichedChatRequest = {
+      ...textRequest,
+      messages: [{ role: "user", text: "🙂".repeat(60) }],
+    };
+    expect(resolveDeepSeekReasoningEffort("deepseek-flash", surrogateRequest, false)).toBe("low");
   });
 });
 
@@ -226,6 +304,8 @@ describe("buildOpenAICompatAdapter", () => {
       supportsImage: true,
       imageModels: ["deepseek-flash"],
       deepseekThinking: true,
+      defaultTemperature: 1.0,
+      defaultFrequencyPenalty: 0.3,
     });
 
     const streamReq = deepseekAdapter.buildRequest({
@@ -236,9 +316,15 @@ describe("buildOpenAICompatAdapter", () => {
     const streamBody = JSON.parse(streamReq.body) as {
       thinking?: { type: string };
       reasoning_effort?: string;
+      temperature?: number;
+      frequency_penalty?: number;
+      messages: Array<{ role: string; content: string }>;
     };
     expect(streamBody.thinking).toEqual({ type: "enabled" });
-    expect(streamBody.reasoning_effort).toBe("high");
+    expect(streamBody.reasoning_effort).toBe("low");
+    expect(streamBody.temperature).toBe(1.0);
+    expect(streamBody.frequency_penalty).toBe(0.3);
+    expect(streamBody.messages[0]?.content).toContain("厂商适配（DeepSeek）");
 
     const judgeReq = deepseekAdapter.buildJudgeRequest({
       apiKey: "sk-" + "b".repeat(40),
@@ -249,9 +335,14 @@ describe("buildOpenAICompatAdapter", () => {
     const judgeBody = JSON.parse(judgeReq.body) as {
       thinking?: { type: string };
       reasoning_effort?: string;
+      temperature?: number;
+      frequency_penalty?: number;
     };
     expect(judgeBody.thinking).toEqual({ type: "disabled" });
     expect(judgeBody.reasoning_effort).toBe("low");
+    expect(judgeBody.temperature).toBe(0.1);
+    // 判定类请求要求确定性输出，重复惩罚反而会扰动 YES/NO 判定
+    expect(judgeBody.frequency_penalty).toBeUndefined();
   });
 
   it("handles glmThinking adapter routing thinking to supported models and sets roleplay temperature", () => {

@@ -1065,6 +1065,128 @@ describe("reference chat components", () => {
     // 验证底栏成功恢复展开
     expect(chatBottom).not.toHaveClass("chat-bottom--collapsed");
   });
+
+  it("automatically collapses control-dock on composer focus to optimize screen space", () => {
+    const currentMessages: ChatMessage[] = [
+      {
+        conversationId: "c1",
+        createdAt: 1,
+        id: "m1",
+        role: "user",
+        status: "complete",
+        text: "你好",
+      },
+    ];
+
+    const mockController = {
+      activeConversation: { id: "c1", title: "测试对话" },
+      compressConversation: vi.fn(),
+      errorCode: undefined,
+      hasMoreHistory: false,
+      loadEarlier: vi.fn(),
+      locale: "zh-CN" as const,
+      get messages() {
+        return currentMessages;
+      },
+      newConversation: vi.fn(),
+      phase: "ready" as const,
+      recall: vi.fn(),
+      regenerate: vi.fn(),
+      retry: vi.fn(),
+      selectConversation: vi.fn(),
+      send: vi.fn(),
+      setLocale: vi.fn(),
+      setOnline: vi.fn(),
+      setPendingImage: vi.fn(),
+      stop: vi.fn(),
+      updateUserMemory: vi.fn(),
+      userMemory: "",
+    } as unknown as ReturnType<typeof useChatController>;
+
+    const { container } = render(
+      <MobileLayout
+        activeProviderSupportsImage={true}
+        activeSkillIds={[]}
+        composerValue=""
+        controller={mockController}
+        conversations={[]}
+        copy={copyFor("zh-CN")}
+        imageUrls={new Map()}
+        isOnline={true}
+        llmEntries={[]}
+        onClearData={vi.fn()}
+        onDelete={vi.fn()}
+        onImage={vi.fn()}
+        onLlmActivate={vi.fn()}
+        onLlmClear={vi.fn()}
+        onLlmSave={vi.fn()}
+        onLocale={vi.fn()}
+        onNewChat={vi.fn()}
+        onRecall={vi.fn()}
+        onRegenerate={vi.fn()}
+        onRename={vi.fn()}
+        onSend={vi.fn()}
+        onSignOut={vi.fn()}
+        onSkillToggle={vi.fn()}
+        onWebSearchSettingsChange={vi.fn()}
+        processImage={vi.fn()}
+        pwa={{ needRefresh: false, offlineReady: false, setNeedRefresh: vi.fn(), setOfflineReady: vi.fn(), updateServiceWorker: vi.fn() }}
+        refreshHistory={vi.fn()}
+        refreshLlm={vi.fn()}
+        setComposerValue={vi.fn()}
+        setPendingImageDataUrl={vi.fn()}
+        showToast={vi.fn()}
+        webSearchSettings={{ enabled: false, smart: true, showSources: true }}
+      />,
+    );
+
+    const chatBottom = container.querySelector(".chat-bottom");
+    expect(chatBottom).not.toHaveClass("chat-bottom--collapsed");
+
+    const textarea = screen.getByPlaceholderText("什么都可以告诉我");
+    fireEvent.focus(textarea);
+    expect(chatBottom).toHaveClass("chat-bottom--collapsed");
+
+    fireEvent.blur(textarea);
+    expect(chatBottom).not.toHaveClass("chat-bottom--collapsed");
+  });
+
+  it("dismisses active keyboard input on touch drag in touch mode", () => {
+    document.documentElement.classList.add("keyboard-open");
+
+    const message: ChatMessage = {
+      conversationId: "c1",
+      createdAt: 1,
+      id: "m1",
+      role: "assistant",
+      status: "complete",
+      text: "很高兴见到你",
+    };
+
+    const { container } = render(
+      <ConversationView
+        locale="zh-CN"
+        messages={[message]}
+      />,
+    );
+
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    input.focus();
+    expect(document.activeElement).toBe(input);
+
+    const scrollContainer = container.querySelector(".conversation-view") as HTMLElement;
+    Object.defineProperty(scrollContainer, "scrollHeight", { configurable: true, value: 1000 });
+    Object.defineProperty(scrollContainer, "clientHeight", { configurable: true, value: 400 });
+
+    fireEvent.touchStart(scrollContainer, { touches: [{ clientY: 300 }] });
+    fireEvent.touchMove(scrollContainer, { touches: [{ clientY: 200 }] });
+
+    expect(document.activeElement).not.toBe(input);
+
+    document.documentElement.classList.remove("keyboard-open");
+    input.remove();
+  });
 });
 
 

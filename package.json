@@ -10,9 +10,10 @@
   "type": "module",
   "scripts": {
     "sync:prompt": "node scripts/sync-role-prompt.mjs",
-    "prebuild": "npm run sync:prompt && node scripts/clean-build-output.mjs",
-    "pretypecheck": "npm run sync:prompt",
-    "pretest:functions": "npm run sync:prompt",
+    "sync:stickers": "node scripts/sync-sticker-catalog.mjs",
+    "prebuild": "npm run sync:prompt && npm run sync:stickers && node scripts/clean-build-output.mjs",
+    "pretypecheck": "npm run sync:prompt && npm run sync:stickers",
+    "pretest:functions": "npm run sync:prompt && npm run sync:stickers",
     "dev": "vite --configLoader runner",
     "dev:pages": "npm run build && wrangler pages dev dist --kv RATE_LIMIT_KV",
     "dev:mock": "npm run build && wrangler pages dev dist --kv RATE_LIMIT_KV --binding APP_MODE=mock",

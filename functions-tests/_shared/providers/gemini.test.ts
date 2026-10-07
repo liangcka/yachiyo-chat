@@ -210,18 +210,19 @@ describe("buildGeminiAdapter", () => {
     expect(adapter.supportsImage).toBe(true);
     expect(adapter.defaultModel).toBe("gemini-3.8-flash");
     expect(adapter.allowedModels).toContain("gemini-3.8-flash");
-    expect(adapter.allowedModels).toContain("gemini-3.5-flash");
+    expect(adapter.allowedModels).toContain("gemini-3.5-flash-lite");
+    expect(adapter.allowedModels).toContain("gemini-3.1-pro");
   });
 
   it("builds a streamGenerateContent URL with x-goog-api-key header", () => {
     const built = adapter.buildRequest({
       request: textRequest,
       apiKey: "AIza" + "a".repeat(35),
-      model: "gemini-3.6-flash",
+      model: "gemini-3.8-flash",
     });
 
     expect(built.url).toBe(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:streamGenerateContent?alt=sse",
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:streamGenerateContent?alt=sse",
     );
     expect(built.headers["x-goog-api-key"]).toMatch(/^AIza/u);
     expect(built.headers["content-type"]).toBe("application/json");

@@ -5,8 +5,8 @@ import { collectClientEvents } from "../../functions/_shared/stream";
 import { onRequestPost } from "../../functions/api/chat";
 
 const origin = "https://yachiyo.test";
-const providerOrigin = "https://api.stepfun.com";
-const providerPath = "/step_plan/v1/chat/completions";
+const providerOrigin = "https://open.bigmodel.cn";
+const providerPath = "/api/paas/v4/chat/completions";
 const providerUrl = `${providerOrigin}${providerPath}`;
 const providerFetch = vi.fn<typeof fetch>();
 
@@ -122,7 +122,7 @@ describe("POST /api/chat", () => {
     expect(await response.json()).toEqual({ error: { code: "SESSION_REQUIRED" } });
   });
 
-  it("sends text with low effort and exposes only sanitized SSE", async () => {
+  it("sends text with GLM-4.7-Flash and exposes only sanitized SSE", async () => {
     let outbound: Record<string, unknown> | undefined;
     let upstreamRequest: Request | undefined;
     providerFetch.mockImplementationOnce(async (input, init) => {
@@ -147,11 +147,13 @@ describe("POST /api/chat", () => {
     expect(upstreamRequest?.url).toBe(providerUrl);
     expect(upstreamRequest?.method).toBe("POST");
     expect(upstreamRequest?.headers.get("authorization")).toBe(
-      `Bearer ${env.STEPFUN_API_KEY}`,
+      `Bearer ${env.GLM_API_KEY}`,
     );
     expect(outbound).toMatchObject({
-      model: "step-3.7-flash",
-      reasoning_effort: "low",
+      model: "glm-4.7-flash",
+      thinking: { type: "enabled" },
+      reasoning_effort: "high",
+      temperature: 0.8,
       stream: true,
     });
     expect(JSON.stringify(outbound)).toContain("月见八千代");
@@ -159,23 +161,12 @@ describe("POST /api/chat", () => {
       { type: "delta", text: "彩叶~今天也辛苦啦！" },
       { type: "done", truncated: false },
     ]);
-    expect(clientText).not.toContain(env.STEPFUN_API_KEY);
+    expect(clientText).not.toContain(env.GLM_API_KEY);
     expect(providerFetch).toHaveBeenCalledOnce();
   });
 
-  it("sends the last user image with medium effort", async () => {
+  it("rejects image in fallback mode as GLM-4.7-Flash is text-only", async () => {
     const imageDataUrl = "data:image/png;base64,iVBORw0KGgo=";
-    let outbound: Record<string, unknown> | undefined;
-    providerFetch.mockImplementationOnce(async (input, init) => {
-      const request = input instanceof Request ? input : new Request(input, init);
-      expect(request.url).toBe(providerUrl);
-      outbound = JSON.parse(await request.text()) as Record<string, unknown>;
-      return new Response(providerSse("看见啦~"), {
-        status: 200,
-        headers: { "content-type": "text/event-stream" },
-      });
-    });
-
     const response = await invoke(
       await chatRequest(
         {
@@ -185,17 +176,16 @@ describe("POST /api/chat", () => {
         "image-session",
       ),
     );
-    await response.text();
 
-    expect(outbound).toMatchObject({ reasoning_effort: "medium" });
-    expect(JSON.stringify(outbound)).toContain(imageDataUrl);
-    expect(providerFetch).toHaveBeenCalledOnce();
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: { code: "INVALID_REQUEST" } });
+    expect(providerFetch).not.toHaveBeenCalled();
   });
 
   it("never returns an upstream error body or provider credential", async () => {
     providerFetch.mockImplementationOnce(async (input) => {
       expect(String(input)).toBe(providerUrl);
-      return new Response(`provider-debug ${env.STEPFUN_API_KEY}`, { status: 500 });
+      return new Response(`provider-debug ${env.GLM_API_KEY}`, { status: 500 });
     });
 
     const response = await invoke(
@@ -209,10 +199,10 @@ describe("POST /api/chat", () => {
     expect(response.status).toBe(502);
     expect(JSON.parse(text)).toEqual({ error: { code: "PROVIDER_ERROR" } });
     expect(text).not.toContain("provider-debug");
-    expect(text).not.toContain(env.STEPFUN_API_KEY);
+    expect(text).not.toContain(env.GLM_API_KEY);
   });
 
-  it("rejects a consumed daily quota before contacting StepFun", async () => {
+  it("rejects a consumed daily quota before contacting GLM", async () => {
     const deviceId = "device-abc123";
     const date = new Date().toISOString().slice(0, 10);
     await env.RATE_LIMIT_KV.put(`quota:${date}:${deviceId}`, env.DAILY_REQUEST_LIMIT);
@@ -283,7 +273,7 @@ describe("POST /api/chat", () => {
     );
     const events = await collectClientEvents(response.body!);
 
-    expect(upstreamRequest?.url).toBe(providerUrl);
+    expect(upstreamRequest?.url).toBe("https://api.stepfun.com/step_plan/v1/chat/completions");
     expect(upstreamRequest?.headers.get("authorization")).toBe(`Bearer ${apiKey}`);
     expect(events).toEqual([
       { type: "delta", text: "这是 Step Plan 的真实流式回答" },
@@ -608,6 +598,9 @@ describe("POST /api/chat", () => {
           locale: "zh-CN",
           messages: [{ role: "user", text: "", imageDataUrl }],
           webSearch: true,
+          provider: "glm",
+          apiKey: "sk-test-key-12345678901234567890",
+          model: "glm-5.3-flash",
         },
         "image-skip-session",
       ),

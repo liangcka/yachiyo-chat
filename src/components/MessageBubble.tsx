@@ -1,8 +1,10 @@
 import { Copy, RotateCcw, RotateCw } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ChatMessage, Locale, MessageStatus } from "../domain/chat";
+import type { StickerEntry } from "../features/sticker/catalog.gen";
+import { splitStickerPieces, stickerUrl, stripPartialStickerToken } from "../features/sticker/parse";
 import { copyFor } from "../i18n/messages";
-import { splitAssistantMessage } from "./message-splitter";
+import { splitAssistantMessage, type BubblePiece } from "./message-splitter";
 
 export interface MessageBubbleProps {
   locale: Locale;
@@ -73,6 +75,42 @@ function formatMessageText(text: string): string[] {
     .split(/\n\s*\n/)
     .map((p) => p.trim())
     .filter((p) => p.length > 0);
+}
+
+/** assistant 气泡展开后的渲染片段：文本气泡或贴图图片 */
+type BubbleRenderItem =
+  | { kind: "bubble"; id: string; text: string; isTyping: boolean }
+  | { kind: "sticker"; id: string; sticker: StickerEntry };
+
+/**
+ * 将拆分器气泡展开为渲染片段：整条内容为 [sticker:id] 的气泡渲染为贴图图片；
+ * 流式期间末尾未闭合标记先隐藏，若隐藏后无剩余内容则回退为 typing 气泡。
+ */
+function expandBubblePieces(pieces: readonly BubblePiece[], isStreaming: boolean): BubbleRenderItem[] {
+  const items: BubbleRenderItem[] = [];
+  pieces.forEach((piece, index) => {
+    if (piece.isTyping === true) {
+      items.push({ kind: "bubble", id: piece.id, text: "", isTyping: true });
+      return;
+    }
+    const isLast = index === pieces.length - 1;
+    const text = isStreaming && isLast ? stripPartialStickerToken(piece.text) : piece.text;
+    const subPieces = splitStickerPieces(text);
+    if (subPieces.length === 0) {
+      if (isStreaming && isLast) {
+        items.push({ kind: "bubble", id: piece.id, text: "", isTyping: true });
+      }
+      return;
+    }
+    subPieces.forEach((sub, subIndex) => {
+      if (sub.kind === "sticker") {
+        items.push({ kind: "sticker", id: `${piece.id}-sticker-${subIndex}`, sticker: sub.sticker });
+      } else {
+        items.push({ kind: "bubble", id: `${piece.id}-text-${subIndex}`, text: sub.text, isTyping: false });
+      }
+    });
+  });
+  return items;
 }
 
 interface SingleBubbleProps {
@@ -375,16 +413,36 @@ export const MessageBubble = memo(function MessageBubble({
 
   const isStreaming = message.status === "streaming";
   const pieces = splitAssistantMessage(displayText, isStreaming, multiBubble);
+  const items = expandBubblePieces(pieces, isStreaming);
 
-  if (pieces.length === 0) {
+  if (items.length === 0) {
     return null;
   }
 
-  if (pieces.length === 1) {
-    const piece = pieces[0];
+  const renderSticker = (item: Extract<BubbleRenderItem, { kind: "sticker" }>) => (
+    <img
+      alt={item.sticker.alt}
+      className="message-bubble__sticker"
+      key={item.id}
+      onLoad={onImageLoad}
+      src={stickerUrl(item.sticker)}
+    />
+  );
+
+  // 来源列表与截断提示依附于最后一个文本气泡；贴图图片不承载这些附属信息
+  const lastBubbleIndex = items.reduce(
+    (acc, item, index) => (item.kind === "bubble" ? index : acc),
+    -1,
+  );
+
+  if (items.length === 1) {
+    const only = items[0];
+    if (only.kind === "sticker") {
+      return renderSticker(only);
+    }
     return (
       <SingleBubble
-        isTyping={piece?.isTyping}
+        isTyping={only.isTyping}
         locale={locale}
         messageRole="assistant"
         onRecall={onRecall}
@@ -392,7 +450,7 @@ export const MessageBubble = memo(function MessageBubble({
         onToast={onToast}
         sources={visibleSources}
         status={message.status}
-        text={piece?.text ?? ""}
+        text={only.text}
         truncated={message.truncated}
       />
     );
@@ -400,24 +458,25 @@ export const MessageBubble = memo(function MessageBubble({
 
   return (
     <div className="message-bubble-group" data-role="assistant">
-      {pieces.map((piece, index) => {
-        const isLast = index === pieces.length - 1;
-        return (
+      {items.map((item, index) =>
+        item.kind === "sticker" ? (
+          renderSticker(item)
+        ) : (
           <SingleBubble
-            key={piece.id}
-            isTyping={piece.isTyping}
+            key={item.id}
+            isTyping={item.isTyping}
             locale={locale}
             messageRole="assistant"
             onRecall={onRecall}
             onRegenerate={onRegenerate}
             onToast={onToast}
-            sources={isLast ? visibleSources : undefined}
+            sources={index === lastBubbleIndex ? visibleSources : undefined}
             status={message.status}
-            text={piece.text}
-            truncated={isLast ? message.truncated : undefined}
+            text={item.text}
+            truncated={index === lastBubbleIndex ? message.truncated : undefined}
           />
-        );
-      })}
+        ),
+      )}
     </div>
   );
 });

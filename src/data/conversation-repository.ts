@@ -56,6 +56,10 @@ export class ConversationRepository {
     await this.db.conversations.update(id, { title: requireTitle(title) });
   }
 
+  async touchConversation(id: string, now = Date.now()): Promise<void> {
+    await this.db.conversations.update(id, { updatedAt: now });
+  }
+
   async updateConversationSummary(
     id: string,
     summary: string,

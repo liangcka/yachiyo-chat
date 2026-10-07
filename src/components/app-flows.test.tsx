@@ -43,6 +43,11 @@ class MemoryRepository implements AppRepository {
     if (conversation !== undefined) conversation.title = title.trim();
   }
 
+  async touchConversation(id: string, now = Date.now()): Promise<void> {
+    const conversation = await this.getConversation(id);
+    if (conversation !== undefined) conversation.updatedAt = now;
+  }
+
   async updateConversationSummary(
     id: string,
     summary: string,
@@ -443,7 +448,10 @@ describe("App flows", () => {
       options.onDelta("照片里的光很温柔呢~（凑近看了看）");
       return { truncated: false };
     });
-    const services = fakeServices({ stream });
+    const db = new YachiyoDatabase(`app-flows-camera-${Date.now()}`);
+    const llmSettings = new LlmSettingsService(db);
+    await llmSettings.saveProvider("stepfun", "sk-test-valid-stepfun-key-123456", "step-3.7-flash");
+    const services = fakeServices({ llmSettings, stream });
     const { container } = render(<App services={services} />);
     await screen.findByRole("button", { name: "拍摄" });
     const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
@@ -470,7 +478,10 @@ describe("App flows", () => {
       options.onDelta("直接粘贴的图片也收到啦！");
       return { truncated: false };
     });
-    const services = fakeServices({ stream });
+    const db = new YachiyoDatabase(`app-flows-paste-${Date.now()}`);
+    const llmSettings = new LlmSettingsService(db);
+    await llmSettings.saveProvider("stepfun", "sk-test-valid-stepfun-key-123456", "step-3.7-flash");
+    const services = fakeServices({ llmSettings, stream });
     render(<App services={services} />);
     const textarea = await screen.findByPlaceholderText("什么都可以告诉我");
 
@@ -512,6 +523,18 @@ describe("App flows", () => {
     await user.click(screen.getByRole("button", { name: "菜单" }));
     await user.click(screen.getByRole("button", { name: "新建对话" }));
     await waitFor(() => expect(services.repository.conversations).toHaveLength(2));
+
+    // 此时存在第 2 个空会话，切换回第 1 个非空会话后再次触发新建对话，应直接复用已有的空会话而不变成 3 个会话
+    await user.click(screen.getByRole("button", { name: "菜单" }));
+    await user.click(screen.getByRole("button", { name: "历史记录" }));
+    const historyCheck = screen.getByRole("dialog", { name: "历史记录" });
+    const itemsCheck = within(historyCheck).getAllByRole("listitem");
+    await user.click(within(itemsCheck[1]!).getByRole("button", { name: /新的对话/ }));
+    await screen.findByText("第一段对话的内容");
+
+    await user.click(screen.getByRole("button", { name: "菜单" }));
+    await user.click(screen.getByRole("button", { name: "新建对话" }));
+    expect(services.repository.conversations).toHaveLength(2);
 
     await user.click(screen.getByRole("button", { name: "菜单" }));
     await user.click(screen.getByRole("button", { name: "历史记录" }));

@@ -27,9 +27,10 @@ interface YachiyoEnvironment {
   APP_MODE?: "live" | "mock";
   ACCESS_CODE_SHA256: string;
   SESSION_SIGNING_SECRET: string;
-  STEPFUN_API_KEY: string;
-  STEPFUN_BASE_URL: string;
-  STEPFUN_MODEL: string;
+  GLM_API_KEY: string;
+  GLM_BASE_URL: string;
+  GLM_MODEL: string;
+  STEPFUN_API_KEY?: string;
   DAILY_REQUEST_LIMIT: string;
   AUTH_ATTEMPT_LIMIT: string;
   RATE_LIMIT_KV: KVNamespace;

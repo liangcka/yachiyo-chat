@@ -105,7 +105,7 @@ describe("formatModelDisplayName", () => {
 
   it("formats Gemini models with capitalized first letter", () => {
     expect(formatModelDisplayName("gemini-3.8-flash")).toBe("Gemini-3.8-flash");
-    expect(formatModelDisplayName("gemini-3.7-flash")).toBe("Gemini-3.7-flash");
+    expect(formatModelDisplayName("gemini-3.5-flash-lite")).toBe("Gemini-3.5-flash-lite");
     expect(formatModelDisplayName("gemini-3.1-pro")).toBe("Gemini-3.1-pro");
   });
 

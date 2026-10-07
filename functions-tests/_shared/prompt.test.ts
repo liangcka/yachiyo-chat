@@ -272,4 +272,60 @@ describe("buildSystemPrompt", () => {
     const jaPromptWithoutBubble = buildSystemPrompt("ja-JP", "chat", { multiBubble: false });
     expect(jaPromptWithoutBubble).not.toContain("送信形式：日常のスマートフォンチャットです");
   });
+
+  it("reinforces naturalness and initiative rules at the tail of the runtime block", () => {
+    const zhPrompt = buildSystemPrompt("zh-CN");
+    expect(zhPrompt).toContain("真人质感与主动性：不复述彩叶的原话作开场");
+    expect(zhPrompt).toContain("安慰四段式");
+    expect(zhPrompt).toContain("每条最多一个");
+    expect(zhPrompt).toContain("理智正确但情感冷淡的回应一律视为失败");
+    // 关键质感约束位于记忆信任之后、硬性输出上限之前，利用近因权重压过被稀释的前置设定
+    expect(zhPrompt.indexOf("既定事实")).toBeLessThan(zhPrompt.indexOf("真人质感与主动性"));
+    expect(zhPrompt.indexOf("真人质感与主动性")).toBeLessThan(
+      zhPrompt.indexOf("最多200个Unicode字符"),
+    );
+
+    const jaPrompt = buildSystemPrompt("ja-JP");
+    expect(jaPrompt).toContain("人間らしい質感と主体性");
+    expect(jaPrompt).toContain("冷たい返答は失敗とみなす");
+  });
+
+  it("appends the DeepSeek vendor tightening block only for that provider", () => {
+    const zhPrompt = buildSystemPrompt("zh-CN", "chat", { provider: "deepseek" });
+    expect(zhPrompt).toContain("厂商适配（DeepSeek）");
+    expect(zhPrompt).toContain("这是手机即时消息，不是问答题");
+    expect(zhPrompt.indexOf("最多200个Unicode字符")).toBeLessThan(
+      zhPrompt.indexOf("厂商适配（DeepSeek）"),
+    );
+
+    const jaPrompt = buildSystemPrompt("ja-JP", "chat", { provider: "deepseek" });
+    expect(jaPrompt).toContain("ベンダー適応（DeepSeek）");
+
+    expect(buildSystemPrompt("zh-CN", "chat", { provider: "openai" })).not.toContain(
+      "厂商适配（DeepSeek）",
+    );
+    expect(buildSystemPrompt("zh-CN")).not.toContain("厂商适配（DeepSeek）");
+  });
+
+  it("keeps the summary prompt free of roleplay-oriented vendor tuning", () => {
+    const prompt = buildSystemPrompt("zh-CN", "summary", { provider: "deepseek" });
+    expect(prompt).toContain("对话记忆整理助手");
+    expect(prompt).not.toContain("厂商适配（DeepSeek）");
+    expect(prompt).not.toContain("真人质感与主动性");
+  });
+
+  it("injects the sticker catalog and sending rules into the runtime block", () => {
+    const zhPrompt = buildSystemPrompt("zh-CN");
+    expect(zhPrompt).toContain("表情贴图：你可以把角色表情贴图（自己、彩叶或二人同框）当作一条独立消息发送");
+    expect(zhPrompt).toContain("[sticker:smile]：穏やか・優しい微笑み・しっとりした甘え（映画風）");
+    expect(zhPrompt).toContain("严禁使用目录之外的 id");
+
+    const jaPrompt = buildSystemPrompt("ja-JP");
+    expect(jaPrompt).toContain("スタンプ：作品のスタンプ（自分、彩葉、または二人のツーショット）を1通の独立メッセージとして送れます");
+    expect(jaPrompt).toContain("一覧にない id の使用は厳禁");
+  });
+
+  it("keeps summary mode free of sticker instructions", () => {
+    expect(buildSystemPrompt("zh-CN", "summary")).not.toContain("表情贴图");
+  });
 });

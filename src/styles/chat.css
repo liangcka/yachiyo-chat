@@ -400,6 +400,14 @@
   margin-bottom: 0;
 }
 
+.message-bubble__sticker {
+  display: block;
+  width: min(10rem, 48vw);
+  height: auto;
+  object-fit: contain;
+  border-radius: 0.9rem;
+}
+
 .message-bubble__image--loading {
   min-height: 8rem;
   background: rgb(255 255 255 / 12%);
@@ -588,6 +596,10 @@
     box-shadow var(--motion-duration-slow) var(--motion-ease-standard),
     backdrop-filter var(--motion-duration-slow) var(--motion-ease-standard),
     -webkit-backdrop-filter var(--motion-duration-slow) var(--motion-ease-standard);
+}
+
+.keyboard-open .chat-bottom {
+  padding-bottom: 0.65rem;
 }
 
 .chat-bottom--collapsed {
@@ -2246,6 +2258,10 @@
 
 .composer__preview img,
 .message-list__item:nth-last-child(-n + 3) .message-bubble__image {
+  animation: motion-image-reveal var(--motion-duration-base) var(--motion-ease-enter) backwards;
+}
+
+.message-list__item:nth-last-child(-n + 3) .message-bubble__sticker {
   animation: motion-image-reveal var(--motion-duration-base) var(--motion-ease-enter) backwards;
 }
 

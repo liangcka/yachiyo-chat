@@ -4,8 +4,8 @@
   "compatibility_date": "2026-07-11",
   "pages_build_output_dir": "dist",
   "vars": {
-    "STEPFUN_BASE_URL": "https://api.stepfun.com/step_plan/v1",
-    "STEPFUN_MODEL": "step-3.7-flash",
+    "GLM_BASE_URL": "https://open.bigmodel.cn/api/paas/v4",
+    "GLM_MODEL": "glm-4.7-flash",
     "DAILY_REQUEST_LIMIT": "100",
     "AUTH_ATTEMPT_LIMIT": "10",
     "DSH_WEB_SEARCH_PROVIDER": "bing",

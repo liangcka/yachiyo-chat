@@ -196,22 +196,22 @@ npm run test:functions
 - 普通变量：
 
 ```text
-STEPFUN_BASE_URL=https://api.stepfun.com/step_plan/v1
-STEPFUN_MODEL=step-3.7-flash
+GLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+GLM_MODEL=glm-4.7-flash
 DAILY_REQUEST_LIMIT=100
 AUTH_ATTEMPT_LIMIT=10
 ```
 
 - Secrets：
-  - `STEPFUN_API_KEY`
+  - `GLM_API_KEY`
   - `ACCESS_CODE_SHA256`
   - `SESSION_SIGNING_SECRET`
 
-Production 和 Preview 都不要设置 `APP_MODE=mock`；应省略 `APP_MODE` 或设为 `live`。如 Preview 需要隔离配额或 StepFun 凭据，应为它绑定独立的 KV namespace 和 Secrets。
+Production 和 Preview 都不要设置 `APP_MODE=mock`；应省略 `APP_MODE` 或设为 `live`。如 Preview 需要隔离配额或 GLM 凭据，应为它绑定独立的 KV namespace 和 Secrets。
 
 ### 配额与边缘防护
 
-KV 额度是面向小范围受邀用户的尽力限制，不是严格计费边界；上线时还应在 Cloudflare 为 `/api/session` 与 `/api/chat` 配置边缘速率规则，并在 StepFun 控制台设置预算告警。绑定自定义域名后，可在确认所有子域都使用 HTTPS 的前提下启用 Cloudflare HSTS。
+KV 额度是面向小范围受邀用户的尽力限制，不是严格计费边界；上线时还应在 Cloudflare 为 `/api/session` 与 `/api/chat` 配置边缘速率规则，并在智谱 AI 控制台设置预算告警。绑定自定义域名后，可在确认所有子域都使用 HTTPS 的前提下启用 Cloudflare HSTS。
 
 不要把任何真实值写入 `.dev.vars.example`、Git、前端变量或 Cloudflare 普通变量。
 
@@ -256,15 +256,15 @@ try {
 [Convert]::ToBase64String($secretBytes)
 ```
 
-分别把摘要和签名密钥写入 `ACCESS_CODE_SHA256`、`SESSION_SIGNING_SECRET` Secret。访问码至少应包含 16 个随机字符，签名密钥不得与访问码或 StepFun Key 复用。
+分别把摘要和签名密钥写入 `ACCESS_CODE_SHA256`、`SESSION_SIGNING_SECRET` Secret。访问码至少应包含 16 个随机字符，签名密钥不得与访问码或 GLM Key 复用。
 
 ### 部署后检查
 
 1. 新设备无法跳过访问码门禁，错误码不会泄露内部信息。
 2. 中文和日文文字请求均能流式返回，角色为月见八千代且带括号动作。
-3. 相机/相册图片可预览、移除并获得基于图片的回答。
+3. 选用支持视觉的模型时，相机/相册图片可预览、移除并获得基于图片的回答。
 4. 停止按钮保留已生成内容；刷新后历史仍在当前设备。
-5. 每日额度耗尽时显示本地化提示且不继续调用 StepFun。
+5. 每日额度耗尽时显示本地化提示且不继续调用服务端 GLM。
 6. 离线时可以打开和阅读历史，但发送与拍摄均禁用；恢复网络后自动恢复。
 7. PWA 可以安装，更新只在用户确认后刷新。
 8. 浏览器控制台无异常，390×844 与桌面居中布局正常。

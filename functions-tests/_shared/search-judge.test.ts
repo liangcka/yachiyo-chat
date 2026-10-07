@@ -217,11 +217,11 @@ describe("judgeSearchNeed (gemini & claude adapters)", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      judgeSearchNeed(PROVIDERS.gemini, "g" + "a".repeat(39), "gemini-3.7-flash", [{ role: "user", text: "你好" }], undefined),
+      judgeSearchNeed(PROVIDERS.gemini, "g" + "a".repeat(39), "gemini-3.8-flash", [{ role: "user", text: "你好" }], undefined),
     ).resolves.toBe(false);
 
     const [url, init] = fetchMock.mock.calls[0] ?? [];
-    expect(url).toBe("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent");
+    expect(url).toBe("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent");
     const headers = (init?.headers ?? {}) as Record<string, string>;
     expect(headers.accept).toBe("application/json");
   });

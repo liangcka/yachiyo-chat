@@ -9,13 +9,12 @@ import {
   sessionFromRequest,
 } from "../_shared/session";
 import {
-  requestStepFun,
-  resolveStepFunConfiguration,
-} from "../_shared/stepfun";
+  requestGlm,
+  resolveGlmConfiguration,
+} from "../_shared/glm";
 import {
   mockChatResponse,
   proxyProviderStream,
-  proxyStepFunStream,
   type ClientStreamEvent,
 } from "../_shared/stream";
 import {
@@ -242,14 +241,17 @@ async function handleServerFallback(
   context: ChatContext,
   request: ClientChatRequest,
 ): Promise<Response> {
-  const providerConfiguration = resolveStepFunConfiguration(context.env);
+  const providerConfiguration = resolveGlmConfiguration(context.env);
   if (providerConfiguration === null) {
     return problemResponse("CONFIGURATION_ERROR", 503);
+  }
+  if (requestContainsImage(request)) {
+    return problemResponse("INVALID_REQUEST", 400);
   }
   const searchResults = await performWebSearchPipeline(request, {
     judge: (messages, signal) =>
       judgeSearchNeed(
-        getProvider("stepfun"),
+        getProvider("glm"),
         providerConfiguration.apiKey,
         providerConfiguration.model,
         messages,
@@ -261,7 +263,7 @@ async function handleServerFallback(
   const handle = prepareUpstreamFetch(context);
   let upstream: Response;
   try {
-    upstream = await requestStepFun(enrichRequest(request, searchResults), providerConfiguration, handle.signal);
+    upstream = await requestGlm(enrichRequest(request, searchResults), providerConfiguration, handle.signal);
   } catch {
     handle.cleanup();
     return handle.isTimedOut()
@@ -274,12 +276,16 @@ async function handleServerFallback(
     return problemResponse("PROVIDER_ERROR", 502);
   }
   const maxCharacters = request.mode === "summary" || request.webSearch === true ? 1000 : 200;
-  return proxyStepFunStream(upstream, {
-    abort: handle.abort,
-    clientSignal: context.request.signal,
-    initialEvents: initialSourcesEvents(searchResults),
-    maxCharacters,
-    onFinalize: handle.cleanup,
-    signal: handle.deadlineSignal,
-  });
+  return proxyProviderStream(
+    upstream,
+    {
+      abort: handle.abort,
+      clientSignal: context.request.signal,
+      initialEvents: initialSourcesEvents(searchResults),
+      maxCharacters,
+      onFinalize: handle.cleanup,
+      signal: handle.deadlineSignal,
+    },
+    getProvider("glm").extractDeltaText,
+  );
 }

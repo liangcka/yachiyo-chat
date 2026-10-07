@@ -56,6 +56,9 @@ function repositoryWith(
     setLocale: vi.fn(async () => undefined),
     replaceMessages: vi.fn(async () => undefined),
     deleteMessagesFrom: vi.fn(async () => undefined),
+    renameConversation: vi.fn(async () => undefined),
+    touchConversation: vi.fn(async () => undefined),
+    deleteConversation: vi.fn(async () => undefined),
     ...overrides,
   };
 }
@@ -174,6 +177,72 @@ describe("useChatController", () => {
 
     expect(repository.createConversation).toHaveBeenCalledTimes(1);
     expect(result.current.activeConversation?.id).toBe(recreated.id);
+  });
+
+  it("reuses existing empty conversation when creating a new conversation from another non-empty conversation", async () => {
+    const activeNonEmpty = { ...conversation, id: "active-non-empty", title: "活跃非空会话", updatedAt: 200 };
+    const existingEmpty = { ...conversation, id: "existing-empty", title: "新的对话", updatedAt: 100 };
+
+    const repository = repositoryWith({
+      createConversation: vi.fn(),
+      getConversation: vi.fn(async (id: string) => {
+        if (id === activeNonEmpty.id) return activeNonEmpty;
+        if (id === existingEmpty.id) return existingEmpty;
+        return undefined;
+      }),
+      listConversations: vi.fn(async () => [activeNonEmpty, existingEmpty]),
+      listMessages: vi.fn(async (id: string) => (id === activeNonEmpty.id ? [greeting] : [])),
+      touchConversation: vi.fn(async () => undefined),
+    });
+
+    const { result } = renderHook(() =>
+      useChatController({
+        repository,
+        streamChat: vi.fn<StreamChatFunction>(),
+      }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+    expect(result.current.activeConversation?.id).toBe(activeNonEmpty.id);
+    expect(result.current.messages).toHaveLength(1);
+
+    await act(async () => {
+      await result.current.newConversation();
+    });
+
+    expect(repository.createConversation).not.toHaveBeenCalled();
+    expect(repository.touchConversation).toHaveBeenCalledWith(existingEmpty.id, expect.any(Number));
+    expect(result.current.activeConversation?.id).toBe(existingEmpty.id);
+    expect(result.current.messages).toHaveLength(0);
+  });
+
+  it("cleans up redundant default empty conversations when reusing an existing empty conversation", async () => {
+    const activeNonEmpty = { ...conversation, id: "active-non-empty", title: "活跃非空会话", updatedAt: 300 };
+    const empty1 = { ...conversation, id: "empty-1", title: "新的对话", updatedAt: 200 };
+    const empty2 = { ...conversation, id: "empty-2", title: "新的对话", updatedAt: 100 };
+
+    const repository = repositoryWith({
+      createConversation: vi.fn(),
+      deleteConversation: vi.fn(async () => undefined),
+      listConversations: vi.fn(async () => [activeNonEmpty, empty1, empty2]),
+      listMessages: vi.fn(async (id: string) => (id === activeNonEmpty.id ? [greeting] : [])),
+      touchConversation: vi.fn(async () => undefined),
+    });
+
+    const { result } = renderHook(() =>
+      useChatController({
+        repository,
+        streamChat: vi.fn<StreamChatFunction>(),
+      }),
+    );
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    await act(async () => {
+      await result.current.newConversation();
+    });
+
+    expect(repository.createConversation).not.toHaveBeenCalled();
+    expect(result.current.activeConversation?.id).toBe(empty1.id);
+    expect(repository.deleteConversation).toHaveBeenCalledWith(empty2.id);
   });
 
   it("persists the user before streaming and completes the assistant message", async () => {

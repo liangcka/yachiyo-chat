@@ -1,5 +1,6 @@
 import { Send, Square, X } from "lucide-react";
 import {
+  useEffect,
   useRef,
   type ClipboardEvent,
   type DragEvent,
@@ -26,6 +27,7 @@ export interface ComposerProps {
   pendingImageDataUrl?: string;
   onRemoveImage?: () => void;
   onFocus?: () => void;
+  onBlur?: () => void;
   onImage?: (image: ProcessedImage) => void;
   onError?: (code: ImageProcessingErrorCode) => void;
   processImage?: (file: File) => Promise<ProcessedImage>;
@@ -40,6 +42,7 @@ export function Composer({
   onChange,
   onError,
   onFocus,
+  onBlur,
   onImage,
   onImageDisabled,
   onRemoveImage,
@@ -81,6 +84,19 @@ export function Composer({
   const handleFocus = () => {
     onFocus?.();
   };
+
+  const handleBlur = () => {
+    onBlur?.();
+  };
+
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    if (typeof CSS === "undefined" || !CSS.supports?.("field-sizing", "content")) {
+      el.style.height = "auto";
+      el.style.height = `${Math.min(el.scrollHeight, 112)}px`;
+    }
+  }, [value]);
 
   const handleImageFile = async (file: File) => {
     if (unavailable || streaming) return;
@@ -181,6 +197,7 @@ export function Composer({
           maxLength={4000}
           onChange={(event) => onChange(event.currentTarget.value)}
           onFocus={handleFocus}
+          onBlur={handleBlur}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           placeholder={phase === "compressing" ? copy.compressingContext : copy.inputHint}

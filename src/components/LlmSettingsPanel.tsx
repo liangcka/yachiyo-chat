@@ -69,7 +69,7 @@ export function LlmSettingsPanel({
       const entry = entries.find((item) => item.provider === newProvider);
       const meta = getProviderMeta(newProvider);
       setApiKeyInput(entry?.apiKey ?? "");
-      setModelInput(entry?.model ?? meta.defaultModel);
+      setModelInput(entry && meta.models.includes(entry.model) ? entry.model : meta.defaultModel);
       setFeedback(undefined);
       setShowKey(false);
       setProviderOpen(false);
@@ -85,7 +85,7 @@ export function LlmSettingsPanel({
     const entry = entries.find((item) => item.provider === selectedProvider);
     const meta = getProviderMeta(selectedProvider);
     setApiKeyInput(entry?.apiKey ?? "");
-    setModelInput(entry?.model ?? meta.defaultModel);
+    setModelInput(entry && meta.models.includes(entry.model) ? entry.model : meta.defaultModel);
     setFeedback(undefined);
   }
 

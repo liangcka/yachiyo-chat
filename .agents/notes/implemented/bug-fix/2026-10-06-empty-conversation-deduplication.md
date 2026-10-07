@@ -1,27 +1,35 @@
-# Agent Note: 空会话新建去重与复用机制 (Empty Conversation Deduplication)
+# Agent Note: 空会话全局去重、跨会话复用与垃圾清理机制 (Global Empty Conversation Deduplication & Reuse)
 
 Status: implemented
 
 ## Problem
-在原有的会话控制器实现中，`newConversation` 无论当前会话状态如何，均会无条件调用 `repository.createConversation` 创建并持久化新会话。当用户处于刚创建且未发送任何消息的空对话中时，若用户连续触发“新建对话”操作（如双击、重复点击菜单项或多端快速交互），系统会持续向 IndexedDB 添加无内容的空对话记录，造成会话历史无限繁殖，并极易触碰 `MAX_CONVERSATIONS` (30条) 上限抛出 `ConversationLimitError`。
+在原有的会话控制器实现中存在空对话繁殖与重复缺陷：
+1. **当前空会话重复新建**：当用户处于刚创建且未发送任何消息的空对话中时，再次触发“新建对话”操作会持续向数据库插入无内容的空对话记录。
+2. **跨会话分支产生多个空会话**：当存储中已经存在一个未使用的空对话时，用户切换至其他非空对话并在该对话中点击“新建对话”，系统会再次无条件调用 `repository.createConversation`，导致历史记录中出现两个甚至多个空对话。
+3. **配额挤占与体验退化**：空会话不断堆积不仅破坏了侧边栏整洁度，还会迅速挤占 `MAX_CONVERSATIONS` (30条) 会话配额。
 
 ## Decision
-在 `useChatController` 的 `newConversation` 状态转移逻辑中引入空会话检测与复用门禁：
-1. **空会话判定**：检查当前活跃会话 (`activeConversation`) 且满足 `messages.length === 0` 与 `!hasMoreHistory`。
-2. **持久化有效性核验**：通过 `repository.getConversation(active.id)` 核验该空会话在底层存储中真实存在（防御删除/清空全部数据后的悬空引用）。
-3. **原地复用与状态清理**：当处于有效空会话时，不再向数据库插入新记录，直接保持在当前活跃会话；同时清理当前未决暂存状态（`pendingImage`）与暂态错误码（`errorCode`）。
-4. **非空会话标准分支**：当当前会话已有消息（或底层会话已被删除）时，正常执行 `createConversation` 开启新会话分支。
+在 `useChatController` 的 `newConversation` 状态机中建立**“系统内至多只存在一个未使用空对话”**的全局不变量机制：
+1. **当前空会话原地复用**：若当前活跃会话 (`activeConversation`) 本身即为空（`messages.length === 0 && !hasMoreHistory`）且在存储中依然有效，直接保持在当前会话，清空输入框与暂存状态。
+2. **跨会话检索与空会话复用**：若当前活跃会话为非空会话，但在会话列表中已经存在未使用的默认空会话（`messages.length === 0` 且标题为“新的对话”或“新しい会話”）：
+   - 提取首个空会话作为复用目标；
+   - 通过 `repository.touchConversation` 将该空会话的 `updatedAt` 更新为当前时间，使其在历史记录中置顶；
+   - 同步语言配置与标题（`setConversationLocale` 与 `renameConversation`），无缝切换到该空会话；
+   - 阻止向存储插入任何多余的空会话记录。
+3. **自动清理历史冗余默认空会话**：若在检索过程中发现存在多个历史遗留的无消息默认空会话，顺带调用 `repository.deleteConversation` 清除多余记录，自动净化历史数据。
+4. **底层契约与存储扩展**：在 `ConversationRepository` 及 `MemoryRepository` 中扩展 `touchConversation` 方法；在 `ChatRepository` 接口中声明可选辅助方法（`touchConversation?`、`renameConversation?`、`deleteConversation?`），保持严格类型与向前兼容。
+5. **正常分支兜底**：仅当存储中完全不存在任何可用空会话时，才真正执行 `createConversation` 创建新会话容器。
 
 ## Alternatives considered
-- **在 UI 层（`handleNewChat`）做节流/防抖**：仅能在界面单一入口降低快速点击概率，无法约束其它调用路径（快捷键、API 调用等），且无法解决“用户过了一段时间未输入再次新建”时的重复建表问题。
-- **在 IndexedDB 层自动清理未发送消息的空对话**：引入异步级联删除或后台清理增加了并发写入竞态风险，且破坏了 IndexedDB 操作的单向确定性。
+- **在 UI 层（`handleNewChat`）做会话 ID 路由**：UI 层无法感知多端同步或跨组件调用的生命周期，将空会话状态机收敛在 `useChatController` 核心控制器内能够保证所有调用路径（菜单、快捷键、API）的一致性。
+- **允许跨会话保留多个空会话**：不仅违背用户的直觉与整洁度预期，还会导致侧边栏充斥无意义的“新的对话”项。
 
 ## Consequences
-- **正向收益**：彻底杜绝未输入内容时新建对话无限繁殖空记录的问题；保护了 30 条会话配额；提升了连续点击时的响应速度（零存储写入与零重渲染）。
-- **注意事项**：在编写涉及会话创建的集成测试时，若需验证多会话场景，需确保当前会话具有消息内容后再触发新建分支。
+- **正向收益**：彻底解决当前会话与跨会话点击新建时空对话无限繁殖的 bug；全局保证最多仅保留 1 个默认空对话；自动治愈历史遗留的多余空对话；保护 30 条会话配额。
+- **注意事项**：若用户显式重命名了某空会话（如自定义为“备忘录”），系统会将其视作用户的专有专题资产，不会作为默认空会话被强制占用或重命名。
 
 ## Verification
-- `npm run test:unit`（涵盖控制器空会话复用测试与完整应用端到端交互测试，25 个测试文件 251 项测试全部通过）
-- `npm run test:functions`（22 个测试文件 276 项测试全部通过）
-- `npm run typecheck`（覆盖应用、Node 脚本及 Functions 三套 TypeScript 配置，0 错误）
+- `npm run test:unit`（包含跨会话空会话复用、冗余清理及完整端到端流测试，25 个测试套件 254 项测试全部通过）
+- `npm run test:functions`（22 个测试套件 276 项测试全部通过）
+- `npm run typecheck`（覆盖全部 tsconfig，0 错误）
 - `npm run lint`（ESLint 规则 0 告警）

@@ -67,6 +67,8 @@ const openaiCompatProviders = {
     supportsImage: true,
     imageModels: ["deepseek-flash"],
     deepseekThinking: true,
+    defaultTemperature: 1.0,
+    defaultFrequencyPenalty: 0.3,
   },
   glm: {
     endpoint: "https://open.bigmodel.cn/api/paas/v4/chat/completions",

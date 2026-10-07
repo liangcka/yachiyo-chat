@@ -54,6 +54,25 @@ describe("PROVIDERS registry", () => {
       expect(provider.allowedModels).toContain(provider.defaultModel);
     }
   });
+
+  it("wires DeepSeek roleplay sampling and the lowest thinking tier into the real request body", () => {
+    const built = PROVIDERS.deepseek.buildRequest({
+      request: { locale: "zh-CN", messages: [{ role: "user", text: "今天有点累" }] },
+      apiKey: "sk-" + "d".repeat(40),
+      model: "deepseek-flash",
+    });
+    const body = JSON.parse(built.body) as {
+      reasoning_effort?: string;
+      temperature?: number;
+      frequency_penalty?: number;
+      messages: Array<{ role: string; content: string }>;
+    };
+
+    expect(body.reasoning_effort).toBe("low");
+    expect(body.temperature).toBe(1.0);
+    expect(body.frequency_penalty).toBe(0.3);
+    expect(body.messages[0]?.content).toContain("厂商适配（DeepSeek）");
+  });
 });
 
 describe("isProviderId", () => {

@@ -151,6 +151,32 @@ export function ConversationView({
     previousMessagesRef.current = messages;
   }, [messages, onScrolledFromTopChange, scrollToBottom, updateCollapseState]);
 
+  // 视口尺寸动态监听：当软键盘弹起/收起导致聊天容器高度剧烈变化时，保持消息贴底防遮挡
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || typeof ResizeObserver === "undefined") return;
+
+    let previousHeight = container.clientHeight;
+
+    const observer = new ResizeObserver(() => {
+      const currentHeight = container.clientHeight;
+      const isInputActive =
+        typeof document !== "undefined" &&
+        document.activeElement instanceof HTMLElement &&
+        (document.activeElement.tagName === "TEXTAREA" || document.activeElement.tagName === "INPUT");
+
+      if (currentHeight !== previousHeight) {
+        if (followingRef.current || isInputActive) {
+          scrollToBottom(false);
+        }
+        previousHeight = currentHeight;
+      }
+    });
+
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [scrollToBottom]);
+
   let lastUserMessageIndex = -1;
   let lastAssistantMessageIndex = -1;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -217,6 +243,22 @@ export function ConversationView({
       </li>
     ) : null;
 
+  const dismissKeyboardIfActive = useCallback(() => {
+    if (typeof window === "undefined" || typeof document === "undefined") return;
+    const isTouchOrKeyboard =
+      window.matchMedia?.("(pointer: coarse)").matches ||
+      document.documentElement.classList.contains("keyboard-open");
+    if (!isTouchOrKeyboard) return;
+
+    const activeEl = document.activeElement;
+    if (
+      activeEl instanceof HTMLElement &&
+      (activeEl.tagName === "TEXTAREA" || activeEl.tagName === "INPUT")
+    ) {
+      activeEl.blur();
+    }
+  }, []);
+
   const handleScroll = useCallback(
     (event: React.UIEvent<HTMLElement>) => {
       const target = event.currentTarget;
@@ -235,6 +277,10 @@ export function ConversationView({
       const delta = currentScrollTop - lastScrollTopRef.current;
       const distanceFromBottom = maxScroll - currentScrollTop;
 
+      if (Math.abs(delta) >= SCROLL_DELTA_THRESHOLD) {
+        dismissKeyboardIfActive();
+      }
+
       if (delta <= -SCROLL_DELTA_THRESHOLD) {
         // 用户往上滑（向上翻看历史消息） -> 收缩四格小组件，浮现毛玻璃
         updateCollapseState(true);
@@ -250,7 +296,7 @@ export function ConversationView({
         updateCollapseState(false);
       }
     },
-    [onScrolledFromTopChange, updateCollapseState],
+    [dismissKeyboardIfActive, onScrolledFromTopChange, updateCollapseState],
   );
 
   const handleTouchStart = useCallback((event: React.TouchEvent<HTMLElement>) => {
@@ -268,6 +314,7 @@ export function ConversationView({
       const maxScroll = target.scrollHeight - target.clientHeight;
 
       if (maxScroll > 0 && Math.abs(deltaY) >= 12) {
+        dismissKeyboardIfActive();
         if (deltaY < 0) {
           // 手势上滑（向上翻阅内容） -> 收缩四格
           updateCollapseState(true);
@@ -278,12 +325,31 @@ export function ConversationView({
         touchStartYRef.current = currentY;
       }
     },
-    [updateCollapseState],
+    [dismissKeyboardIfActive, updateCollapseState],
   );
 
   const handleTouchEnd = useCallback(() => {
     touchStartYRef.current = null;
   }, []);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleContainerClick = (event: MouseEvent) => {
+      if (
+        event.target === container ||
+        (event.target instanceof HTMLElement && event.target.classList.contains("message-list"))
+      ) {
+        dismissKeyboardIfActive();
+      }
+    };
+
+    container.addEventListener("click", handleContainerClick);
+    return () => {
+      container.removeEventListener("click", handleContainerClick);
+    };
+  }, [dismissKeyboardIfActive]);
 
   const virtualItems = virtualizer.getVirtualItems();
 

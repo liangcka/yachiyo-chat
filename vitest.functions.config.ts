@@ -12,9 +12,9 @@ const bindings = {
     .update("correct horse moonlight")
     .digest("hex"),
   SESSION_SIGNING_SECRET: "test-only-signing-secret-with-32-bytes",
-  STEPFUN_API_KEY: "test-only-never-live",
-  STEPFUN_BASE_URL: "https://api.stepfun.com/step_plan/v1",
-  STEPFUN_MODEL: "step-3.7-flash",
+  GLM_API_KEY: "test-only-never-live",
+  GLM_BASE_URL: "https://open.bigmodel.cn/api/paas/v4",
+  GLM_MODEL: "glm-4.7-flash",
   DAILY_REQUEST_LIMIT: "100",
   AUTH_ATTEMPT_LIMIT: "10",
 };

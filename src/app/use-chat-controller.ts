@@ -45,6 +45,9 @@ export interface ChatRepository {
   setLocale(locale: Locale): Promise<void>;
   getLocale(): Promise<Locale>;
   setConversationLocale(id: string, locale: Locale): Promise<void>;
+  renameConversation?(id: string, title: string): Promise<void>;
+  touchConversation?(id: string, now?: number): Promise<void>;
+  deleteConversation?(id: string): Promise<void>;
 }
 
 export type StreamChatFunction = (
@@ -683,8 +686,8 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       pendingImage?: StoredImage,
     ): Promise<void> => {
       const activeConfig = activeLlmConfigRef.current;
-      const currentProvider = activeConfig?.provider ?? "stepfun";
-      const currentModel = activeConfig?.model ?? "step-3.7-flash";
+      const currentProvider = activeConfig?.provider ?? "glm";
+      const currentModel = activeConfig?.model ?? "glm-4.7-flash";
       const assistant: ChatMessage = {
         conversationId: history.at(-1)?.conversationId ?? "",
         createdAt: nextTimestamp(),
@@ -1275,14 +1278,18 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
 
   const newConversation = useCallback(async (): Promise<void> => {
     await stopAndWait();
+    const repository = servicesRef.current.repository;
     const currentActive = stateRef.current.activeConversation;
+    const currentLocale = stateRef.current.locale;
+
+    // 1. 若当前活跃会话本身就是空会话且底层存储依然存在，直接停留在当前会话
     if (
       currentActive !== undefined &&
       stateRef.current.messages.length === 0 &&
       !stateRef.current.hasMoreHistory
     ) {
       try {
-        const existing = await servicesRef.current.repository.getConversation(currentActive.id);
+        const existing = await repository.getConversation(currentActive.id);
         if (existing !== undefined) {
           if (stateRef.current.pendingImage !== undefined) {
             emit({ type: "pending-image-changed", image: undefined });
@@ -1293,11 +1300,67 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
           return;
         }
       } catch {
-        // 存储查询异常时降级走新建路径
+        // 存储查询异常时降级走后续流程
       }
     }
+
+    // 2. 若当前会话非空，检查存储中是否已有其他未使用的默认空会话（避免产生多个空会话）
     try {
-      const loaded = await createConversation(stateRef.current.locale);
+      const conversations = await repository.listConversations();
+      let targetEmptyConversation: Conversation | undefined;
+
+      for (const conversation of conversations) {
+        if (conversation.id === currentActive?.id) continue;
+        const messages = await repository.listMessages(conversation.id, { limit: 1 });
+        if (
+          messages.length === 0 &&
+          (conversation.title === "新的对话" || conversation.title === "新しい会話")
+        ) {
+          if (targetEmptyConversation === undefined) {
+            targetEmptyConversation = conversation;
+          } else if (repository.deleteConversation !== undefined) {
+            // 清理多余的历史遗留默认空会话
+            await repository.deleteConversation(conversation.id).catch(() => undefined);
+          }
+        }
+      }
+
+      if (targetEmptyConversation !== undefined) {
+        const now = nextTimestamp();
+        const expectedTitle = currentLocale === "ja-JP" ? "新しい会話" : "新的对话";
+        await repository.touchConversation?.(targetEmptyConversation.id, now);
+        if (targetEmptyConversation.locale !== currentLocale) {
+          await repository.setConversationLocale(targetEmptyConversation.id, currentLocale);
+        }
+        if (targetEmptyConversation.title !== expectedTitle) {
+          await repository.renameConversation?.(targetEmptyConversation.id, expectedTitle);
+        }
+        await repository.setLocale(currentLocale);
+        emit({
+          conversation: {
+            ...targetEmptyConversation,
+            locale: currentLocale,
+            title: expectedTitle,
+            updatedAt: now,
+          },
+          messages: [],
+          type: "conversation-selected",
+        });
+        if (stateRef.current.pendingImage !== undefined) {
+          emit({ type: "pending-image-changed", image: undefined });
+        }
+        if (stateRef.current.errorCode !== undefined) {
+          emit({ type: "clear-error" });
+        }
+        return;
+      }
+    } catch {
+      // 存储查询异常时降级走标准创建路径
+    }
+
+    // 3. 存储中不存在任何空会话，正常创建新的会话
+    try {
+      const loaded = await createConversation(currentLocale);
       emit({
         conversation: loaded.conversation,
         messages: loaded.messages,
@@ -1307,7 +1370,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     } catch {
       emit({ errorCode: "CONVERSATION_LIMIT", type: "load-failed" });
     }
-  }, [createConversation, emit, stopAndWait]);
+  }, [createConversation, emit, nextTimestamp, stopAndWait]);
 
   const selectConversation = useCallback(
     async (id: string): Promise<void> => {
