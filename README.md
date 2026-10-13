@@ -46,7 +46,7 @@ Yachiyo Chat 是一个手机优先的 AI 角色扮演聊天应用，以 Cloudfla
 
 ### 多厂商 LLM 设置
 
-在 LLM 设置面板中激活个人 API Key 后，聊天请求将直接调用所选厂商并产生对应用量；未激活时走服务端备用凭据（仅限受邀访问场景）。
+智谱 GLM 推荐使用 charGLM-4，需配置个人 API Key。GLM-4.7-Flash 无需填写 API Key，保存并设为当前后直接使用服务端凭据；未激活个人配置时也使用该默认服务（仅限受邀访问场景）。其他模型在 LLM 设置面板中激活个人 API Key 后，按所选厂商和模型产生对应用量。
 
 | 分组 | 厂商 | 视觉模型 |
 | ---- | ---- | -------- |
@@ -57,7 +57,7 @@ Yachiyo Chat 是一个手机优先的 AI 角色扮演聊天应用，以 Cloudfla
 | 国际 | Anthropic (Claude) | 支持 |
 | 国际 | Google (Gemini) | 支持 |
 
-StepFun 选项使用 Step Plan 专用 API，请填写 Step Plan Key；其余厂商请在对应控制台获取 API Key。
+StepFun 选项使用 Step Plan 专用 API，请填写 Step Plan Key；除服务端提供的 GLM-4.7-Flash 外，其余模型请在对应控制台获取 API Key。
 
 ### 技能系统
 
@@ -140,7 +140,7 @@ npm run dev:mock
 
 ## Android 原生应用与 GitHub 热更新
 
-项目通过 Capacitor 8 提供 Android APK。首次使用热更新需覆盖安装支持热更新的 APK；当前原生基线为 [Android v0.1.13](https://github.com/liangcka/yachiyo-chat/releases/tag/v0.1.13)。保持应用标识与签名一致即可保留现有聊天、记忆和设置。各次 OTA 发布说明会从 `mobile-release.json` 的 `nativeVersion` 生成所需 APK 的下载链接，原生基线升级后以对应发布说明为准。
+项目通过 Capacitor 8 提供 Android APK。首次使用热更新需覆盖安装支持热更新的 APK；当前原生基线为 [Android v0.1.14](https://github.com/liangcka/yachiyo-chat/releases/tag/v0.1.14)。保持应用标识与签名一致即可保留现有聊天、记忆和设置。各次 OTA 发布说明会从 `mobile-release.json` 的 `nativeVersion` 生成所需 APK 的下载链接，原生基线升级后以对应发布说明为准。
 
 ```powershell
 npm run mob:sync    # 构建前端并同步到 Android 工程

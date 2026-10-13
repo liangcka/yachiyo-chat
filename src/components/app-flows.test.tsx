@@ -445,6 +445,119 @@ describe("App flows", () => {
     }
   });
 
+  it.each([
+    { label: "未保存 Key", apiKey: "" },
+    { label: "保留历史 Key", apiKey: "sk-glm-history-key-abcdefghijklmnopqrstuvwxyz" },
+  ])("GLM-4.7-Flash 在 $label 时聊天和自动整理都使用服务端配置", async ({ apiKey }) => {
+    const user = userEvent.setup();
+    const db = new YachiyoDatabase(`yachiyo-app-server-glm-${crypto.randomUUID()}`);
+    const llmSettings = new LlmSettingsService(db);
+    await llmSettings.saveProvider("glm", apiKey, "glm-4.7-flash");
+    const repository = Object.assign(new MemoryRepository(), {
+      applyConversationMetadata: vi.fn<NonNullable<AppRepository["applyConversationMetadata"]>>(
+        async () => ({}),
+      ),
+    });
+    const stream = vi.fn<StreamChatFunction>(async (request, options) => {
+      options.onDelta(request.mode === "metadata" ? '{"title":"草莓","memory":null}' : "记住啦。");
+      return { truncated: false };
+    });
+    const view = render(<App services={fakeServices({ llmSettings, repository, stream })} />);
+
+    try {
+      const composer = await screen.findByPlaceholderText("什么都可以告诉我");
+      expect(screen.getByRole("button", { name: "拍摄" })).toBeDisabled();
+      await user.type(composer, "我喜欢草莓");
+      await user.click(screen.getByRole("button", { name: "发送" }));
+
+      await waitFor(() => expect(stream.mock.calls.some(([request]) => request.mode === "metadata")).toBe(true));
+      expect(stream.mock.calls).toHaveLength(2);
+      for (const [request] of stream.mock.calls) {
+        expect(request).not.toHaveProperty("provider");
+        expect(request).not.toHaveProperty("apiKey");
+        expect(request).not.toHaveProperty("model");
+      }
+    } finally {
+      view.unmount();
+      db.close();
+      await db.delete();
+    }
+  });
+
+  it("charGLM-4 聊天和自动整理保留用户的 Key 与模型", async () => {
+    const user = userEvent.setup();
+    const db = new YachiyoDatabase(`yachiyo-app-charglm-${crypto.randomUUID()}`);
+    const llmSettings = new LlmSettingsService(db);
+    const apiKey = "sk-charglm-user-key-abcdefghijklmnopqrstuvwxyz";
+    await llmSettings.saveProvider("glm", apiKey, "charglm-4");
+    const repository = Object.assign(new MemoryRepository(), {
+      applyConversationMetadata: vi.fn<NonNullable<AppRepository["applyConversationMetadata"]>>(
+        async () => ({}),
+      ),
+    });
+    const stream = vi.fn<StreamChatFunction>(async (request, options) => {
+      options.onDelta(request.mode === "metadata" ? '{"title":"草莓","memory":null}' : "记住啦。");
+      return { truncated: false };
+    });
+    const view = render(<App services={fakeServices({ llmSettings, repository, stream })} />);
+
+    try {
+      const composer = await screen.findByPlaceholderText("什么都可以告诉我");
+      await user.type(composer, "我喜欢草莓");
+      await user.click(screen.getByRole("button", { name: "发送" }));
+
+      await waitFor(() => expect(stream.mock.calls.some(([request]) => request.mode === "metadata")).toBe(true));
+      expect(stream.mock.calls).toHaveLength(2);
+      for (const [request] of stream.mock.calls) {
+        expect(request).toMatchObject({ provider: "glm", apiKey, model: "charglm-4" });
+      }
+    } finally {
+      view.unmount();
+      db.close();
+      await db.delete();
+    }
+  });
+
+  it("从其他厂商切换到已保存的无 Key GLM-4.7-Flash 后使用服务端配置", async () => {
+    const user = userEvent.setup();
+    const copy = copyFor("zh-CN");
+    const db = new YachiyoDatabase(`yachiyo-app-glm-switch-${crypto.randomUUID()}`);
+    const llmSettings = new LlmSettingsService(db);
+    await llmSettings.saveProvider("stepfun", "sk-step-user-key-abcdefghijklmnopqrstuvwxyz", "step-3.7-flash");
+    await llmSettings.saveProvider("glm", "", "glm-4.7-flash");
+    const stream = vi.fn<StreamChatFunction>(async (_request, options) => {
+      options.onDelta("服务端模型的回复");
+      return { truncated: false };
+    });
+    const view = render(<App services={fakeServices({ llmSettings, stream })} />);
+
+    try {
+      const composer = await screen.findByPlaceholderText("什么都可以告诉我");
+      expect(screen.getByRole("button", { name: "拍摄" })).toBeEnabled();
+      await user.click(screen.getByRole("button", { name: "菜单" }));
+      await user.click(screen.getByRole("button", { name: copy.allSettings }));
+      const settings = await screen.findByRole("dialog", { name: copy.allSettings });
+      await user.selectOptions(within(settings).getByLabelText(copy.llmProvider), "glm");
+      await user.click(within(settings).getByRole("button", { name: copy.llmActivate }));
+      await waitFor(async () => expect(await llmSettings.getActiveProvider()).toBe("glm"));
+      await user.click(within(settings).getByRole("button", { name: copy.closeMenu }));
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: copy.allSettings })).not.toBeInTheDocument());
+      expect(screen.getByRole("button", { name: "拍摄" })).toBeDisabled();
+      await user.type(composer, "切换后继续聊");
+      await user.click(screen.getByRole("button", { name: "发送" }));
+
+      await waitFor(() => expect(stream).toHaveBeenCalledOnce());
+      const request = stream.mock.calls[0]?.[0];
+      expect(request).not.toHaveProperty("provider");
+      expect(request).not.toHaveProperty("apiKey");
+      expect(request).not.toHaveProperty("model");
+    } finally {
+      view.unmount();
+      db.close();
+      await db.delete();
+    }
+  });
+
   it("stops an active stream while retaining its partial response", async () => {
     const user = userEvent.setup();
     const stream = vi.fn<StreamChatFunction>(async (_request, options) => {

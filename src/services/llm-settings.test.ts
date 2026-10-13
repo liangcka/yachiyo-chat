@@ -65,10 +65,7 @@ describe("LlmSettingsService", () => {
       const record = await service.saveProvider("glm", VALID_KEY, model);
 
       expect(record.model).toBe("glm-4.7-flash");
-      expect(await service.getActiveConfig()).toMatchObject({
-        provider: "glm",
-        model: "glm-4.7-flash",
-      });
+      expect(await service.getActiveConfig()).toBeUndefined();
     },
   );
 
@@ -76,6 +73,14 @@ describe("LlmSettingsService", () => {
     await service.saveProvider("glm", VALID_KEY, "charglm-4");
 
     expect(await service.getActiveConfig()).toMatchObject({ model: "charglm-4" });
+  });
+
+  it.each(["", VALID_KEY])("GLM-4.7-Flash 始终使用服务端，保留本地配置和个人 Key（%s）", async (apiKey) => {
+    await service.saveProvider("glm", apiKey, "glm-4.7-flash");
+
+    expect(await service.getActiveProvider()).toBe("glm");
+    expect(await service.get("glm")).toMatchObject({ apiKey, model: "glm-4.7-flash" });
+    expect(await service.getActiveConfig()).toBeUndefined();
   });
 
   it.each(["glm-4.6", "glm-4.6v-flash"])(

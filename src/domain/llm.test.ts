@@ -45,9 +45,9 @@ describe("PROVIDER_METADATA", () => {
     }
   });
 
-  it("默认推荐免费的 GLM-4.7-Flash，并移除 GLM-4.6 预设", () => {
+  it("推荐 charGLM-4，保留免费的 GLM-4.7-Flash 默认服务", () => {
     expect(PROVIDER_METADATA.glm.defaultModel).toBe("glm-4.7-flash");
-    expect(PROVIDER_METADATA.glm.recommendedModel).toBe("glm-4.7-flash");
+    expect(PROVIDER_METADATA.glm.recommendedModel).toBe("charglm-4");
     expect(PROVIDER_METADATA.glm.freeModels).toContain("glm-4.7-flash");
     expect(PROVIDER_METADATA.glm.models).not.toContain("glm-4.6");
     expect(PROVIDER_METADATA.glm.models).not.toContain("glm-4.6v-flash");

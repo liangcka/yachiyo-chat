@@ -84,6 +84,7 @@ export interface UiCopy {
   readonly llmApiKey: string;
   readonly llmModel: string;
   readonly llmApiKeyHint: (hint: string) => string;
+  readonly llmServerManagedHint: string;
   readonly llmNoImageSupport: string;
   readonly llmModelNoImageSupport: string;
   readonly llmRecommended: string;
@@ -266,6 +267,7 @@ const chinese = Object.freeze({
   llmApiKey: "API Key",
   llmModel: "模型",
   llmApiKeyHint: (hint) => hint,
+  llmServerManagedHint: "使用服务端 GLM-4.7-Flash，无需填写 API Key。",
   llmNoImageSupport: "该厂商暂不支持图片输入",
   llmModelNoImageSupport: "当前模型不支持图片输入，可选择带「识图」标签的模型。",
   llmRecommended: "推荐",
@@ -449,6 +451,7 @@ const japanese = Object.freeze({
   llmApiKey: "API Key",
   llmModel: "モデル",
   llmApiKeyHint: (hint) => hint,
+  llmServerManagedHint: "サーバー側の GLM-4.7-Flash を使用するため、API Key の入力は不要です。",
   llmNoImageSupport: "このプロバイダは画像入力に対応していません",
   llmModelNoImageSupport: "選択中のモデルはテキスト専用です（画像認識には「識図」タグ付きのモデルを選択してください）",
   llmRecommended: "おすすめ",

@@ -6,6 +6,7 @@ import {
   PROVIDER_METADATA,
   getProviderMeta,
   isProviderId,
+  isServerManagedModel,
   isValidApiKey,
 } from "../domain/llm";
 
@@ -17,7 +18,7 @@ const ACTIVE_PROVIDER_KEY = "activeProvider" as const;
  * 设计：
  * - llmSettings 表按 provider 主键存储每家厂商的 apiKey/model（切换厂商时保留各自的 Key）。
  * - settings 表的 activeProvider 项指向当前激活的厂商。
- * - 未配置激活厂商或激活厂商的 Key 无效时，getActiveConfig 返回 undefined，
+ * - 未配置激活厂商、选择服务端内置模型或激活厂商的 Key 无效时，getActiveConfig 返回 undefined，
  *   调用方据此走服务端 fallback。
  */
 export class LlmSettingsService {
@@ -60,13 +61,14 @@ export class LlmSettingsService {
   }
 
   /**
-   * 返回当前激活厂商的完整配置；若未激活或 Key 无效则返回 undefined。
+   * 返回当前激活的个人配置；服务端内置模型、未激活或 Key 无效时返回 undefined。
    */
   async getActiveConfig(): Promise<ActiveLlmConfig | undefined> {
     const provider = await this.getActiveProvider();
     if (provider === undefined) return undefined;
     const record = await this.db.llmSettings.get(provider);
     if (record === undefined) return undefined;
+    if (isServerManagedModel(record.provider, record.model)) return undefined;
     if (!isValidApiKey(record.apiKey)) return undefined;
     return {
       provider: record.provider,

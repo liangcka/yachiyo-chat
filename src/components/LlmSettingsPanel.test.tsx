@@ -62,21 +62,56 @@ describe("LlmSettingsPanel", () => {
     expect(screen.getByLabelText("厂商")).toHaveValue("claude");
   });
 
-  it("disables save while the key is empty", () => {
+  it("charGLM 需要有效的个人 API Key", async () => {
+    const user = userEvent.setup();
     mount();
+    await user.selectOptions(screen.getByLabelText("模型"), "charglm-4");
+    expect(screen.getByLabelText("API Key")).toHaveValue("");
     expect(screen.getByRole("button", { name: "保存" })).toBeDisabled();
   });
 
-  it("enables save and calls onSave with provider, key, and default model", async () => {
+  it("GLM-4.7-Flash 隐藏 Key 输入并允许直接保存", async () => {
     const user = userEvent.setup();
     const onSave = vi.fn(async () => undefined);
     mount({ onSave });
 
+    expect(screen.queryByLabelText("API Key")).not.toBeInTheDocument();
+    expect(screen.getByText("使用服务端 GLM-4.7-Flash，无需填写 API Key。")).toBeVisible();
+    expect(screen.getByRole("button", { name: "保存" })).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "保存" }));
+    expect(onSave).toHaveBeenCalledWith("glm", "", "glm-4.7-flash");
+  });
+
+  it("charGLM 使用有效 Key 保存", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn(async () => undefined);
+    mount({ onSave });
+
+    await user.selectOptions(screen.getByLabelText("模型"), "charglm-4");
     await user.type(screen.getByPlaceholderText("API Key"), VALID_KEY);
     expect(screen.getByRole("button", { name: "保存" })).toBeEnabled();
 
     await user.click(screen.getByRole("button", { name: "保存" }));
+    expect(onSave).toHaveBeenCalledWith("glm", VALID_KEY, "charglm-4");
+  });
+
+  it("保存服务端 Flash 后切回 charGLM 保留个人 Key", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn(async () => undefined);
+    mount({
+      entries: [{ provider: "glm", apiKey: VALID_KEY, model: "charglm-4" }],
+      onSave,
+    });
+
+    await user.selectOptions(screen.getByLabelText("模型"), "glm-4.7-flash");
+    expect(screen.queryByLabelText("API Key")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "保存" }));
     expect(onSave).toHaveBeenCalledWith("glm", VALID_KEY, "glm-4.7-flash");
+
+    await user.selectOptions(screen.getByLabelText("模型"), "charglm-4");
+    expect(screen.getByLabelText("API Key")).toHaveValue(VALID_KEY);
+    expect(screen.getByRole("button", { name: "保存" })).toBeEnabled();
   });
 
   it("loads the existing entry when switching to a configured provider", async () => {
@@ -141,10 +176,23 @@ describe("LlmSettingsPanel", () => {
     expect(onActivate).toHaveBeenCalledWith("claude");
   });
 
+  it("已保存的无 Key Flash 可以设为当前和清除", async () => {
+    const user = userEvent.setup();
+    const onActivate = vi.fn(async () => undefined);
+    const onClear = vi.fn(async () => undefined);
+    mount({ entries: [{ provider: "glm", apiKey: "", model: "glm-4.7-flash" }], onActivate, onClear });
+
+    await user.click(screen.getByRole("button", { name: "设为当前" }));
+    expect(onActivate).toHaveBeenCalledWith("glm");
+    await user.click(screen.getByRole("button", { name: "清除配置" }));
+    expect(onClear).toHaveBeenCalledWith("glm");
+  });
+
   it("toggles API key visibility", async () => {
     const user = userEvent.setup();
     mount();
 
+    await user.selectOptions(screen.getByLabelText("模型"), "charglm-4");
     const input = screen.getByPlaceholderText("API Key") as HTMLInputElement;
     expect(input.type).toBe("password");
 
@@ -170,9 +218,12 @@ describe("LlmSettingsPanel", () => {
     expect(screen.getByText("该厂商暂不支持图片输入")).toBeInTheDocument();
   });
 
-  it("renders recommendation badge for recommended models", () => {
+  it("推荐标记属于 charGLM，默认 Flash 保留免费标记", async () => {
+    const user = userEvent.setup();
     mount();
-    expect(screen.getAllByText("推荐").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: /^GLM-4\.7-Flash/ })).not.toHaveTextContent("推荐");
+    await user.selectOptions(screen.getByLabelText("模型"), "charglm-4");
+    expect(screen.getByRole("button", { name: /^charGLM-4/ })).toHaveTextContent("推荐");
   });
 
   it("默认模型展示免费徽章", () => {

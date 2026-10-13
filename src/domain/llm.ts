@@ -79,7 +79,7 @@ export const PROVIDER_METADATA: Readonly<Record<ProviderId, LlmProviderMeta>> = 
       "glm-5.3-flash",
     ],
     defaultModel: "glm-4.7-flash",
-    recommendedModel: "glm-4.7-flash",
+    recommendedModel: "charglm-4",
     freeModels: ["glm-4.7-flash"],
     supportsImage: true,
     // 保留已保存的视觉配置能力，GLM-4.6V-Flash 不再出现在预设模型列表中。
@@ -156,6 +156,11 @@ export function getProviderMeta(id: ProviderId): LlmProviderMeta {
   return PROVIDER_METADATA[id];
 }
 
+/** 服务端内置模型使用部署凭据，聊天请求须同时省略 provider、apiKey 和 model。 */
+export function isServerManagedModel(provider: ProviderId, model: string): boolean {
+  return provider === "glm" && model === "glm-4.7-flash";
+}
+
 /** IndexedDB llmSettings 表中每家厂商的配置记录 */
 export interface LlmSettingsRecord {
   readonly provider: ProviderId;
@@ -164,7 +169,7 @@ export interface LlmSettingsRecord {
   readonly updatedAt: number;
 }
 
-/** 发送聊天请求时携带的激活配置（未配置 Key 时为 undefined，走服务端 fallback） */
+/** 当前选择的厂商配置；服务端内置模型的个人 Key 不参与请求。 */
 export interface ActiveLlmConfig {
   readonly provider: ProviderId;
   readonly apiKey: string;

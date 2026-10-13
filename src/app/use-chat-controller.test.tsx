@@ -685,6 +685,36 @@ describe("useChatController", () => {
     expect(chatRequest?.messages.at(-1)).toEqual({ role: "user", text: "次" });
   });
 
+  it("选择带历史 Key 的 GLM-4.7-Flash 时，摘要请求使用服务端凭据", async () => {
+    const messages: ChatMessage[] = Array.from({ length: 4 }, (_, index) => ({
+      conversationId: conversation.id,
+      createdAt: 20 + index,
+      id: `history-${index}`,
+      role: index % 2 === 0 ? "user" : "assistant",
+      status: "complete",
+      text: `历史 ${index}`,
+    }));
+    const repository = repositoryWith({ listMessages: vi.fn(async () => messages) });
+    const stream = vi.fn<StreamChatFunction>(async (_request, options) => {
+      options.onDelta("<conversation_memory>已保留关键事件</conversation_memory>");
+      return { truncated: false };
+    });
+    const { result } = renderHook(() => useChatController({
+      repository,
+      streamChat: stream,
+      activeLlmConfig: { provider: "glm", model: "glm-4.7-flash", apiKey: "sk-test-12345678901234567890" },
+    }));
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+    await act(async () => expect(await result.current.compressConversation(true)).toBe(true));
+
+    expect(stream).toHaveBeenCalledTimes(1);
+    const request = stream.mock.calls[0]![0];
+    expect(request.mode).toBe("summary");
+    expect(request).not.toHaveProperty("provider");
+    expect(request).not.toHaveProperty("apiKey");
+    expect(request).not.toHaveProperty("model");
+  });
+
   it("压缩覆盖窗口外的连续历史并保留最近一轮原文", async () => {
     const messages: ChatMessage[] = Array.from({ length: 60 }, (_, index) => ({
       conversationId: conversation.id,

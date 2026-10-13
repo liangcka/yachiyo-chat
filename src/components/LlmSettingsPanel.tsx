@@ -8,6 +8,7 @@ import {
   PROVIDER_METADATA,
   formatModelDisplayName,
   getProviderMeta,
+  isServerManagedModel,
   isValidApiKey,
   type ProviderId,
 } from "../domain/llm";
@@ -116,8 +117,11 @@ export function LlmSettingsPanel({
 
   const meta = PROVIDER_METADATA[selectedProvider];
   const existingEntry = entries.find((item) => item.provider === selectedProvider);
-  const hasExisting = existingEntry !== undefined && existingEntry.apiKey.length > 0;
-  const isKeyValid = isValidApiKey(apiKeyInput);
+  const hasExisting = existingEntry !== undefined && (
+    existingEntry.apiKey.length > 0 || isServerManagedModel(selectedProvider, existingEntry.model)
+  );
+  const serverManaged = isServerManagedModel(selectedProvider, modelInput);
+  const canSave = serverManaged || isValidApiKey(apiKeyInput);
 
   const runAction = async (action: () => Promise<unknown>, successMessage: string) => {
     setBusy(true);
@@ -279,31 +283,35 @@ export function LlmSettingsPanel({
           </div>
         </div>
 
-        <div className="llm-panel__field">
-          <label htmlFor="llm-key">{copy.llmApiKey}</label>
-          <div className="llm-panel__key">
-            <input
-              id="llm-key"
-              autoComplete="off"
-              onChange={(event) => setApiKeyInput(event.currentTarget.value)}
-              placeholder={copy.llmApiKey}
-              type={showKey ? "text" : "password"}
-              value={apiKeyInput}
-            />
-            <button
-              aria-label={showKey ? copy.llmHideKey : copy.llmShowKey}
-              onClick={() => setShowKey((prev) => !prev)}
-              type="button"
-            >
-              {showKey ? (
-                <EyeOff aria-hidden="true" size={18} />
-              ) : (
-                <Eye aria-hidden="true" size={18} />
-              )}
-            </button>
+        {serverManaged ? (
+          <p className="llm-panel__hint">{copy.llmServerManagedHint}</p>
+        ) : (
+          <div className="llm-panel__field">
+            <label htmlFor="llm-key">{copy.llmApiKey}</label>
+            <div className="llm-panel__key">
+              <input
+                id="llm-key"
+                autoComplete="off"
+                onChange={(event) => setApiKeyInput(event.currentTarget.value)}
+                placeholder={copy.llmApiKey}
+                type={showKey ? "text" : "password"}
+                value={apiKeyInput}
+              />
+              <button
+                aria-label={showKey ? copy.llmHideKey : copy.llmShowKey}
+                onClick={() => setShowKey((prev) => !prev)}
+                type="button"
+              >
+                {showKey ? (
+                  <EyeOff aria-hidden="true" size={18} />
+                ) : (
+                  <Eye aria-hidden="true" size={18} />
+                )}
+              </button>
+            </div>
+            <p className="llm-panel__hint">{copy.llmApiKeyHint(meta.apiKeyHint)}</p>
           </div>
-          <p className="llm-panel__hint">{copy.llmApiKeyHint(meta.apiKeyHint)}</p>
-        </div>
+        )}
 
         <div className="llm-panel__field" ref={modelRef}>
           <label htmlFor="llm-model">{copy.llmModel}</label>
@@ -385,7 +393,7 @@ export function LlmSettingsPanel({
         )}
 
         <div className="llm-panel__actions">
-          <button disabled={busy || !isKeyValid} onClick={handleSave} type="button">
+          <button disabled={busy || !canSave} onClick={handleSave} type="button">
             {copy.llmSave}
           </button>
           {hasExisting && activeProvider !== selectedProvider && (

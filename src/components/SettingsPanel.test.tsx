@@ -95,9 +95,55 @@ describe("SettingsPanel", () => {
     await user.click(screen.getByRole("button", { name: "显示" }));
     expect(screen.getByLabelText("API Key")).toHaveAttribute("type", "text");
     await user.selectOptions(screen.getByLabelText("厂商"), "glm");
+    expect(screen.queryByLabelText("API Key")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("模型")).toHaveValue("glm-4.7-flash");
+    await user.selectOptions(screen.getByLabelText("模型"), "charglm-4");
     expect(screen.getByLabelText("API Key")).toHaveValue("");
     expect(screen.getByLabelText("API Key")).toHaveAttribute("type", "password");
-    expect(screen.getByLabelText("模型")).toHaveValue("glm-4.7-flash");
+  });
+
+  it("Flash 无需 Key 即可保存，charGLM 显示推荐并要求 Key", async () => {
+    const user = userEvent.setup();
+    const { props } = mount();
+
+    expect(screen.queryByLabelText("API Key")).not.toBeInTheDocument();
+    expect(screen.getByText("使用服务端 GLM-4.7-Flash，无需填写 API Key。")).toBeVisible();
+    expect(screen.getByRole("button", { name: /^GLM-4\.7-Flash/ })).not.toHaveTextContent("推荐");
+    expect(screen.getByRole("button", { name: "保存" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "保存" }));
+    expect(props.onLlmSave).toHaveBeenCalledWith("glm", "", "glm-4.7-flash");
+
+    await user.selectOptions(screen.getByLabelText("模型"), "charglm-4");
+    expect(screen.getByRole("button", { name: /^charGLM-4/ })).toHaveTextContent("推荐");
+    expect(screen.getByLabelText("API Key")).toHaveValue("");
+    expect(screen.getByRole("button", { name: "保存" })).toBeDisabled();
+    await user.type(screen.getByLabelText("API Key"), "sk-settings-ui-test-key");
+    await user.click(screen.getByRole("button", { name: "保存" }));
+    expect(props.onLlmSave).toHaveBeenCalledWith("glm", "sk-settings-ui-test-key", "charglm-4");
+  });
+
+  it("无 Key Flash 配置可以设为当前和清除", async () => {
+    const user = userEvent.setup();
+    const { props } = mount({ entries: [{ provider: "glm", apiKey: "", model: "glm-4.7-flash" }] });
+
+    await user.click(screen.getByRole("button", { name: "设为当前" }));
+    expect(props.onLlmActivate).toHaveBeenCalledWith("glm");
+    await user.click(screen.getByRole("button", { name: "清除配置" }));
+    expect(props.onLlmClear).toHaveBeenCalledWith("glm");
+  });
+
+  it("保存 Flash 后切回 charGLM 保留已存 Key", async () => {
+    const user = userEvent.setup();
+    const key = "sk-settings-ui-test-key";
+    const { props } = mount({ entries: [{ provider: "glm", apiKey: key, model: "charglm-4" }] });
+
+    await user.selectOptions(screen.getByLabelText("模型"), "glm-4.7-flash");
+    expect(screen.queryByLabelText("API Key")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "保存" }));
+    expect(props.onLlmSave).toHaveBeenCalledWith("glm", key, "glm-4.7-flash");
+    await user.selectOptions(screen.getByLabelText("模型"), "charglm-4");
+    expect(screen.getByLabelText("API Key")).toHaveValue(key);
+    expect(screen.getByRole("button", { name: "保存" })).toBeEnabled();
   });
 
   it("renders tab navigation with accessibility attributes", () => {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { ChatMessage, ChatSource, Conversation, Locale, StoredImage, TokenUsage } from "../domain/chat";
-import type { ActiveLlmConfig } from "../domain/llm";
+import { isServerManagedModel, type ActiveLlmConfig } from "../domain/llm";
 import { isUntitledConversation, type ConversationMetadata } from "../domain/conversation-metadata";
 import { generateConversationMetadata } from "./conversation-metadata";
 import type { UserMemoryRevision } from "../domain/user-memory";
@@ -347,10 +347,14 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     repository: options.repository,
     streamChat: options.streamChat ?? streamChatRequest,
   });
-  const activeLlmConfigRef = useRef<ActiveLlmConfig | undefined>(options.activeLlmConfig);
+  const personalLlmConfig = options.activeLlmConfig !== undefined &&
+    !isServerManagedModel(options.activeLlmConfig.provider, options.activeLlmConfig.model)
+    ? options.activeLlmConfig
+    : undefined;
+  const activeLlmConfigRef = useRef<ActiveLlmConfig | undefined>(personalLlmConfig);
   useEffect(() => {
-    activeLlmConfigRef.current = options.activeLlmConfig;
-  }, [options.activeLlmConfig]);
+    activeLlmConfigRef.current = personalLlmConfig;
+  }, [personalLlmConfig]);
   const activeSkillsRef = useRef<readonly SkillDefinition[] | undefined>(options.activeSkills);
   useEffect(() => {
     activeSkillsRef.current = options.activeSkills;
