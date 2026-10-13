@@ -1,0 +1,169 @@
+.overlay--onboarding {
+  align-items: center;
+  justify-content: center;
+  padding: var(--safe-top) 1rem var(--safe-bottom);
+}
+
+.onboarding-guide {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 24rem;
+  max-height: 100%;
+  margin: 0;
+  padding: 1rem 1.25rem 1.25rem;
+  overflow: hidden;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  color: var(--text-primary);
+  background: var(--space-1);
+  box-shadow: 0 1rem 4rem rgb(2 6 20 / 32%);
+  animation: motion-sheet-in var(--motion-duration-panel) var(--motion-ease-enter) backwards;
+}
+
+.onboarding-guide__header,
+.onboarding-guide__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.onboarding-guide__header {
+  flex-shrink: 0;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+}
+
+.onboarding-guide button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-control);
+  color: var(--text-primary);
+  background: var(--glass-soft);
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.onboarding-guide button svg {
+  flex-shrink: 0;
+}
+
+.onboarding-guide button:focus-visible {
+  outline: 2px solid var(--text-primary);
+  outline-offset: 3px;
+}
+
+.onboarding-guide .onboarding-guide__skip {
+  padding-inline: 0.75rem;
+  border-color: transparent;
+  background: transparent;
+}
+
+.onboarding-guide__body {
+  min-height: 0;
+  padding-block: 1rem;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  overscroll-behavior: contain;
+}
+
+.onboarding-guide__icon {
+  display: grid;
+  width: 4rem;
+  height: 4rem;
+  margin-bottom: 1.25rem;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  background: var(--glass-soft);
+  place-items: center;
+}
+
+.onboarding-guide__progress {
+  margin: 0 0 0.5rem;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+}
+
+.onboarding-guide h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.5rem;
+  line-height: 1.4;
+}
+
+.onboarding-guide__description,
+.onboarding-guide__features p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  line-height: 1.75;
+}
+
+.onboarding-guide__features {
+  display: grid;
+  gap: 1rem;
+  margin: 1rem 0;
+  padding: 0;
+  list-style: none;
+}
+
+.onboarding-guide__features li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.onboarding-guide__features svg {
+  flex-shrink: 0;
+  margin-top: 0.125rem;
+  color: var(--text-dim);
+}
+
+.onboarding-guide__features strong {
+  font-size: 0.875rem;
+}
+
+.onboarding-guide__hint {
+  margin: 1.5rem 0 0;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  line-height: 1.6;
+}
+
+.onboarding-guide__footer {
+  display: grid;
+  flex-shrink: 0;
+  gap: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--glass-border);
+}
+
+.onboarding-guide .onboarding-guide__settings {
+  width: 100%;
+  border-color: transparent;
+  background: transparent;
+}
+
+.onboarding-guide .onboarding-guide__next {
+  flex: 1;
+  min-width: 0;
+  color: var(--space-1);
+  background: var(--glass-strong);
+}
+
+.onboarding-guide--closing {
+  animation: motion-sheet-out var(--motion-duration-panel) var(--motion-ease-enter) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .onboarding-guide,
+  .onboarding-guide--closing {
+    animation: none;
+  }
+}

@@ -1,7 +1,15 @@
-import { useCallback, useEffect, useReducer, useRef } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { ChatMessage, ChatSource, Conversation, Locale, StoredImage, TokenUsage } from "../domain/chat";
 import type { ActiveLlmConfig } from "../domain/llm";
+import { isUntitledConversation, type ConversationMetadata } from "../domain/conversation-metadata";
+import { generateConversationMetadata } from "./conversation-metadata";
+import type { UserMemoryRevision } from "../domain/user-memory";
 import type { SkillDefinition } from "../skills";
+import {
+  buildConversationSummaryBatch,
+  parseConversationSummary,
+  selectConversationSummaryMessages,
+} from "./conversation-summary";
 
 import {
   ChatClientError,
@@ -34,12 +42,33 @@ export interface ChatRepository {
     now?: number,
     compressedUpTo?: number,
     compressedUpToId?: string,
+    signal?: AbortSignal,
   ): Promise<void>;
   getUserMemory(): Promise<string>;
+  /** 自动整理只读取当前会话的事实，避免把其他会话的记忆复制到新来源。 */
+  getConversationMemory?(conversationId: string): Promise<string>;
   updateUserMemory(memory: string): Promise<void>;
+  listUserMemoryHistory?(): Promise<UserMemoryRevision[]>;
+  undoUserMemoryChange?(revisionId: string): Promise<string | undefined>;
+  rememberMessageMemory?(
+    conversationId: string,
+    messageId: string,
+    expectedMemory: string,
+    memory: string,
+    signal?: AbortSignal,
+  ): Promise<string | undefined>;
+  applyConversationMetadata?(
+    conversationId: string,
+    messageId: string,
+    expectedMemory: string,
+    metadata: ConversationMetadata,
+    signal?: AbortSignal,
+  ): Promise<{ conversation?: Conversation; memory?: string }>;
   /** 将存储中的会话消息截断为给定前缀（定点删除水位线之后的部分） */
   replaceMessages(conversationId: string, messages: ChatMessage[]): Promise<void>;
   deleteMessagesFrom(conversationId: string, fromCreatedAt: number): Promise<void>;
+  /** 撤回消息并恢复其记忆更新，返回事务提交后的当前记忆。 */
+  recallMessagesFrom?(conversationId: string, fromCreatedAt: number): Promise<string>;
   putImage(image: StoredImage): Promise<void>;
   getImage(id: string): Promise<StoredImage | undefined>;
   setLocale(locale: Locale): Promise<void>;
@@ -47,7 +76,7 @@ export interface ChatRepository {
   setConversationLocale(id: string, locale: Locale): Promise<void>;
   renameConversation?(id: string, title: string): Promise<void>;
   touchConversation?(id: string, now?: number): Promise<void>;
-  deleteConversation?(id: string): Promise<void>;
+  deleteConversation?(id: string): Promise<string | void>;
 }
 
 export type StreamChatFunction = (
@@ -76,6 +105,8 @@ export interface RecalledMessageData {
   imageId?: string;
 }
 
+export type RememberMessageResult = "saved" | "unchanged" | "failed" | "cancelled" | "too-long";
+
 export interface ChatController extends ChatState {
   send(text: string): Promise<void>;
   retry(): Promise<void>;
@@ -84,14 +115,21 @@ export interface ChatController extends ChatState {
   regenerate(messageId?: string): Promise<void>;
   compressConversation(manual?: boolean): Promise<boolean>;
   updateUserMemory(memory: string): Promise<boolean>;
+  userMemoryHistory: readonly UserMemoryRevision[];
+  refreshUserMemoryHistory(): Promise<void>;
+  undoUserMemoryChange(revisionId: string): Promise<boolean>;
+  rememberMessage(messageId: string): Promise<RememberMessageResult>;
   newConversation(): Promise<void>;
   selectConversation(id: string): Promise<void>;
+  deleteConversation(id: string): Promise<boolean>;
   /** 向上翻页：加载当前窗口之前更早的历史消息（UI 窗口化） */
   loadEarlier(): Promise<void>;
   setLocale(locale: Locale): Promise<void>;
   setPendingImage(image?: StoredImage): void;
   setOnline(online: boolean): void;
   clearError(): void;
+  /** 等待已启动的生成、消息与记忆写入完成；存储失败时拒绝重载，不中止聊天。 */
+  prepareForReload(): Promise<void>;
 }
 
 interface ControllerServices {
@@ -124,6 +162,7 @@ interface ActiveRun {
   sources?: ReadonlyArray<ChatSource>;
   timer?: ReturnType<typeof setTimeout>;
   token: number;
+  metadataGeneration: number;
 }
 
 const partialPersistenceInterval = 250;
@@ -269,55 +308,6 @@ function requestHistory(
   return selected;
 }
 
-/** 解析压缩请求的双区块输出；模型未按格式输出时整体降级为会话记忆 */
-function parseCompressionOutput(text: string): { conversationMemory: string; userProfile?: string } {
-  const memoryMatch = text.match(/<conversation_memory>([\s\S]*?)<\/conversation_memory>/i);
-  const profileMatch = text.match(/<user_profile>([\s\S]*?)<\/user_profile>/i);
-  const conversationMemory = memoryMatch?.[1]?.trim() ?? "";
-  if (conversationMemory.length > 0) {
-    const userProfile = profileMatch?.[1]?.trim();
-    return {
-      conversationMemory,
-      ...(userProfile !== undefined && userProfile.length > 0 ? { userProfile } : {}),
-    };
-  }
-  return { conversationMemory: text.trim() };
-}
-
-/** 压缩指令：要求合并既有记忆并顺带提炼用户长期画像，双区块输出 */
-const compressionInstruction: Record<"zh-CN" | "ja-JP", string> = {
-  "zh-CN": `请整理以上内容，输出以下两个区块，不要输出其他内容：
-
-<conversation_memory>
-合并【已有记忆摘要】与最新对话内容，输出更新后的完整会话记忆，按以下结构组织：
-【核心事实】双方确认的重要事实与设定
-【用户特征与偏好】彩叶表现出的喜好、习惯与性格特点
-【双方约定】互相许下的承诺与约定
-【关系与情绪】当前关系状态与情绪脉络
-【剧情进展】故事线的关键节点
-旧记忆中仍然有效的内容必须保留，不得遗漏。
-</conversation_memory>
-
-<user_profile>
-从对话中提炼用户「酒寄彩叶」的长期画像（称呼、喜好、重要经历等），与【现有用户画像】合并去重后输出完整版本；没有新增内容时原样输出既有画像。
-</user_profile>`,
-  "ja-JP": `以上の内容を整理し、次の2つのブロックのみを出力してください：
-
-<conversation_memory>
-【既存の記憶要約】と最新の会話を統合し、更新後の完全な会話メモリーを以下の構成で出力してください：
-【核心的事実】両者が確認した重要な事実と設定
-【ユーザーの特徴と好み】彩葉の好み・習慣・性格
-【約束事項】交わした約束
-【関係と感情】現在の関係性と感情の流れ
-【ストーリーの進展】物語の重要な節目
-古い記憶のうち今も有効な内容は必ず残してください。
-</conversation_memory>
-
-<user_profile>
-会話からユーザー「酒寄彩葉」の長期プロフィール（呼び名、好み、大切な出来事など）を抽出し、【既存のユーザープロフィール】と統合・重複排除した完全版を出力してください。追加情報がない場合は既存のプロフィールをそのまま出力してください。
-</user_profile>`,
-};
-
 /** 仅统计压缩边界之后（未被摘要取代）的 eligible 消息数 */
 function countUncompressedMessages(messages: ChatMessage[], compressedUpTo?: number): number {
   return messages.filter(
@@ -378,16 +368,64 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     multiBubbleRef.current = options.multiBubble ?? true;
   }, [options.multiBubble]);
   const [state, dispatch] = useReducer(chatReducer, initialChatState);
+  const [userMemoryHistory, setUserMemoryHistory] = useState<readonly UserMemoryRevision[]>([]);
+  const memoryHistoryRequestRef = useRef(0);
   const stateRef = useRef<ChatState>(initialChatState);
   const activeRef = useRef<ActiveRun | undefined>(undefined);
   const compressControllerRef = useRef<AbortController | undefined>(undefined);
+  const metadataControllerRef = useRef<AbortController | undefined>(undefined);
+  const metadataGenerationRef = useRef(0);
   const lastCompressionAttemptRef = useRef<{ timestamp: number; failed: boolean }>({ failed: false, timestamp: 0 });
   const initializationRef = useRef<Promise<InitialData> | undefined>(undefined);
   const mountedRef = useRef(false);
   const persistQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const persistenceFailedRef = useRef(false);
+  const metadataTasksRef = useRef(new Set<Promise<unknown>>());
   const runTokenRef = useRef(0);
   const sendingRef = useRef(false);
+  const sendingCompletionRef = useRef<{ promise: Promise<void>; resolve: () => void } | undefined>(undefined);
   const lastTimestampRef = useRef(0);
+
+  const setSending = useCallback((sending: boolean): void => {
+    sendingRef.current = sending;
+    if (sending) {
+      if (sendingCompletionRef.current === undefined) {
+        let resolve!: () => void;
+        const promise = new Promise<void>((done) => { resolve = done; });
+        sendingCompletionRef.current = { promise, resolve };
+      }
+    } else {
+      sendingCompletionRef.current?.resolve();
+      sendingCompletionRef.current = undefined;
+    }
+  }, []);
+
+  const trackPersistence = useCallback(<T,>(task: Promise<T>): Promise<T> => {
+    persistQueueRef.current = task.then(() => undefined, () => {
+      persistenceFailedRef.current = true;
+    });
+    return task;
+  }, []);
+
+  const trackMetadata = useCallback(<T,>(task: Promise<T>): Promise<T> => {
+    metadataTasksRef.current.add(task);
+    void task.then(() => metadataTasksRef.current.delete(task), () => metadataTasksRef.current.delete(task));
+    return task;
+  }, []);
+
+  const prepareForReload = useCallback(async (): Promise<void> => {
+    while (true) {
+      if (sendingCompletionRef.current !== undefined) await sendingCompletionRef.current.promise;
+      const queue = persistQueueRef.current;
+      await Promise.all([queue, ...metadataTasksRef.current]);
+      // 等待期间仍可继续聊天；新增的生成或写入必须进入下一轮实际任务等待。
+      if (sendingRef.current || queue !== persistQueueRef.current || metadataTasksRef.current.size > 0) continue;
+      if (persistenceFailedRef.current || stateRef.current.errorCode === "STORAGE_ERROR") {
+        throw new Error("本地数据尚未成功保存，不能重载应用。");
+      }
+      return;
+    }
+  }, []);
 
   const nextTimestamp = useCallback(() => {
     const timestamp = Math.max(servicesRef.current.now(), lastTimestampRef.current + 1);
@@ -399,6 +437,65 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     stateRef.current = chatReducer(stateRef.current, action);
     dispatch(action);
   }, []);
+
+  const cancelMetadata = useCallback(() => {
+    metadataGenerationRef.current += 1;
+    metadataControllerRef.current?.abort();
+    metadataControllerRef.current = undefined;
+  }, []);
+
+  const refreshUserMemoryHistory = useCallback(async (): Promise<void> => {
+    const request = ++memoryHistoryRequestRef.current;
+    try {
+      const history = await servicesRef.current.repository.listUserMemoryHistory?.() ?? [];
+      if (mountedRef.current && request === memoryHistoryRequestRef.current) setUserMemoryHistory(history);
+    } catch {
+      // 历史读取失败不影响已有记忆与聊天，重新打开面板时重试。
+    }
+  }, []);
+
+  useEffect(() => { void refreshUserMemoryHistory(); }, [refreshUserMemoryHistory, state.userMemory]);
+
+  const updateMetadata = useCallback(async (assistant: ChatMessage): Promise<void> => {
+    const snapshot = stateRef.current;
+    const conversation = snapshot.activeConversation;
+    const user = [...snapshot.messages].reverse().find((message) => message.role === "user");
+    const repository = servicesRef.current.repository;
+    if (!mountedRef.current || conversation?.id !== assistant.conversationId || user === undefined ||
+      repository.applyConversationMetadata === undefined) return;
+    cancelMetadata();
+    const controller = new AbortController();
+    metadataControllerRef.current = controller;
+    const config = activeLlmConfigRef.current;
+    const timer = setTimeout(() => controller.abort(), 30_000);
+    let writing = false;
+    try {
+      const memory = await repository.getUserMemory();
+      const conversationMemory = await repository.getConversationMemory?.(conversation.id) ?? memory;
+      if (controller.signal.aborted) return;
+      const metadata = await generateConversationMetadata({
+        conversation, user, assistant, memory: conversationMemory, config,
+        streamChat: servicesRef.current.streamChat,
+        signal: controller.signal,
+      });
+      if (metadata === undefined || controller.signal.aborted || !mountedRef.current) return;
+      writing = true;
+      const applied = await repository.applyConversationMetadata(
+        conversation.id, assistant.id, memory, metadata, controller.signal,
+      );
+      if (controller.signal.aborted || !mountedRef.current) return;
+      if (applied.conversation !== undefined) {
+        emit({ type: "conversation-metadata-updated", conversation: applied.conversation });
+      }
+      if (applied.memory !== undefined) emit({ type: "user-memory-updated", memory: applied.memory });
+    } catch {
+      if (writing && !controller.signal.aborted) persistenceFailedRef.current = true;
+      // 后台整理失败保留已保存内容，下一次完整对话可重试。
+    } finally {
+      clearTimeout(timer);
+      if (metadataControllerRef.current === controller) metadataControllerRef.current = undefined;
+    }
+  }, [cancelMetadata, emit]);
 
   const streamBatcherRef = useRef<StreamBatcher | undefined>(undefined);
   useEffect(() => {
@@ -414,9 +511,8 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     const task = persistQueueRef.current.then(() =>
       servicesRef.current.repository.putMessage(message),
     );
-    persistQueueRef.current = task.catch(() => undefined);
-    return task;
-  }, []);
+    return trackPersistence(task);
+  }, [trackPersistence]);
 
   const createConversation = useCallback(
     async (locale: Locale): Promise<InitialData> => {
@@ -488,6 +584,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     return () => {
       ignored = true;
       mountedRef.current = false;
+      cancelMetadata();
       const compressController = compressControllerRef.current;
       if (compressController !== undefined) {
         compressControllerRef.current = undefined;
@@ -511,7 +608,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
           .catch(() => undefined);
       }
     };
-  }, [createConversation, emit, queueMessage]);
+  }, [cancelMetadata, createConversation, emit, queueMessage]);
 
   const makeRequestMessages = useCallback(
     async (
@@ -536,7 +633,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         ? [...skillUserText].length + [...skillAssistantText].length
         : 0;
 
-      const activeUserMemory = stateRef.current.userMemory;
+      const activeUserMemory = truncateUnicode(stateRef.current.userMemory ?? "", 3000);
       const hasUserMemory =
         typeof activeUserMemory === "string" && activeUserMemory.trim().length > 0;
 
@@ -555,7 +652,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         ? [...memoryUserText].length + [...memoryAssistantText].length
         : 0;
 
-      const activeSummary = overrideSummary ?? stateRef.current.activeConversation?.summary;
+      const activeSummary = truncateUnicode(overrideSummary ?? stateRef.current.activeConversation?.summary ?? "", 3000);
       const hasSummary = typeof activeSummary === "string" && activeSummary.trim().length > 0;
 
       const summaryUserText = hasSummary
@@ -670,13 +767,19 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
             });
           }
         }
+        let persisted = true;
         await queueMessage(message).catch(() => {
+          persisted = false;
           if (mountedRef.current) emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
         });
+        if (persisted && status === "complete" && truncated !== true && !run.controller.signal.aborted &&
+          metadataGenerationRef.current === run.metadataGeneration) {
+          void trackMetadata(updateMetadata(message));
+        }
       })();
       return run.finishing;
     },
-    [emit, queueMessage],
+    [emit, queueMessage, trackMetadata, updateMetadata],
   );
 
   const startAssistant = useCallback(
@@ -685,6 +788,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       user: ChatMessage | undefined,
       pendingImage?: StoredImage,
     ): Promise<void> => {
+      cancelMetadata();
       const activeConfig = activeLlmConfigRef.current;
       const currentProvider = activeConfig?.provider ?? "glm";
       const currentModel = activeConfig?.model ?? "glm-4.7-flash";
@@ -708,6 +812,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         model: currentModel,
         startTime: servicesRef.current.now(),
         token: ++runTokenRef.current,
+        metadataGeneration: metadataGenerationRef.current,
       };
       activeRef.current = run;
       emit({ assistant, type: "send-started", user });
@@ -830,7 +935,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         else await finishRun(run, "failed", code);
       }
     },
-    [emit, finishRun, makeRequestMessages, nextTimestamp, queueMessage],
+    [cancelMetadata, emit, finishRun, makeRequestMessages, nextTimestamp, queueMessage],
   );
 
   const compressConversation = useCallback(
@@ -847,163 +952,94 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         return false;
       }
 
-      // 增量压缩：只处理压缩边界之后的消息，已压缩区间由摘要取代
-      const previousBoundary = snapshot.activeConversation.compressedUpTo;
-      const uncompressedCount = countUncompressedMessages(snapshot.messages, previousBoundary);
-      if (uncompressedCount <= 1) {
-        return false;
-      }
-
       const controller = new AbortController();
       compressControllerRef.current = controller;
-      sendingRef.current = true;
+      setSending(true);
       emit({ type: "compress-started" });
+      const conversationId = snapshot.activeConversation.id;
+      const isCurrent = (): boolean =>
+        mountedRef.current &&
+        !controller.signal.aborted &&
+        stateRef.current.activeConversation?.id === conversationId;
 
       try {
-        const conversationId = snapshot.activeConversation.id;
-        const summaryPrompt = compressionInstruction[snapshot.locale];
-
-        const existingSummary = snapshot.activeConversation.summary?.trim();
-        const hasExistingSummary = Boolean(existingSummary && existingSummary.length > 0);
-
-        const existingUserMemory = snapshot.userMemory?.trim();
-        const hasExistingUserMemory = Boolean(
-          existingUserMemory && existingUserMemory.length > 0,
+        await persistQueueRef.current;
+        const storedMessages = await servicesRef.current.repository.listMessages(conversationId);
+        if (!isCurrent()) return false;
+        const pending = selectConversationSummaryMessages(
+          storedMessages,
+          snapshot.activeConversation.compressedUpTo,
         );
-
-        const priorSummaryUser = hasExistingSummary
-          ? snapshot.locale === "ja-JP"
-            ? `【既存の記憶要約】\n${existingSummary}`
-            : `【已有记忆摘要】\n${existingSummary}`
-          : "";
-        const priorSummaryAssistant = hasExistingSummary
-          ? snapshot.locale === "ja-JP"
-            ? "（既存の要約を確認しました）"
-            : "（已知悉既有摘要）"
-          : "";
-
-        const priorMemoryUser = hasExistingUserMemory
-          ? snapshot.locale === "ja-JP"
-            ? `【既存のユーザープロフィール】\n${existingUserMemory}`
-            : `【现有用户画像】\n${existingUserMemory}`
-          : "";
-        const priorMemoryAssistant = hasExistingUserMemory
-          ? snapshot.locale === "ja-JP"
-            ? "（既存のプロフィールを確認しました）"
-            : "（已知悉现有用户画像）"
-          : "";
-
-        const reservedChars =
-          [...summaryPrompt].length +
-          [...priorSummaryUser].length +
-          [...priorSummaryAssistant].length +
-          [...priorMemoryUser].length +
-          [...priorMemoryAssistant].length;
-
-        const reservedSlots =
-          (hasExistingSummary ? 2 : 0) + (hasExistingUserMemory ? 2 : 0) + 1;
-        const history = requestHistory(
-          snapshot.messages,
-          reservedChars,
-          maximumRequestMessages - reservedSlots,
-          previousBoundary,
-        );
-
-        const requestMessages: StreamChatMessage[] = [];
-        if (hasExistingSummary) {
-          requestMessages.push(
-            { role: "user", text: priorSummaryUser },
-            { role: "assistant", text: priorSummaryAssistant },
-          );
-        }
-        if (hasExistingUserMemory) {
-          requestMessages.push(
-            { role: "user", text: priorMemoryUser },
-            { role: "assistant", text: priorMemoryAssistant },
-          );
-        }
-
-        for (const { message, text } of history) {
-          requestMessages.push({ role: message.role, text });
-        }
-
-        requestMessages.push({ role: "user", text: summaryPrompt });
+        const lastIncluded = pending.at(-1);
+        if (lastIncluded === undefined) return false;
 
         const activeConfig = activeLlmConfigRef.current;
-        let summaryText = "";
-
-        await servicesRef.current.streamChat(
-          {
-            locale: snapshot.locale,
-            messages: requestMessages,
-            mode: "summary",
-            ...(activeConfig !== undefined
-              ? { provider: activeConfig.provider, apiKey: activeConfig.apiKey, model: activeConfig.model }
-              : {}),
-          },
-          {
-            onDelta(text) {
-              summaryText += text;
+        let summary = snapshot.activeConversation.summary;
+        let processed = 0;
+        while (processed < pending.length) {
+          const batch = buildConversationSummaryBatch(
+            pending.slice(processed),
+            snapshot.locale,
+            summary,
+            {
+              messages: maximumRequestMessages,
+              messageCharacters: maximumRequestMessageCharacters,
+              totalCharacters: maximumRequestCharacters,
             },
-            signal: controller.signal,
-          },
-        );
-
-        if (controller.signal.aborted) {
-          if (mountedRef.current) emit({ type: "clear-error" });
-          return false;
-        }
-
-        const { conversationMemory, userProfile } = parseCompressionOutput(summaryText);
-        if (conversationMemory.length > 0) {
-          // 压缩边界推进到最后一条纳入本次摘要的消息；边界只前进不后退
-          const lastIncluded = history[history.length - 1];
-          const nextBoundary =
-            lastIncluded !== undefined
-              ? Math.max(lastIncluded.message.createdAt, previousBoundary ?? 0)
-              : undefined;
-          const nextBoundaryId = lastIncluded?.message.id;
-
-          await servicesRef.current.repository.updateConversationSummary(
-            conversationId,
-            conversationMemory,
-            nextTimestamp(),
-            nextBoundary,
-            nextBoundaryId,
           );
-          if (userProfile !== undefined) {
-            await servicesRef.current.repository.updateUserMemory(userProfile);
-          }
-          if (
-            mountedRef.current &&
-            stateRef.current.activeConversation?.id === conversationId &&
-            !controller.signal.aborted
-          ) {
-            emit({
-              type: "context-compressed",
-              summary: conversationMemory,
-              ...(nextBoundary !== undefined ? { compressedUpTo: nextBoundary } : {}),
-              ...(nextBoundaryId !== undefined ? { compressedUpToId: nextBoundaryId } : {}),
-              ...(userProfile !== undefined ? { userMemory: userProfile } : {}),
-            });
-            return true;
-          }
+          if (batch === undefined || !isCurrent()) return false;
+          let output = "";
+          const result = await servicesRef.current.streamChat(
+            {
+              locale: snapshot.locale,
+              messages: batch.messages,
+              mode: "summary",
+              ...(activeConfig !== undefined
+                ? { provider: activeConfig.provider, apiKey: activeConfig.apiKey, model: activeConfig.model }
+                : {}),
+            },
+            {
+              onDelta(text) {
+                output += text;
+              },
+              signal: controller.signal,
+            },
+          );
+          if (!isCurrent()) return false;
+          summary = parseConversationSummary(output, result.truncated);
+          if (summary === undefined) return false;
+          processed += batch.included.length;
         }
-        if (mountedRef.current) emit({ type: "clear-error" });
-        return false;
+
+        if (summary === undefined || !isCurrent()) return false;
+        await servicesRef.current.repository.updateConversationSummary(
+          conversationId,
+          summary,
+          nextTimestamp(),
+          lastIncluded.createdAt,
+          lastIncluded.id,
+          controller.signal,
+        );
+        if (!isCurrent()) return false;
+        emit({
+          type: "context-compressed",
+          summary,
+          compressedUpTo: lastIncluded.createdAt,
+          compressedUpToId: lastIncluded.id,
+        });
+        return true;
       } catch {
-        if (mountedRef.current) emit({ type: "clear-error" });
         return false;
       } finally {
-        if (compressControllerRef.current === controller) {
+        if (compressControllerRef.current === controller || compressControllerRef.current === undefined) {
           compressControllerRef.current = undefined;
+          setSending(false);
+          if (isCurrent()) emit({ type: "clear-error" });
         }
-        sendingRef.current = false;
       }
     },
-    [emit, nextTimestamp],
+    [emit, nextTimestamp, setSending],
   );
-
   const send = useCallback(
     async (text: string): Promise<void> => {
       const snapshot = stateRef.current;
@@ -1023,7 +1059,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
 
       const targetConversationId = snapshot.activeConversation.id;
       const currentMessages = snapshot.messages;
-      sendingRef.current = true;
+      setSending(true);
         try {
         // 未压缩历史达到阈值且非失败冷却期时先增量压缩，再发送（为摘要/长期记忆前缀预留槽位）
         const lastAttempt = lastCompressionAttemptRef.current;
@@ -1039,13 +1075,13 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
             snapshot.activeConversation.compressedUpTo,
           ) >= compressionTriggerUncompressedMessages
         ) {
-          sendingRef.current = false;
+          setSending(false);
           const success = await compressConversation();
           lastCompressionAttemptRef.current = {
             failed: !success,
             timestamp: servicesRef.current.now(),
           };
-          sendingRef.current = true;
+          setSending(true);
 
           const currentSnapshot = stateRef.current;
           if (
@@ -1083,10 +1119,10 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       } catch {
         if (mountedRef.current) emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
       } finally {
-        sendingRef.current = false;
+        setSending(false);
       }
     },
-    [compressConversation, emit, nextTimestamp, startAssistant],
+    [compressConversation, emit, nextTimestamp, setSending, startAssistant],
   );
 
   const retry = useCallback(async (): Promise<void> => {
@@ -1102,15 +1138,16 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     ) {
       return;
     }
-    sendingRef.current = true;
+    setSending(true);
     try {
       await startAssistant(snapshot.messages, undefined);
     } finally {
-      sendingRef.current = false;
+      setSending(false);
     }
-  }, [startAssistant]);
+  }, [setSending, startAssistant]);
 
   const stop = useCallback(async (): Promise<void> => {
+    cancelMetadata();
     const compressController = compressControllerRef.current;
     if (compressController !== undefined) {
       compressControllerRef.current = undefined;
@@ -1122,7 +1159,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     run.controller.abort();
     await run.preparation.catch(() => undefined);
     await finishRun(run, "stopped");
-  }, [emit, finishRun]);
+  }, [cancelMetadata, emit, finishRun]);
 
   const recall = useCallback(async (): Promise<RecalledMessageData | undefined> => {
     const snapshot = stateRef.current;
@@ -1147,6 +1184,8 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       return undefined;
     }
 
+    cancelMetadata();
+
     const compressController = compressControllerRef.current;
     if (compressController !== undefined) {
       compressControllerRef.current = undefined;
@@ -1170,17 +1209,21 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
 
     try {
       const task = persistQueueRef.current.then(async () => {
-        // 水位线定点删除：撤回目标及其后的所有记录（含未加载的窗口外消息），保留区不动
-        await servicesRef.current.repository.deleteMessagesFrom(
+        const repository = servicesRef.current.repository;
+        if (repository.recallMessagesFrom !== undefined) {
+          return repository.recallMessagesFrom(conversationId, recalledUser.createdAt);
+        }
+        await repository.deleteMessagesFrom(
           conversationId,
           recalledUser.createdAt,
         );
       });
-      persistQueueRef.current = task.catch(() => undefined);
-      await task;
+      trackPersistence(task);
+      const memory = await task;
 
       if (mountedRef.current) {
-        emit({ messages: remainingMessages, type: "messages-reverted" });
+        if (memory !== undefined) emit({ type: "user-memory-updated", memory });
+        emit({ messages: remainingMessages, fromCreatedAt: recalledUser.createdAt, type: "messages-reverted" });
       }
 
       return {
@@ -1191,7 +1234,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       if (mountedRef.current) emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
       return undefined;
     }
-  }, [emit]);
+  }, [cancelMetadata, emit, trackPersistence]);
 
   const regenerate = useCallback(
     async (messageId?: string): Promise<void> => {
@@ -1228,6 +1271,8 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       const hasPrecedingUser = precedingMessages.some((msg) => msg.role === "user");
       if (!hasPrecedingUser) return;
 
+      cancelMetadata();
+
       const compressController = compressControllerRef.current;
       if (compressController !== undefined) {
         compressControllerRef.current = undefined;
@@ -1243,7 +1288,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         active.controller.abort();
       }
 
-      sendingRef.current = true;
+      setSending(true);
       const conversationId = snapshot.activeConversation.id;
       // 水位线 = 被重生成的 assistant 消息；它及其后的所有记录（含窗口外）定点删除
       const targetMessage = messages[targetIndex]!;
@@ -1255,21 +1300,21 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
             targetMessage.createdAt,
           );
         });
-        persistQueueRef.current = task.catch(() => undefined);
+        trackPersistence(task);
         await task;
 
         if (mountedRef.current) {
-          emit({ messages: precedingMessages, type: "messages-reverted" });
+          emit({ messages: precedingMessages, fromCreatedAt: targetMessage.createdAt, type: "messages-reverted" });
         }
 
         await startAssistant(precedingMessages, undefined);
       } catch {
         if (mountedRef.current) emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
       } finally {
-        sendingRef.current = false;
+        setSending(false);
       }
     },
-    [emit, startAssistant],
+    [cancelMetadata, emit, setSending, startAssistant, trackPersistence],
   );
 
   const stopAndWait = useCallback(async () => {
@@ -1314,7 +1359,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         const messages = await repository.listMessages(conversation.id, { limit: 1 });
         if (
           messages.length === 0 &&
-          (conversation.title === "新的对话" || conversation.title === "新しい会話")
+          isUntitledConversation(conversation)
         ) {
           if (targetEmptyConversation === undefined) {
             targetEmptyConversation = conversation;
@@ -1331,9 +1376,6 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         await repository.touchConversation?.(targetEmptyConversation.id, now);
         if (targetEmptyConversation.locale !== currentLocale) {
           await repository.setConversationLocale(targetEmptyConversation.id, currentLocale);
-        }
-        if (targetEmptyConversation.title !== expectedTitle) {
-          await repository.renameConversation?.(targetEmptyConversation.id, expectedTitle);
         }
         await repository.setLocale(currentLocale);
         emit({
@@ -1449,17 +1491,100 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
 
   const updateUserMemory = useCallback(
     async (memory: string): Promise<boolean> => {
+      cancelMetadata();
       const normalized = memory.trim();
       try {
         await servicesRef.current.repository.updateUserMemory(normalized);
         if (mountedRef.current) emit({ type: "user-memory-updated", memory: normalized });
+        await refreshUserMemoryHistory();
         return true;
       } catch {
         if (mountedRef.current) emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
         return false;
       }
     },
-    [emit],
+    [cancelMetadata, emit, refreshUserMemoryHistory],
+  );
+
+  const deleteConversation = useCallback(async (id: string): Promise<boolean> => {
+    cancelMetadata();
+    if (stateRef.current.activeConversation?.id === id) await stop();
+    const repository = servicesRef.current.repository;
+    if (repository.deleteConversation === undefined) return false;
+    try {
+      const deletedMemory = await repository.deleteConversation(id);
+      const memory = typeof deletedMemory === "string" ? deletedMemory : await repository.getUserMemory();
+      if (mountedRef.current) emit({ type: "user-memory-updated", memory });
+      await refreshUserMemoryHistory();
+      return true;
+    } catch {
+      if (mountedRef.current) emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
+      return false;
+    }
+  }, [cancelMetadata, emit, refreshUserMemoryHistory, stop]);
+
+  const undoUserMemoryChange = useCallback(async (revisionId: string): Promise<boolean> => {
+    cancelMetadata();
+    try {
+      const memory = await servicesRef.current.repository.undoUserMemoryChange?.(revisionId);
+      if (memory === undefined) return false;
+      if (mountedRef.current) emit({ type: "user-memory-updated", memory });
+      return true;
+    } catch {
+      return false;
+    } finally {
+      await refreshUserMemoryHistory();
+    }
+  }, [cancelMetadata, emit, refreshUserMemoryHistory]);
+
+  const rememberMessage = useCallback(async (messageId: string): Promise<RememberMessageResult> => {
+    const snapshot = stateRef.current;
+    const conversation = snapshot.activeConversation;
+    const user = snapshot.messages.find((message) => message.id === messageId);
+    const repository = servicesRef.current.repository;
+    if (!mountedRef.current || conversation === undefined || snapshot.phase === "offline" ||
+      snapshot.phase === "streaming" || snapshot.phase === "compressing" ||
+      user?.role !== "user" || user.status !== "complete" || !user.text.trim() ||
+      repository.rememberMessageMemory === undefined) return "failed";
+    if ([...JSON.stringify({ userText: user.text })].length > 4000) return "too-long";
+    cancelMetadata();
+    const controller = new AbortController();
+    metadataControllerRef.current = controller;
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 30_000);
+    let writing = false;
+    try {
+      const memory = await repository.getUserMemory();
+      const conversationMemory = await repository.getConversationMemory?.(conversation.id) ?? memory;
+      if (controller.signal.aborted) return timedOut ? "failed" : "cancelled";
+      if ([...conversationMemory].length > 2000 || JSON.stringify(conversationMemory).length > 3500) return "too-long";
+      const metadata = await generateConversationMetadata({
+        conversation, user, assistant: { ...user, role: "assistant", text: "" }, memory: conversationMemory,
+        memoryOnly: true, config: activeLlmConfigRef.current,
+        streamChat: servicesRef.current.streamChat, signal: controller.signal,
+      });
+      if (controller.signal.aborted || !mountedRef.current) return timedOut ? "failed" : "cancelled";
+      if (metadata === undefined) return "failed";
+      if (metadata.memory === null || metadata.memory === conversationMemory) return "unchanged";
+      writing = true;
+      const applied = await repository.rememberMessageMemory(conversation.id, user.id, memory, metadata.memory, controller.signal);
+      if (controller.signal.aborted || !mountedRef.current) return timedOut ? "failed" : "cancelled";
+      if (applied === undefined) return "failed";
+      emit({ type: "user-memory-updated", memory: applied });
+      await refreshUserMemoryHistory();
+      return "saved";
+    } catch {
+      if (writing && !controller.signal.aborted) persistenceFailedRef.current = true;
+      return controller.signal.aborted && !timedOut ? "cancelled" : "failed";
+    } finally {
+      clearTimeout(timer);
+      if (metadataControllerRef.current === controller) metadataControllerRef.current = undefined;
+    }
+  }, [cancelMetadata, emit, refreshUserMemoryHistory]);
+
+  const trackedRememberMessage = useCallback(
+    (messageId: string) => trackMetadata(rememberMessage(messageId)),
+    [rememberMessage, trackMetadata],
   );
 
   const clearError = useCallback(() => emit({ type: "clear-error" }), [emit]);
@@ -1468,15 +1593,21 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     ...state,
     messages: overlayStreamedText(state),
     clearError,
+    prepareForReload,
     newConversation,
     loadEarlier,
     recall,
     regenerate,
     retry,
     selectConversation,
+    deleteConversation,
     send,
     compressConversation,
     updateUserMemory,
+    userMemoryHistory,
+    refreshUserMemoryHistory,
+    undoUserMemoryChange,
+    rememberMessage: trackedRememberMessage,
     setLocale,
     setOnline,
     setPendingImage,

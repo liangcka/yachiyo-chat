@@ -25,6 +25,13 @@ export interface UiCopy {
   readonly switchLineRetry: string;
   readonly history: string;
   readonly noHistory: string;
+  readonly historySearchLabel: string;
+  readonly historySearchPlaceholder: string;
+  readonly historySearchClear: string;
+  readonly historySearching: string;
+  readonly historySearchEmpty: string;
+  readonly historySearchFailed: string;
+  readonly historySearchRetry: string;
   readonly newChat: string;
   readonly rename: string;
   readonly delete: string;
@@ -45,6 +52,19 @@ export interface UiCopy {
   readonly updateReady: string;
   readonly updateAction: string;
   readonly offlineReady: string;
+  readonly nativeUpdateTitle: string;
+  readonly nativeCurrentVersion: (version: string) => string;
+  readonly nativeUpdateCheck: string;
+  readonly nativeUpdateChecking: string;
+  readonly nativeUpdateCurrent: string;
+  readonly nativeUpdateError: string;
+  readonly nativeUpdateDownloading: (progress: number) => string;
+  readonly nativeUpdateReady: (version: string) => string;
+  readonly nativeUpdateLater: string;
+  readonly nativeUpdateBlocked: string;
+  readonly nativeUpdateCloseSettings: string;
+  readonly nativeUpdateIncompatible: string;
+  readonly nativeUpdateGetApk: string;
   readonly firstGreeting: string;
   readonly removeImage: string;
   readonly imageProcessing: string;
@@ -87,12 +107,29 @@ export interface UiCopy {
   readonly userMemoryEntry: string;
   readonly userMemoryTitle: string;
   readonly userMemoryDescription: string;
+  readonly userMemoryLimitHint: string;
   readonly userMemoryPlaceholder: string;
   readonly userMemorySave: string;
   readonly userMemoryClear: string;
   readonly userMemorySaved: string;
   readonly userMemoryCleared: string;
   readonly userMemorySaveFailed: string;
+  readonly userMemoryHistoryTitle: string;
+  readonly userMemoryHistoryEmpty: string;
+  readonly userMemoryBefore: string;
+  readonly userMemoryAfter: string;
+  readonly userMemoryEmpty: string;
+  readonly userMemoryUndo: string;
+  readonly userMemoryUndoFailed: string;
+  readonly userMemoryUndoSuccess: string;
+  readonly userMemorySourceAutomatic: string;
+  readonly userMemorySourceManual: string;
+  readonly userMemorySourceMessage: string;
+  readonly userMemorySourceUndo: string;
+  readonly rememberMessage: string;
+  readonly rememberMessagePending: string;
+  readonly rememberMessageUnchanged: string;
+  readonly rememberMessageTooLong: string;
   readonly recall: string;
   readonly recallSuccess: string;
   readonly copyText: string;
@@ -101,6 +138,7 @@ export interface UiCopy {
   readonly skillsEntry: string;
   readonly skillsTitle: string;
   readonly skillsDescription: string;
+  readonly skillsEmpty: string;
   readonly skillEnable: string;
   readonly skillDisable: string;
   readonly skillToggleLabel: string;
@@ -118,6 +156,30 @@ export interface UiCopy {
   readonly workspaceEntry: string;
   readonly workspaceTitle: string;
   readonly workspaceDescription: string;
+  readonly chatPreferences: string;
+  readonly chatPreferencesDescription: string;
+  readonly allSettings: string;
+  readonly activeModelLabel: string;
+  readonly defaultModelLabel: string;
+  readonly sessionSectionTitle: string;
+  readonly settingsSectionTitle: string;
+  readonly onboardingTitle: string;
+  readonly onboardingEntry: string;
+  readonly onboardingSkip: string;
+  readonly onboardingNext: string;
+  readonly onboardingBack: string;
+  readonly onboardingStart: string;
+  readonly onboardingOpenSettings: string;
+  readonly onboardingProgress: (step: number, total: number) => string;
+  readonly onboardingWelcomeTitle: string;
+  readonly onboardingWelcomeDescription: string;
+  readonly onboardingModelTitle: string;
+  readonly onboardingModelDescription: string;
+  readonly onboardingFeaturesTitle: string;
+  readonly onboardingHistoryDescription: string;
+  readonly onboardingMemoryDescription: string;
+  readonly onboardingSearchDescription: string;
+  readonly onboardingReplayHint: string;
 }
 
 const chinese = Object.freeze({
@@ -144,6 +206,13 @@ const chinese = Object.freeze({
   accessNetworkError: "连不上服务器，请检查网络后重试。",
   switchLineRetry: "切换线路重试",
   history: "历史记录",
+  historySearchLabel: "搜索对话",
+  historySearchPlaceholder: "搜索标题或消息内容",
+  historySearchClear: "清除搜索",
+  historySearching: "正在搜索…",
+  historySearchEmpty: "没有找到相关对话",
+  historySearchFailed: "搜索失败，请重试。",
+  historySearchRetry: "重新搜索",
   noHistory: "还没有历史对话",
   newChat: "新建对话",
   rename: "重命名",
@@ -165,6 +234,19 @@ const chinese = Object.freeze({
   updateReady: "新版本已经准备好了。",
   updateAction: "立即更新",
   offlineReady: "应用已可离线打开。",
+  nativeUpdateTitle: "应用更新",
+  nativeCurrentVersion: (version) => `当前版本 ${version}`,
+  nativeUpdateCheck: "检查更新",
+  nativeUpdateChecking: "正在检查更新…",
+  nativeUpdateCurrent: "已是最新版本",
+  nativeUpdateError: "暂时无法更新，请检查网络后重试。",
+  nativeUpdateDownloading: (progress) => `正在下载更新 ${progress}%`,
+  nativeUpdateReady: (version) => `新版本 ${version} 已准备好`,
+  nativeUpdateLater: "稍后",
+  nativeUpdateBlocked: "更新前请结束正在进行的聊天，处理草稿或图片，并关闭面板。",
+  nativeUpdateCloseSettings: "关闭设置后，可在聊天页确认更新。",
+  nativeUpdateIncompatible: "这次更新需要安装新版 APK。聊天记录会保留，请直接覆盖安装。",
+  nativeUpdateGetApk: "下载新版 APK",
   firstGreeting: "彩叶~今天也辛苦啦！（笑着朝你挥了挥手）",
   removeImage: "移除图片",
   imageProcessing: "正在处理图片…",
@@ -185,7 +267,7 @@ const chinese = Object.freeze({
   llmModel: "模型",
   llmApiKeyHint: (hint) => hint,
   llmNoImageSupport: "该厂商暂不支持图片输入",
-  llmModelNoImageSupport: "当前模型为纯文本对话，不支持图片输入（如需识图请选择带有「识图」标签的模型，如 glm-4v-plus）",
+  llmModelNoImageSupport: "当前模型不支持图片输入，可选择带「识图」标签的模型。",
   llmRecommended: "推荐",
   llmFree: "免费",
   llmVisionTag: "识图",
@@ -204,16 +286,33 @@ const chinese = Object.freeze({
   compressingContext: "正在压缩上下文…",
   memoryLabel: "对话记忆",
   loadEarlierLabel: "加载更早的消息",
-  userMemoryEntry: "长期记忆",
-  userMemoryTitle: "长期记忆管理",
+  userMemoryEntry: "记忆",
+  userMemoryTitle: "记忆",
   userMemoryDescription:
-    "八千代跨对话记住的关于你的信息（压缩上下文时自动提炼，也可手动编辑）；新对话中同样生效。",
-  userMemoryPlaceholder: "暂无长期记忆。与八千代对话并压缩上下文后会自动生成，也可在此手动填写。",
+    "八千代会整理你在聊天中表达的稳定偏好，并在之后的对话中记住。删除聊天也会清理对应记忆，部分旧版记忆可能仍会保留。",
+  userMemoryLimitHint: "每段聊天最多自动整理 2000 字记忆；聊天会使用合并记忆的前 3000 字。",
+  userMemoryPlaceholder: "还没有记住的内容。聊聊你的喜好，八千代会慢慢记住。",
   userMemorySave: "保存记忆",
   userMemoryClear: "清除记忆",
   userMemorySaved: "长期记忆已保存",
   userMemoryCleared: "长期记忆已清除",
   userMemorySaveFailed: "长期记忆保存失败，请重试",
+  userMemoryHistoryTitle: "记忆变更记录",
+  userMemoryHistoryEmpty: "还没有记忆变更记录",
+  userMemoryBefore: "变更前",
+  userMemoryAfter: "变更后",
+  userMemoryEmpty: "空记忆",
+  userMemoryUndo: "撤销这次变更",
+  userMemoryUndoFailed: "无法撤销，记录已刷新，请重试",
+  userMemoryUndoSuccess: "已撤销最近一次记忆变更",
+  userMemorySourceAutomatic: "自动整理",
+  userMemorySourceManual: "手动编辑",
+  userMemorySourceMessage: "主动记住",
+  userMemorySourceUndo: "撤销操作",
+  rememberMessage: "记住这件事",
+  rememberMessagePending: "正在整理这条消息中的记忆…",
+  rememberMessageUnchanged: "这条消息没有新增的稳定事实，记忆保持不变",
+  rememberMessageTooLong: "消息或现有记忆过长，暂时无法记住这件事",
   recall: "撤回",
   recallSuccess: "已撤回最新一条消息",
   copyText: "复制",
@@ -222,6 +321,7 @@ const chinese = Object.freeze({
   skillsEntry: "技能",
   skillsTitle: "技能",
   skillsDescription: "供对话调用的文本处理技能，启用后自动生效",
+  skillsEmpty: "暂无可用技能",
   skillEnable: "启用",
   skillDisable: "停用",
   skillToggleLabel: "切换技能启用状态",
@@ -239,6 +339,30 @@ const chinese = Object.freeze({
   workspaceEntry: "工作区 & Agent",
   workspaceTitle: "工作区 & Agent 终端",
   workspaceDescription: "配置本地 Agent 工具的运行目录，支持安全文件读写与终端命令执行。",
+  chatPreferences: "聊天偏好",
+  chatPreferencesDescription: "调整八千代的回复方式、联网时效性与日常交互习惯",
+  allSettings: "设置中心",
+  activeModelLabel: "当前模型",
+  defaultModelLabel: "默认服务",
+  sessionSectionTitle: "对话管理",
+  settingsSectionTitle: "偏好与功能",
+  onboardingTitle: "新手引导",
+  onboardingEntry: "重看新手引导",
+  onboardingSkip: "跳过",
+  onboardingNext: "下一步",
+  onboardingBack: "上一步",
+  onboardingStart: "开始聊天",
+  onboardingOpenSettings: "前往模型设置",
+  onboardingProgress: (step, total) => `第 ${step} 步，共 ${total} 步`,
+  onboardingWelcomeTitle: "和八千代聊聊吧",
+  onboardingWelcomeDescription: "在底部输入框写下想说的话，点击发送就能开始。左上角菜单可以新建对话、查看历史或打开设置。",
+  onboardingModelTitle: "模型已经准备好了",
+  onboardingModelDescription: "默认服务使用 GLM-4.7-Flash，无需填写自己的 API Key。如需使用自己的服务，在「LLM 设置」中填写 API Key、选择模型，保存后设为当前。",
+  onboardingFeaturesTitle: "这些入口，随时用得上",
+  onboardingHistoryDescription: "在菜单中查看或搜索这台设备上保存的对话。",
+  onboardingMemoryDescription: "八千代会从聊天中整理稳定偏好，在设置中可以查看已记住的内容。",
+  onboardingSearchDescription: "在「聊天偏好」中开启联网搜索，让回复参考网络资料。",
+  onboardingReplayHint: "以后也可以在设置里重看这份引导。",
 } satisfies UiCopy);
 
 const japanese = Object.freeze({
@@ -265,6 +389,13 @@ const japanese = Object.freeze({
   accessNetworkError: "サーバーに接続できません。ネットワークを確認して再試行してください。",
   switchLineRetry: "回線を切り替えて再試行",
   history: "履歴",
+  historySearchLabel: "会話を検索",
+  historySearchPlaceholder: "タイトルやメッセージを検索",
+  historySearchClear: "検索をクリア",
+  historySearching: "検索中…",
+  historySearchEmpty: "該当する会話がありません",
+  historySearchFailed: "検索できませんでした。もう一度お試しください。",
+  historySearchRetry: "再検索",
   noHistory: "まだ会話履歴はありません",
   newChat: "新しい会話",
   rename: "名前を変更",
@@ -286,6 +417,19 @@ const japanese = Object.freeze({
   updateReady: "新しいバージョンを利用できます。",
   updateAction: "今すぐ更新",
   offlineReady: "オフラインでも開けるようになりました。",
+  nativeUpdateTitle: "アプリの更新",
+  nativeCurrentVersion: (version) => `現在のバージョン ${version}`,
+  nativeUpdateCheck: "更新を確認",
+  nativeUpdateChecking: "更新を確認中…",
+  nativeUpdateCurrent: "最新のバージョンです",
+  nativeUpdateError: "今は更新できません。接続を確認して再試行してください。",
+  nativeUpdateDownloading: (progress) => `更新をダウンロード中 ${progress}%`,
+  nativeUpdateReady: (version) => `新しいバージョン ${version} の準備ができました`,
+  nativeUpdateLater: "あとで",
+  nativeUpdateBlocked: "更新の前に会話の処理を終え、下書きや画像を処理して、パネルを閉じてください。",
+  nativeUpdateCloseSettings: "設定を閉じると、チャット画面で更新できます。",
+  nativeUpdateIncompatible: "新しい APK のインストールが必要です。会話を残すため、アプリを削除せず上書きしてください。",
+  nativeUpdateGetApk: "新しい APK をダウンロード",
   firstGreeting: "彩葉~今日もお疲れさま！（笑顔で手を振る）",
   removeImage: "画像を外す",
   imageProcessing: "画像を処理中…",
@@ -325,17 +469,34 @@ const japanese = Object.freeze({
   compressingContext: "コンテキストを圧縮中…",
   memoryLabel: "会話の記憶",
   loadEarlierLabel: "前のメッセージを読み込む",
-  userMemoryEntry: "長期記憶",
-  userMemoryTitle: "長期記憶の管理",
+  userMemoryEntry: "記憶",
+  userMemoryTitle: "記憶",
   userMemoryDescription:
-    "八千代が会話をまたいで覚えているあなたの情報（コンテキスト圧縮時に自動で抽出、手動編集も可能）。新しい会話でも有効です。",
+    "八千代は会話で伝えてくれた好みを整理し、次の会話でも覚えています。会話を削除すると、その会話の記憶も削除されます。旧版で保存した一部の記憶は残る場合があります。",
+  userMemoryLimitHint: "会話ごとに最大2000文字の記憶を自動整理します。会話では統合した記憶の先頭3000文字を使います。",
   userMemoryPlaceholder:
-    "長期記憶はまだありません。八千代との会話を圧縮すると自動で生成されます。ここに手動で入力することもできます。",
+    "覚えていることはまだありません。好きなものを話すと、八千代が少しずつ覚えます。",
   userMemorySave: "記憶を保存",
   userMemoryClear: "記憶を削除",
   userMemorySaved: "長期記憶を保存しました",
   userMemoryCleared: "長期記憶を削除しました",
   userMemorySaveFailed: "長期記憶の保存に失敗しました。もう一度お試しください",
+  userMemoryHistoryTitle: "記憶の変更履歴",
+  userMemoryHistoryEmpty: "記憶の変更履歴はまだありません",
+  userMemoryBefore: "変更前",
+  userMemoryAfter: "変更後",
+  userMemoryEmpty: "記憶なし",
+  userMemoryUndo: "この変更を元に戻す",
+  userMemoryUndoFailed: "元に戻せませんでした。履歴を更新したので、もう一度お試しください",
+  userMemoryUndoSuccess: "直前の記憶の変更を元に戻しました",
+  userMemorySourceAutomatic: "自動整理",
+  userMemorySourceManual: "手動編集",
+  userMemorySourceMessage: "選んだメッセージ",
+  userMemorySourceUndo: "元に戻す操作",
+  rememberMessage: "これを覚えて",
+  rememberMessagePending: "このメッセージから記憶を整理しています…",
+  rememberMessageUnchanged: "新たに記憶する事実がないため、記憶は変わっていません",
+  rememberMessageTooLong: "メッセージまたは記憶が長すぎるため、今は覚えられません",
   recall: "取り消す",
   recallSuccess: "最新のメッセージを取り消しました",
   copyText: "コピー",
@@ -344,6 +505,7 @@ const japanese = Object.freeze({
   skillsEntry: "スキル",
   skillsTitle: "スキル",
   skillsDescription: "会話で使用するテキスト処理スキル。有効にすると自動的に適用されます",
+  skillsEmpty: "利用できるスキルはまだありません",
   skillEnable: "有効にする",
   skillDisable: "無効にする",
   skillToggleLabel: "スキルの有効/無効を切り替える",
@@ -361,6 +523,30 @@ const japanese = Object.freeze({
   workspaceEntry: "ワークスペース & Agent",
   workspaceTitle: "ワークスペース & Agent ターミナル",
   workspaceDescription: "ローカルAgentツールの実行ディレクトリを設定し、安全なファイル読み書きとターミナルコマンド実行をサポートします。",
+  chatPreferences: "チャット設定",
+  chatPreferencesDescription: "返信スタイル、Web検索、日常的な対話の設定を調整します",
+  allSettings: "設定センター",
+  activeModelLabel: "現在のモデル",
+  defaultModelLabel: "デフォルト",
+  sessionSectionTitle: "対話管理",
+  settingsSectionTitle: "機能・設定",
+  onboardingTitle: "はじめてのガイド",
+  onboardingEntry: "ガイドをもう一度見る",
+  onboardingSkip: "スキップ",
+  onboardingNext: "次へ",
+  onboardingBack: "戻る",
+  onboardingStart: "チャットを始める",
+  onboardingOpenSettings: "モデル設定を開く",
+  onboardingProgress: (step, total) => `${total} ステップ中 ${step} ステップ目`,
+  onboardingWelcomeTitle: "八千代と話してみよう",
+  onboardingWelcomeDescription: "画面下の入力欄に話したいことを書いて、送信すれば始められます。左上のメニューから会話の作成、履歴の確認、設定ができます。",
+  onboardingModelTitle: "モデルは準備できています",
+  onboardingModelDescription: "デフォルトのサービスは GLM-4.7-Flash を使用し、自分の API Key は不要です。自分のサービスを使う場合は「LLM 設定」で API Key とモデルを保存し、「現在の設定にする」を選んでください。",
+  onboardingFeaturesTitle: "便利な機能も使ってみよう",
+  onboardingHistoryDescription: "メニューから、この端末に保存した会話を確認・検索できます。",
+  onboardingMemoryDescription: "八千代は会話から好みを整理します。覚えている内容は設定で確認できます。",
+  onboardingSearchDescription: "「チャット設定」でウェブ検索を有効にすると、返信にウェブの情報を使います。",
+  onboardingReplayHint: "このガイドは設定からいつでも見直せます。",
 } satisfies UiCopy);
 
 const dictionaries: Readonly<Record<Locale, UiCopy>> = Object.freeze({

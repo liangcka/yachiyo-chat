@@ -72,7 +72,7 @@ const openaiCompatProviders = {
   },
   glm: {
     endpoint: "https://open.bigmodel.cn/api/paas/v4/chat/completions",
-    defaultModel: "charglm-4",
+    defaultModel: "glm-4.7-flash",
     allowedModels: [
       "charglm-4",
       "glm-4-plus",
@@ -80,15 +80,16 @@ const openaiCompatProviders = {
       "glm-5.3-flash",
       "glm-5.2",
       "glm-4.7-flash",
-      "glm-4.6",
       "glm-4-air",
       "glm-4-long",
       "glm-4-flash",
       "glm-4-flashx",
       "glm-4v-plus",
       "glm-4v",
-      "glm-4.6v-flash",
       "glm-4v-flash",
+      // 兼容用户已保存的型号；前端预设列表不再提供 GLM-4.6 系列。
+      "glm-4.6",
+      "glm-4.6v-flash",
     ],
     supportsImage: true,
     imageModels: [

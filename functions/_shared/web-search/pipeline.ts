@@ -28,7 +28,7 @@ export async function performWebSearchPipeline(
   request: ClientChatRequest,
   options?: WebSearchPipelineOptions,
 ): Promise<readonly WebSearchResult[] | undefined> {
-  if (request.webSearch !== true || request.mode === "summary") {
+  if (request.webSearch !== true || request.mode === "summary" || request.mode === "metadata") {
     return undefined;
   }
 

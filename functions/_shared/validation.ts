@@ -1,3 +1,5 @@
+import { parseMetadataInput } from "./metadata";
+
 export type ChatLocale = "zh-CN" | "ja-JP";
 
 export interface ClientHistoryMessage {
@@ -23,7 +25,7 @@ export function isProviderId(value: unknown): value is ProviderId {
   return typeof value === "string" && (PROVIDER_IDS as readonly string[]).includes(value);
 }
 
-export type RequestMode = "chat" | "summary";
+export type RequestMode = "chat" | "summary" | "metadata";
 
 export interface ClientChatRequest {
   locale: ChatLocale;
@@ -228,11 +230,17 @@ export function validateChatRequest(value: unknown): ClientChatRequest {
     return invalid();
   }
 
-  if (value.mode !== undefined && value.mode !== "chat" && value.mode !== "summary") {
+  if (
+    value.mode !== undefined && value.mode !== "chat" &&
+    value.mode !== "summary" && value.mode !== "metadata"
+  ) {
     return invalid();
   }
 
   const mode = value.mode as RequestMode | undefined;
+  if (mode === "metadata" && parseMetadataInput(messages) === undefined) {
+    return invalid();
+  }
 
   if (value.webSearch !== undefined && typeof value.webSearch !== "boolean") {
     return invalid();

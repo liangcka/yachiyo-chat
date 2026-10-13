@@ -1,4 +1,4 @@
-import { Copy, RotateCcw, RotateCw } from "lucide-react";
+import { Brain, Copy, RotateCcw, RotateCw } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ChatMessage, Locale, MessageStatus } from "../domain/chat";
 import type { StickerEntry } from "../features/sticker/catalog.gen";
@@ -16,6 +16,7 @@ export interface MessageBubbleProps {
   multiBubble?: boolean;
   onRecall?: () => void;
   onRegenerate?: () => void;
+  onRemember?: () => void;
   onToast?: (message: string) => void;
   onImageLoad?: () => void;
 }
@@ -124,6 +125,7 @@ interface SingleBubbleProps {
   sources?: ReadonlyArray<{ title: string; url: string }>;
   onRecall?: () => void;
   onRegenerate?: () => void;
+  onRemember?: () => void;
   onToast?: (message: string) => void;
   onImageLoad?: () => void;
 }
@@ -136,6 +138,7 @@ const SingleBubble = memo(function SingleBubble({
   onImageLoad,
   onRecall,
   onRegenerate,
+  onRemember,
   onToast,
   sources,
   status,
@@ -259,6 +262,12 @@ const SingleBubble = memo(function SingleBubble({
     onRegenerate?.();
   };
 
+  const handleRememberAction = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setMenuOpen(false);
+    onRemember?.();
+  };
+
   if (!hasText && !hasImage && !isTyping) {
     return null;
   }
@@ -285,6 +294,11 @@ const SingleBubble = memo(function SingleBubble({
         }
       }}
     >
+      {onRemember !== undefined && (
+        <button className="message-bubble__remember-shortcut" onClick={handleRememberAction} type="button">
+          {copyFor(locale).rememberMessage}
+        </button>
+      )}
       {hasImage ? (
         imageUrl !== undefined ? (
           <img alt="" className="message-bubble__image" onLoad={onImageLoad} src={imageUrl} />
@@ -364,6 +378,18 @@ const SingleBubble = memo(function SingleBubble({
               <span>{copyFor(locale).copyText}</span>
             </button>
           ) : null}
+          {onRemember !== undefined ? (
+            <button
+              aria-label={copyFor(locale).rememberMessage}
+              className="message-bubble__context-item"
+              onClick={handleRememberAction}
+              role="menuitem"
+              type="button"
+            >
+              <Brain aria-hidden="true" size={14} strokeWidth={2.2} />
+              <span>{copyFor(locale).rememberMessage}</span>
+            </button>
+          ) : null}
         </div>
       )}
     </article>
@@ -379,6 +405,7 @@ export const MessageBubble = memo(function MessageBubble({
   onImageLoad,
   onRecall,
   onRegenerate,
+  onRemember,
   onToast,
   showSources,
 }: MessageBubbleProps) {
@@ -397,6 +424,7 @@ export const MessageBubble = memo(function MessageBubble({
         onImageLoad={onImageLoad}
         onRecall={onRecall}
         onRegenerate={onRegenerate}
+        onRemember={message.status === "complete" && displayText.trim().length > 0 ? onRemember : undefined}
         onToast={onToast}
         status={message.status}
         text={displayText}

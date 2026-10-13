@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      "virtual:pwa-register/react": fileURLToPath(
+      "virtual:pwa-register": fileURLToPath(
         new URL("./src/test/pwa-register-stub.ts", import.meta.url),
       ),
     },

@@ -1016,6 +1016,44 @@
   font-size: 1.2rem;
 }
 
+.drawer__header-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.drawer__model-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  padding: 0.2rem 0.55rem;
+  margin-top: 0.28rem;
+  border: 1px solid rgb(173 216 255 / 22%);
+  border-radius: var(--radius-control);
+  background: rgb(15 42 92 / 55%);
+  width: fit-content;
+}
+
+.drawer__model-badge-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: #5ce1e6;
+  box-shadow: 0 0 6px #5ce1e6;
+  flex-shrink: 0;
+}
+
+.drawer__model-badge-text {
+  font-size: 0.72rem;
+  color: #cde0ff;
+  font-weight: 550;
+  letter-spacing: 0.02em;
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .drawer__header button,
 .history-panel > header button {
   display: grid;
@@ -1029,6 +1067,59 @@
   place-items: center;
 }
 
+.drawer__nav {
+  display: flex;
+  flex-direction: column;
+  margin-top: 1.15rem;
+  gap: 1.1rem;
+}
+
+.drawer__nav-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.drawer__section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 0.15rem;
+}
+
+.drawer__section-title {
+  font-size: 0.74rem;
+  color: var(--text-dim);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.drawer__section-all-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid rgb(255 255 255 / 15%);
+  border-radius: var(--radius-control);
+  color: #cfe1ff;
+  background: rgb(255 255 255 / 8%);
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--motion-duration-fast);
+}
+
+.drawer__section-all-btn:hover {
+  background: rgb(255 255 255 / 16%);
+  border-color: rgb(255 255 255 / 28%);
+}
+
+.drawer__section-items {
+  display: grid;
+  gap: 0.5rem;
+}
+
 .drawer__actions {
   display: grid;
   margin-top: 1.35rem;
@@ -1036,18 +1127,32 @@
 }
 
 .drawer__actions button,
+.drawer__nav-btn,
 .drawer__footer button {
   display: flex;
   width: 100%;
-  min-height: 3.2rem;
-  padding: 0.75rem 0.9rem;
+  min-height: 3.1rem;
+  padding: 0.72rem 0.9rem;
   align-items: center;
   gap: 0.75rem;
   border: 1px solid rgb(255 255 255 / 10%);
   border-radius: 1rem;
   color: var(--text-primary);
-  background: rgb(145 174 218 / 13%);
+  background: rgb(145 174 218 / 12%);
   text-align: left;
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition: background var(--motion-duration-fast), border-color var(--motion-duration-fast), transform var(--motion-duration-fast);
+}
+
+.drawer__nav-btn:hover {
+  background: rgb(145 174 218 / 20%);
+  border-color: rgb(255 255 255 / 22%);
+}
+
+.drawer__nav-btn:active {
+  transform: scale(var(--motion-scale-pressed));
 }
 
 .drawer__language {
@@ -1416,6 +1521,51 @@
   color: var(--text-primary);
   background: var(--glass-soft);
   place-items: center;
+}
+
+.native-update-prompt {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.native-update-prompt__content {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.35rem;
+  overflow-wrap: anywhere;
+}
+
+.native-update-prompt__content small {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+.native-update-prompt progress {
+  width: 100%;
+  height: 0.35rem;
+  accent-color: var(--text-primary);
+}
+
+.native-update-prompt__actions {
+  display: flex;
+  grid-column: 2;
+  gap: 0.5rem;
+}
+
+.native-update-prompt button {
+  min-height: 2.75rem;
+  cursor: pointer;
+}
+
+.native-update-prompt button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.native-update-prompt .native-update-prompt__later {
+  color: var(--text-primary);
+  background: var(--glass-soft);
 }
 
 @media (width <= 22rem) {
@@ -2057,6 +2207,7 @@
   overflow-wrap: break-word;
 }
 
+
 @supports not ((backdrop-filter: blur(1px))) {
   .message-bubble,
   .capture-pill,
@@ -2173,7 +2324,8 @@
 
 .history-panel,
 .llm-panel,
-.skills-panel {
+.skills-panel,
+.settings-panel {
   animation: motion-sheet-in var(--motion-duration-panel) var(--motion-ease-enter) backwards;
 }
 
@@ -2252,7 +2404,8 @@
   }
 
   .history-panel > ol > li:hover,
-  .skills-panel__item:hover {
+  .skills-panel__item:hover,
+  .preference-card:hover {
     border-color: rgb(188 216 255 / 24%);
     background-color: rgb(151 177 216 / 15%);
   }
@@ -2381,6 +2534,9 @@
 .drawer--closing {
   animation: motion-drawer-out var(--motion-duration-panel) var(--motion-ease-enter) forwards;
 }
-.history-panel--closing, .llm-panel--closing, .skills-panel--closing {
+.history-panel--closing,
+.llm-panel--closing,
+.skills-panel--closing,
+.settings-panel--closing {
   animation: motion-sheet-out var(--motion-duration-panel) var(--motion-ease-enter) forwards;
 }

@@ -120,7 +120,7 @@ export function buildAnthropicMessages(
 export function buildAnthropicBody(request: EnrichedChatRequest, model: string): unknown {
   return {
     model,
-    max_tokens: request.mode === "summary" ? 1024 : 2048,
+    max_tokens: request.mode === "summary" || request.mode === "metadata" ? 4096 : 2048,
     system: buildSystemPrompt(request.locale, request.mode, {
       webSearch: request.webSearch,
       smartSearch: request.smartSearch,

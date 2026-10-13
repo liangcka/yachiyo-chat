@@ -2,6 +2,8 @@
 
 Status: implemented
 
+对话行为与 DeepSeek 提示措辞以[八千代的自然日常对话](../feature/2026-10-08-natural-roleplay-conversation.md)为准。本文的厂商接口、思考档位与采样参数决策继续有效。
+
 ## Problem
 角色扮演体验与 DeepSeek 接入各自存在两类顽固退化：
 

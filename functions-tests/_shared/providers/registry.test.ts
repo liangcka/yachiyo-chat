@@ -55,6 +55,15 @@ describe("PROVIDERS registry", () => {
     }
   });
 
+  it("GLM 默认使用 GLM-4.7-Flash，并兼容已保存的 GLM-4.6 配置", () => {
+    expect(PROVIDERS.glm.defaultModel).toBe("glm-4.7-flash");
+    expect(isAllowedModel(PROVIDERS.glm, "glm-4.7-flash")).toBe(true);
+    expect(isAllowedModel(PROVIDERS.glm, "glm-4.6")).toBe(true);
+    expect(isAllowedModel(PROVIDERS.glm, "glm-4.6v-flash")).toBe(true);
+    expect(PROVIDERS.glm.imageModels).toContain("glm-4.6v-flash");
+    expect(PROVIDERS.glm.imageModels).not.toContain("glm-4.7-flash");
+  });
+
   it("wires DeepSeek roleplay sampling and the lowest thinking tier into the real request body", () => {
     const built = PROVIDERS.deepseek.buildRequest({
       request: { locale: "zh-CN", messages: [{ role: "user", text: "今天有点累" }] },

@@ -138,16 +138,46 @@ npm run dev:mock
 | `npm run mob:sync` | 构建 + Capacitor Android 同步（实验性） |
 | `npm run mob:build` | Android Release 构建（实验性） |
 
-## 实验性：Android 原生应用
+## Android 原生应用与 GitHub 热更新
 
-项目通过 Capacitor 8 提供 Android 原生壳（`android/` 目录），当前定位为**实验性功能**，构建与签名流程可能随版本调整：
+项目通过 Capacitor 8 提供 Android APK。首次使用热更新需覆盖安装支持热更新的 APK；当前原生基线为 [Android v0.1.13](https://github.com/liangcka/yachiyo-chat/releases/tag/v0.1.13)。保持应用标识与签名一致即可保留现有聊天、记忆和设置。各次 OTA 发布说明会从 `mobile-release.json` 的 `nativeVersion` 生成所需 APK 的下载链接，原生基线升级后以对应发布说明为准。
 
 ```powershell
 npm run mob:sync    # 构建前端并同步到 Android 工程
 npm run mob:build   # 同步后执行 gradlew assembleRelease
 ```
 
-签名配置参考 `android/keystore.properties.example`。日常使用建议以 Web PWA 为准。
+构建要求 Java 21 和 Android SDK 36。签名配置参考 `android/keystore.properties.example`，真实配置放在被忽略的 `android/keystore.properties`；发布前须确认 `app-release.apk` 已签名，且与已安装版本使用同一证书。安装包输出到 `android/app/build/outputs/apk/release/`，通过 GitHub Release 附件分发，二进制不提交到 Git。
+
+### 自动发布前端热更新
+
+向 `main` 推送后，Cloudflare 现有 Git 集成负责发布网站和 Functions；GitHub 的 `CI` 全部成功后，`Android OTA` 工作流为该提交构建加密资源包，并在 GitHub Releases 发布 `app-update.json` 和 `yachiyo-web-<版本>.zip`。工作流只发布仍为 `main` 最新提交的资源，不会让迟到的旧构建覆盖当前更新；手动运行也要求当前提交已通过 CI。
+
+在 GitHub 仓库的 Actions Secrets 中配置 `OTA_PRIVATE_KEY`，内容为与 `src/update/public-key.txt` 对应的 RSA 私钥。私钥仅用于发布签名，不放入 Cloudflare、前端变量或仓库。APK 内置公钥验证清单签名，原生更新插件验证并解密资源包；仅有 ZIP 的普通摘要不能替代发布签名。
+
+| 变更内容 | 发布方式 |
+| ---- | ---- |
+| 页面、样式、前端逻辑与静态资源 | 推送 `main`，通过 CI 后自动发布 GitHub 热更新 |
+| 模型、提示词与 Functions | 推送 `main`，由 Cloudflare 发布服务端 |
+| 原生插件、权限、Gradle、Capacitor 或不兼容的数据协议 | 构建并发布使用原签名的新 APK |
+
+应用检查更新后提示用户安装，启用资源包会重新加载界面。聊天生成、图片处理和本地保存期间应等操作完成再更新；资源加载失败时保留可回退的旧包和 APK 内置资源。升级需要网络，当前资源已在本地时仍可离线启动。
+
+### 本地打包与原生版本发布
+
+原生版本与运行时兼容范围由 `mobile-release.json` 记录。变更原生能力时递增 `nativeBuild` 与 `nativeVersion`，同步 Android 工程版本；不兼容的前端与原生接口还需更新 `runtimeVersion`，阻止旧 APK 安装新运行时资源。资源包版本使用 14 位 UTC 时间，须在编译和打包时保持相同值：
+
+```powershell
+$env:VITE_BUNDLE_VERSION = (Get-Date).ToUniversalTime().ToString("yyyyMMddHHmmss")
+$env:OTA_TAG = "ota-$env:VITE_BUNDLE_VERSION-local"
+npm run build
+npm run test:ota
+npm run ota:package
+```
+
+本地私钥默认读取 `.ota/private-key.pem`，也可由环境变量 `OTA_PRIVATE_KEY` 提供；输出位于被忽略的 `.ota/artifacts/`。打包脚本检查构建版本、运行时与安装公钥，使用官方 SDK 加密后再次验证包与清单。上传两个附件到同一版本的草稿 Release，确认完整下载且校验一致后再发布，避免客户端读到缺少资源包的清单。
+
+新版 APK 使用 `npm run mob:build` 构建并校验签名后，作为对应 `v<原生版本>` Release 的附件发布。自动 OTA 工作流只发布前端资源，不接触 Android 安装签名。回退业务逻辑时将已验证内容重新构建为更高的资源版本；数据库变更须兼容保留的旧包。Web PWA 继续使用现有 Service Worker 更新机制。
 
 ## 测试与验证
 

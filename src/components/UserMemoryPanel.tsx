@@ -1,7 +1,9 @@
 import { X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useClosing } from "../app/use-closing";
+import type { UserMemoryRevision } from "../domain/user-memory";
 import type { UiCopy } from "../i18n/messages";
+import { UserMemoryEditor } from "./UserMemoryEditor";
 
 export interface UserMemoryPanelProps {
   copy: UiCopy;
@@ -11,24 +13,21 @@ export interface UserMemoryPanelProps {
   onClose: () => void;
   /** 保存编辑后的长期记忆；失败时返回 false 以便上层提示 */
   onSave: (memory: string) => Promise<boolean>;
+  history?: readonly UserMemoryRevision[];
+  onUndo?: (revisionId: string) => Promise<boolean>;
 }
 
 /** 长期记忆管理面板：查看 / 编辑 / 清除跨会话的用户记忆 */
 export function UserMemoryPanel({
   copy,
+  history,
   memory,
   open,
   onClose,
   onSave,
+  onUndo,
 }: UserMemoryPanelProps) {
   const closeRef = useRef<HTMLButtonElement>(null);
-  const [draft, setDraft] = useState(memory);
-  // 外部记忆更新时（如压缩提炼），在渲染期间同步草稿，避免 effect 级联渲染
-  const [prevMemory, setPrevMemory] = useState(memory);
-  if (memory !== prevMemory) {
-    setPrevMemory(memory);
-    setDraft(memory);
-  }
 
   const { render, closing } = useClosing(open, 300);
 
@@ -52,33 +51,7 @@ export function UserMemoryPanel({
             <X aria-hidden="true" size={22} />
           </button>
         </header>
-        <p className="skills-panel__hint">{copy.userMemoryDescription}</p>
-        <textarea
-          aria-label={copy.userMemoryTitle}
-          className="memory-panel__editor"
-          onChange={(event) => setDraft(event.target.value)}
-          placeholder={copy.userMemoryPlaceholder}
-          rows={8}
-          value={draft}
-        />
-        <div className="llm-panel__actions">
-          <button
-            onClick={() => {
-              void onSave(draft);
-            }}
-            type="button"
-          >
-            {copy.userMemorySave}
-          </button>
-          <button
-            className="danger-action"
-            disabled={draft.trim().length === 0}
-            onClick={() => setDraft("")}
-            type="button"
-          >
-            {copy.userMemoryClear}
-          </button>
-        </div>
+        <UserMemoryEditor copy={copy} history={history} memory={memory} onSave={onSave} onUndo={onUndo} />
       </section>
     </div>
   );

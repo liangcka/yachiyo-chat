@@ -1,12 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-
-async function enterApp(page: Page): Promise<void> {
-  await page.goto("/");
-  await expect(page.locator(".access-gate")).toBeVisible();
-  await page.locator(".access-gate input").fill("yachiyo-local-access");
-  await page.locator('.access-gate button[type="submit"]').click();
-  await expect(page.locator(".composer textarea")).toBeVisible();
-}
+import { dismissOnboarding, enterApp } from "./helpers";
 
 /** 新会话没有初始问候气泡，断言前先发一条消息等 mock 回复让消息列表出现 */
 async function sendMockMessage(page: Page): Promise<void> {
@@ -103,6 +96,7 @@ test.describe("motion system", () => {
     await page.locator(".access-gate input").fill("yachiyo-local-access");
     await page.locator('.access-gate button[type="submit"]').click();
     await expect(page.locator(".composer textarea")).toBeVisible();
+    await dismissOnboarding(page);
 
     await sendMockMessage(page);
 
@@ -171,7 +165,7 @@ test.describe("motion system", () => {
     await expectEffectiveAnimation(toast);
 
     await page.locator(".top-controls__menu").click();
-    await page.locator(".drawer__actions button").nth(1).click();
+    await page.getByRole("button", { name: "历史记录", exact: true }).click();
     const firstHistoryItem = page.locator(".history-panel > ol > li").first();
     await expect(firstHistoryItem).toBeVisible();
     await expectEffectiveAnimation(firstHistoryItem);

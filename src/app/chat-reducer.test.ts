@@ -191,7 +191,7 @@ describe("chatReducer", () => {
     expect(compressed.activeConversation?.summary).toBe("用户今天有点累");
   });
 
-  it("advances compression boundary and user memory on context-compressed", () => {
+  it("推进摘要边界时保留独立的长期记忆", () => {
     const idleState = {
       ...initialChatState,
       activeConversation: { ...conversation, compressedUpTo: 10, summary: "旧记忆" },
@@ -204,14 +204,13 @@ describe("chatReducer", () => {
       compressedUpTo: 20,
       summary: "新记忆",
       type: "context-compressed",
-      userMemory: "新画像",
     });
 
     expect(compressed.activeConversation).toMatchObject({
       compressedUpTo: 20,
       summary: "新记忆",
     });
-    expect(compressed.userMemory).toBe("新画像");
+    expect(compressed.userMemory).toBe("旧画像");
   });
 
   it("updates user memory via user-memory-updated without touching other state", () => {

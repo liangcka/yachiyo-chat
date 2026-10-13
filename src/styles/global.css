@@ -1,6 +1,10 @@
 @import "./tokens.css";
 @import "./animations.css";
 @import "./chat.css";
+@import "./history-search.css";
+@import "./memory-history.css";
+@import "./settings.css";
+@import "./onboarding.css";
 
 *,
 *::before,

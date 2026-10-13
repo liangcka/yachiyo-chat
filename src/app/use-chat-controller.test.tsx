@@ -79,6 +79,141 @@ function deferred<T = void>() {
 }
 
 describe("useChatController", () => {
+  it("重载前等待空闲状态下尚未提交的最终回复", async () => {
+    const finalWrite = deferred();
+    const repository = repositoryWith({
+      putMessage: vi.fn(async (message) => {
+        if (message.id === "assistant-1" && message.status === "complete") await finalWrite.promise;
+      }),
+    });
+    const stream = vi.fn<StreamChatFunction>(async (_request, options) => {
+      options.onDelta("已完成的回复");
+      return { truncated: false };
+    });
+    const { result } = renderHook(() => useChatController({
+      id: ids("user-1", "assistant-1"), repository, streamChat: stream,
+    }));
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+    let sending = Promise.resolve();
+    act(() => { sending = result.current.send("你好"); });
+    await waitFor(() => expect(repository.putMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "assistant-1", status: "complete" }),
+    ));
+    expect(result.current.phase).toBe("idle");
+    const ready = vi.fn();
+    const preparing = result.current.prepareForReload().then(ready);
+    await act(async () => { await Promise.resolve(); });
+    expect(ready).not.toHaveBeenCalled();
+    await act(async () => {
+      finalWrite.resolve();
+      await Promise.all([sending, preparing]);
+    });
+    expect(ready).toHaveBeenCalledOnce();
+    expect(result.current.messages.at(-1)?.text).toBe("已完成的回复");
+  });
+
+  it("重载准备等待生成自然完成，不中止流式回复", async () => {
+    const response = deferred<StreamChatResult>();
+    let signal: AbortSignal | undefined;
+    const stream = vi.fn<StreamChatFunction>(async (_request, options) => {
+      signal = options.signal;
+      options.onDelta("继续回复");
+      return response.promise;
+    });
+    const { result } = renderHook(() => useChatController({ repository: repositoryWith(), streamChat: stream }));
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+    let sending = Promise.resolve();
+    act(() => { sending = result.current.send("你好"); });
+    await waitFor(() => expect(stream).toHaveBeenCalledOnce());
+    const ready = vi.fn();
+    const preparing = result.current.prepareForReload().then(ready);
+    await act(async () => { await Promise.resolve(); });
+    expect(ready).not.toHaveBeenCalled();
+    expect(signal?.aborted).toBe(false);
+    await act(async () => {
+      response.resolve({ truncated: false });
+      await Promise.all([sending, preparing]);
+    });
+    expect(ready).toHaveBeenCalledOnce();
+  });
+
+  it("最终回复存储失败后，即使清除界面错误也拒绝重载", async () => {
+    const repository = repositoryWith({
+      putMessage: vi.fn(async (message) => {
+        if (message.role === "assistant" && message.status === "complete") throw new Error("存储失败");
+      }),
+    });
+    const stream = vi.fn<StreamChatFunction>(async (_request, options) => {
+      options.onDelta("仍需保存");
+      return { truncated: false };
+    });
+    const { result } = renderHook(() => useChatController({ repository, streamChat: stream }));
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+    await act(async () => { await result.current.send("你好"); });
+    act(() => { result.current.clearError(); });
+    await expect(result.current.prepareForReload()).rejects.toThrow("本地数据尚未成功保存");
+  });
+
+  it.each([false, true])("重载前等待后台标题与记忆事务，并拒绝写入失败（失败=%s）", async (fail) => {
+    const metadataWrite = deferred();
+    const repository = repositoryWith({
+      applyConversationMetadata: vi.fn(async () => {
+        await metadataWrite.promise;
+        return { memory: "喜欢绿茶" };
+      }),
+    });
+    const stream = vi.fn<StreamChatFunction>(async (request, options) => {
+      options.onDelta(request.mode === "metadata"
+        ? JSON.stringify({ title: "绿茶", memory: "喜欢绿茶" }) : "记住了");
+      return { truncated: false };
+    });
+    const { result } = renderHook(() => useChatController({ repository, streamChat: stream }));
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+    await act(async () => { await result.current.send("我喜欢绿茶"); });
+    await waitFor(() => expect(repository.applyConversationMetadata).toHaveBeenCalledOnce());
+    expect(result.current.phase).toBe("idle");
+    const ready = vi.fn();
+    const preparing = result.current.prepareForReload().then(ready);
+    const outcome = fail
+      ? expect(preparing).rejects.toThrow("本地数据尚未成功保存")
+      : expect(preparing).resolves.toBeUndefined();
+    await act(async () => { await Promise.resolve(); });
+    expect(ready).not.toHaveBeenCalled();
+    await act(async () => {
+      if (fail) metadataWrite.reject(new Error("记忆写入失败"));
+      else metadataWrite.resolve();
+      await outcome;
+    });
+    expect(ready).toHaveBeenCalledTimes(fail ? 0 : 1);
+  });
+
+  it("重载前等待手动记住消息的写入", async () => {
+    const memoryWrite = deferred();
+    const user: ChatMessage = { ...greeting, id: "user-1", role: "user", text: "喜欢绿茶" };
+    const repository = repositoryWith({
+      listMessages: vi.fn(async () => [user]),
+      rememberMessageMemory: vi.fn(async () => { await memoryWrite.promise; return "喜欢绿茶"; }),
+    });
+    const stream = vi.fn<StreamChatFunction>(async (_request, options) => {
+      options.onDelta(JSON.stringify({ title: null, memory: "喜欢绿茶" }));
+      return { truncated: false };
+    });
+    const { result } = renderHook(() => useChatController({ repository, streamChat: stream }));
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+    let remembering: Promise<unknown> = Promise.resolve();
+    act(() => { remembering = result.current.rememberMessage("user-1"); });
+    await waitFor(() => expect(repository.rememberMessageMemory).toHaveBeenCalledOnce());
+    const ready = vi.fn();
+    const preparing = result.current.prepareForReload().then(ready);
+    await act(async () => { await Promise.resolve(); });
+    expect(ready).not.toHaveBeenCalled();
+    await act(async () => {
+      memoryWrite.resolve();
+      await Promise.all([remembering, preparing]);
+    });
+    expect(ready).toHaveBeenCalledOnce();
+  });
+
   it("creates a new conversation when history is empty", async () => {
     const created = { ...conversation, id: "new-conversation" };
     const repository = repositoryWith({
@@ -550,6 +685,234 @@ describe("useChatController", () => {
     expect(chatRequest?.messages.at(-1)).toEqual({ role: "user", text: "次" });
   });
 
+  it("压缩覆盖窗口外的连续历史并保留最近一轮原文", async () => {
+    const messages: ChatMessage[] = Array.from({ length: 60 }, (_, index) => ({
+      conversationId: conversation.id,
+      createdAt: 20 + index,
+      id: `history-${index}`,
+      role: index % 2 === 0 ? "user" : "assistant",
+      status: "complete",
+      text: `完整历史 ${index}`,
+    }));
+    const repository = repositoryWith({
+      listMessages: vi.fn(async (_id, options) =>
+        options?.limit === undefined ? messages : messages.slice(-options.limit),
+      ),
+    });
+    const stream = vi.fn<StreamChatFunction>(async (_request, options) => {
+      options.onDelta("<conversation_memory>已保留关键事件</conversation_memory>");
+      return { truncated: false };
+    });
+    const { result } = renderHook(() => useChatController({ repository, streamChat: stream }));
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+    expect(result.current.messages).toHaveLength(50);
+
+    await act(async () => expect(await result.current.compressConversation()).toBe(true));
+
+    const summarized = stream.mock.calls.flatMap(([request]) =>
+      request.messages.map((message) => message.text),
+    );
+    for (const message of messages.slice(0, -2)) {
+      expect(summarized.filter((text) => text === message.text)).toHaveLength(1);
+    }
+    expect(summarized).not.toContain("完整历史 58");
+    expect(summarized).not.toContain("完整历史 59");
+    expect(result.current.activeConversation?.compressedUpTo).toBe(77);
+    expect(result.current.messages).toHaveLength(50);
+    expect(repository.updateConversationSummary).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { output: "<conversation_memory>不完整摘要</conversation_memory>", truncated: true },
+    { output: "<conversation_memory>缺少闭合标签", truncated: false },
+    { output: "<user_profile>只有画像</user_profile>", truncated: false },
+    { output: "<conversation_memory> </conversation_memory>", truncated: false },
+    { output: "界".repeat(2001), truncated: false },
+  ])("拒绝不完整或超长摘要并保留旧边界：$truncated $output", async ({ output, truncated }) => {
+    const messages: ChatMessage[] = Array.from({ length: 4 }, (_, index) => ({
+      conversationId: conversation.id,
+      createdAt: 20 + index,
+      id: `history-${index}`,
+      role: index % 2 === 0 ? "user" : "assistant",
+      status: "complete",
+      text: `消息 ${index}`,
+    }));
+    const repository = repositoryWith({ listMessages: vi.fn(async () => messages) });
+    const stream = vi.fn<StreamChatFunction>(async (_request, options) => {
+      options.onDelta(output);
+      return { truncated };
+    });
+    const { result } = renderHook(() => useChatController({ repository, streamChat: stream }));
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    await act(async () => expect(await result.current.compressConversation()).toBe(false));
+
+    expect(result.current.activeConversation?.compressedUpTo).toBeUndefined();
+    expect(repository.updateConversationSummary).not.toHaveBeenCalled();
+    expect(repository.updateUserMemory).not.toHaveBeenCalled();
+    expect(result.current.phase).toBe("idle");
+  });
+
+  it("后续压缩批次失败时不提交前一批摘要或边界", async () => {
+    const messages: ChatMessage[] = Array.from({ length: 24 }, (_, index) => ({
+      conversationId: conversation.id,
+      createdAt: 20 + index,
+      id: `history-${index}`,
+      role: index % 2 === 0 ? "user" : "assistant",
+      status: "complete",
+      text: `消息 ${index}`,
+    }));
+    const repository = repositoryWith({ listMessages: vi.fn(async () => messages) });
+    const stream = vi.fn<StreamChatFunction>()
+      .mockImplementationOnce(async (_request, options) => {
+        options.onDelta("<conversation_memory>第一批摘要</conversation_memory>");
+        return { truncated: false };
+      })
+      .mockImplementationOnce(async (_request, options) => {
+        options.onDelta("<conversation_memory>第二批未完成");
+        return { truncated: true };
+      });
+    const { result } = renderHook(() => useChatController({ repository, streamChat: stream }));
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    await act(async () => expect(await result.current.compressConversation()).toBe(false));
+
+    expect(stream).toHaveBeenCalledTimes(2);
+    expect(repository.updateConversationSummary).not.toHaveBeenCalled();
+    expect(result.current.activeConversation?.summary).toBeUndefined();
+    expect(result.current.activeConversation?.compressedUpTo).toBeUndefined();
+  });
+
+  it("增量压缩失败时保留已有摘要和边界", async () => {
+    const compressedConversation: Conversation = {
+      ...conversation,
+      compressedUpTo: 21,
+      compressedUpToId: "history-1",
+      summary: "已有的有效摘要",
+    };
+    const messages: ChatMessage[] = Array.from({ length: 6 }, (_, index) => ({
+      conversationId: conversation.id,
+      createdAt: 20 + index,
+      id: `history-${index}`,
+      role: index % 2 === 0 ? "user" : "assistant",
+      status: "complete",
+      text: `消息 ${index}`,
+    }));
+    const repository = repositoryWith({
+      listConversations: vi.fn(async () => [compressedConversation]),
+      listMessages: vi.fn(async () => messages),
+    });
+    const stream = vi.fn<StreamChatFunction>(async (_request, options) => {
+      options.onDelta("<conversation_memory>新摘要未完成");
+      return { truncated: true };
+    });
+    const { result } = renderHook(() => useChatController({ repository, streamChat: stream }));
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    await act(async () => expect(await result.current.compressConversation()).toBe(false));
+
+    expect(result.current.activeConversation).toEqual(compressedConversation);
+    expect(repository.updateConversationSummary).not.toHaveBeenCalled();
+    expect(result.current.phase).toBe("idle");
+  });
+
+  it("只有最近一轮时不请求压缩并恢复空闲", async () => {
+    const messages: ChatMessage[] = [
+      { conversationId: conversation.id, createdAt: 20, id: "user-1", role: "user", text: "你好", status: "complete" },
+      { conversationId: conversation.id, createdAt: 21, id: "assistant-1", role: "assistant", text: "你好呀", status: "complete" },
+    ];
+    const repository = repositoryWith({ listMessages: vi.fn(async () => messages) });
+    const stream = vi.fn<StreamChatFunction>();
+    const { result } = renderHook(() => useChatController({ repository, streamChat: stream }));
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    await act(async () => expect(await result.current.compressConversation()).toBe(false));
+
+    expect(stream).not.toHaveBeenCalled();
+    expect(repository.updateConversationSummary).not.toHaveBeenCalled();
+    expect(result.current.phase).toBe("idle");
+  });
+
+  it("连续撤回进入压缩区时清除摘要，后续请求使用剩余原文", async () => {
+    const compressedConversation: Conversation = {
+      ...conversation,
+      compressedUpTo: 23,
+      compressedUpToId: "history-3",
+      lastCompressedAt: 30,
+      summary: "已经撤销的约定",
+    };
+    const messages: ChatMessage[] = Array.from({ length: 6 }, (_, index) => ({
+      conversationId: conversation.id,
+      createdAt: 20 + index,
+      id: `history-${index}`,
+      role: index % 2 === 0 ? "user" : "assistant",
+      status: "complete",
+      text: `消息 ${index}`,
+    }));
+    const repository = repositoryWith({
+      listConversations: vi.fn(async () => [compressedConversation]),
+      listMessages: vi.fn(async () => messages),
+    });
+    const stream = vi.fn<StreamChatFunction>(async (_request, options) => {
+      options.onDelta("接着聊");
+      return { truncated: false };
+    });
+    const { result } = renderHook(() => useChatController({ repository, streamChat: stream }));
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    await act(async () => { await result.current.recall(); });
+    expect(result.current.activeConversation?.summary).toBe(compressedConversation.summary);
+    expect(result.current.activeConversation?.compressedUpTo).toBe(23);
+
+    await act(async () => { await result.current.recall(); });
+    expect(repository.deleteMessagesFrom).toHaveBeenNthCalledWith(1, conversation.id, 24);
+    expect(repository.deleteMessagesFrom).toHaveBeenNthCalledWith(2, conversation.id, 22);
+    expect(result.current.activeConversation?.summary).toBeUndefined();
+    expect(result.current.activeConversation?.compressedUpTo).toBeUndefined();
+    expect(result.current.activeConversation?.compressedUpToId).toBeUndefined();
+    expect(result.current.activeConversation?.lastCompressedAt).toBeUndefined();
+
+    await act(async () => result.current.send("继续"));
+    const texts = stream.mock.calls[0]?.[0].messages.map(({ text }) => text);
+    expect(texts).toEqual(["消息 0", "消息 1", "继续"]);
+  });
+
+  it("重生成压缩边界上的回复时先移除旧摘要再发送原文", async () => {
+    const compressedConversation: Conversation = {
+      ...conversation,
+      compressedUpTo: 23,
+      compressedUpToId: "history-3",
+      summary: "旧回复中的约定",
+    };
+    const messages: ChatMessage[] = Array.from({ length: 6 }, (_, index) => ({
+      conversationId: conversation.id,
+      createdAt: 20 + index,
+      id: `history-${index}`,
+      role: index % 2 === 0 ? "user" : "assistant",
+      status: "complete",
+      text: `消息 ${index}`,
+    }));
+    const repository = repositoryWith({
+      listConversations: vi.fn(async () => [compressedConversation]),
+      listMessages: vi.fn(async () => messages),
+    });
+    const stream = vi.fn<StreamChatFunction>(async (_request, options) => {
+      options.onDelta("重新回复");
+      return { truncated: false };
+    });
+    const { result } = renderHook(() => useChatController({ repository, streamChat: stream }));
+    await waitFor(() => expect(result.current.phase).toBe("idle"));
+
+    await act(async () => result.current.regenerate("history-3"));
+
+    expect(repository.deleteMessagesFrom).toHaveBeenCalledWith(conversation.id, 23);
+    expect(result.current.activeConversation?.summary).toBeUndefined();
+    expect(result.current.activeConversation?.compressedUpTo).toBeUndefined();
+    expect(stream.mock.calls[0]?.[0].messages.map(({ text }) => text)).toEqual([
+      "消息 0", "消息 1", "消息 2",
+    ]);
+  });
+
   it("compresses context non-destructively and injects memory on subsequent turns", async () => {
     const messages: ChatMessage[] = [
       { conversationId: conversation.id, createdAt: 1, id: "u1", role: "user", text: "我喜欢草莓大福", status: "complete" },
@@ -583,14 +946,15 @@ describe("useChatController", () => {
     expect(result.current.messages).toHaveLength(4);
     expect(result.current.activeConversation?.summary).toBe("用户喜欢草莓大福，两人约定明天去涉谷。");
     // 增量压缩：边界推进到最后一条纳入摘要的消息
-    expect(result.current.activeConversation?.compressedUpTo).toBe(4);
-    expect(result.current.activeConversation?.compressedUpToId).toBe("a2");
+    expect(result.current.activeConversation?.compressedUpTo).toBe(2);
+    expect(result.current.activeConversation?.compressedUpToId).toBe("a1");
     expect(repository.updateConversationSummary).toHaveBeenCalledWith(
       conversation.id,
       "用户喜欢草莓大福，两人约定明天去涉谷。",
       expect.any(Number),
-      4,
-      "a2",
+      2,
+      "a1",
+      expect.any(AbortSignal),
     );
     // 模型未按区块格式输出时不写用户画像
     expect(repository.updateUserMemory).not.toHaveBeenCalled();
@@ -607,6 +971,10 @@ describe("useChatController", () => {
       role: "assistant",
       text: "（已记住我们之前的对话与经历，继续交流~）",
     });
+    expect(chatRequest?.messages).toEqual(expect.arrayContaining([
+      { role: "user", text: "明天去涉谷逛街" },
+      { role: "assistant", text: "好呀！" },
+    ]));
     expect(chatRequest?.messages.at(-1)).toEqual({
       role: "user",
       text: "天气怎么样？",
@@ -628,6 +996,8 @@ describe("useChatController", () => {
     const newMessages: ChatMessage[] = [
       { conversationId: conversation.id, createdAt: 5, id: "u3", role: "user", text: "新消息一", status: "complete" },
       { conversationId: conversation.id, createdAt: 6, id: "a3", role: "assistant", text: "新回复一", status: "complete" },
+      { conversationId: conversation.id, createdAt: 7, id: "u4", role: "user", text: "保留的最新消息", status: "complete" },
+      { conversationId: conversation.id, createdAt: 8, id: "a4", role: "assistant", text: "保留的最新回复", status: "complete" },
     ];
     const repository = repositoryWith({
       getConversation: vi.fn(async () => compressedConversation),
@@ -637,7 +1007,7 @@ describe("useChatController", () => {
     });
     const stream = vi.fn<StreamChatFunction>(async (_request, options) => {
       options.onDelta(
-        "<conversation_memory>合并后的完整记忆</conversation_memory>\n<user_profile>彩叶喜欢草莓大福，最近想去涉谷</user_profile>",
+        "<conversation_memory>合并后的完整记忆</conversation_memory>",
       );
       return { truncated: false };
     });
@@ -656,35 +1026,37 @@ describe("useChatController", () => {
     const compressionRequest = stream.mock.calls[0]?.[0];
     expect(compressionRequest?.mode).toBe("summary");
     const compressionTexts = compressionRequest?.messages.map((message) => message.text) ?? [];
-    // 旧摘要与现有用户画像作为前缀注入
+    // 会话摘要独立维护，不重新提取或覆盖长期画像。
     expect(compressionTexts.some((text) => text.includes("旧记忆：用户喜欢草莓大福。"))).toBe(true);
-    expect(compressionTexts.some((text) => text.includes("彩叶喜欢草莓大福"))).toBe(true);
+    expect(compressionTexts.some((text) => text.includes("彩叶喜欢草莓大福"))).toBe(false);
     // 已压缩区间不再重复发送
     expect(compressionTexts.some((text) => text.includes("旧消息一"))).toBe(false);
     expect(compressionTexts.some((text) => text.includes("旧回复二"))).toBe(false);
     // 压缩边界之后的新消息参与合并
     expect(compressionTexts.some((text) => text.includes("新消息一"))).toBe(true);
     expect(compressionTexts.some((text) => text.includes("新回复一"))).toBe(true);
+    expect(compressionTexts).not.toContain("保留的最新消息");
 
-    // 双区块解析：会话记忆与用户画像分别落库
+    // 摘要和压缩边界一次落库，长期画像保持原值。
     expect(repository.updateConversationSummary).toHaveBeenCalledWith(
       conversation.id,
       "合并后的完整记忆",
       expect.any(Number),
       6,
       "a3",
+      expect.any(AbortSignal),
     );
-    expect(repository.updateUserMemory).toHaveBeenCalledWith("彩叶喜欢草莓大福，最近想去涉谷");
+    expect(repository.updateUserMemory).not.toHaveBeenCalled();
     expect(result.current.activeConversation?.compressedUpTo).toBe(6);
     expect(result.current.activeConversation?.compressedUpToId).toBe("a3");
-    expect(result.current.userMemory).toBe("彩叶喜欢草莓大福，最近想去涉谷");
+    expect(result.current.userMemory).toBe("彩叶喜欢草莓大福");
 
     // 后续请求：长期记忆 + 摘要前缀，且已压缩消息不重复进入历史
     await act(async () => result.current.send("继续聊"));
     const chatRequest = stream.mock.calls[1]?.[0];
     const chatTexts = chatRequest?.messages.map((message) => message.text) ?? [];
     expect(chatTexts.some((text) => text.includes("【关于彩叶的长期记忆"))).toBe(true);
-    expect(chatTexts.some((text) => text.includes("彩叶喜欢草莓大福，最近想去涉谷"))).toBe(true);
+    expect(chatTexts.some((text) => text.includes("彩叶喜欢草莓大福"))).toBe(true);
     expect(chatTexts.some((text) => text.includes("【前情提要"))).toBe(true);
     expect(chatTexts.some((text) => text.includes("旧消息一"))).toBe(false);
     expect(chatRequest?.messages.at(-1)).toEqual({ role: "user", text: "继续聊" });

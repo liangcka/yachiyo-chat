@@ -182,6 +182,38 @@ describe("POST /api/chat", () => {
     expect(providerFetch).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { model: "glm-4.6", imageDataUrl: undefined },
+    { model: "glm-4.6v-flash", imageDataUrl: "data:image/png;base64,iVBORw0KGgo=" },
+  ])("允许已保存的 $model 配置继续发送消息", async ({ model, imageDataUrl }) => {
+    let outbound: Record<string, unknown> | undefined;
+    providerFetch.mockImplementationOnce(async (input, init) => {
+      const upstreamRequest = new Request(input, init);
+      outbound = JSON.parse(await upstreamRequest.text()) as Record<string, unknown>;
+      return new Response(providerSse("彩叶~"), {
+        headers: { "content-type": "text/event-stream" },
+      });
+    });
+
+    const response = await invoke(
+      await chatRequest(
+        {
+          locale: "zh-CN",
+          provider: "glm",
+          apiKey: "sk-test-key-12345678901234567890",
+          model,
+          messages: [{ role: "user", text: "你好", ...(imageDataUrl ? { imageDataUrl } : {}) }],
+        },
+        `legacy-${model}`,
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(outbound?.model).toBe(model);
+    expect(await collectClientEvents(response.body!)).toContainEqual({ type: "delta", text: "彩叶~" });
+    expect(providerFetch).toHaveBeenCalledOnce();
+  });
+
   it("never returns an upstream error body or provider credential", async () => {
     providerFetch.mockImplementationOnce(async (input) => {
       expect(String(input)).toBe(providerUrl);

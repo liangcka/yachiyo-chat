@@ -1,24 +1,17 @@
 import { expect, test, type Page } from "@playwright/test";
+import { enterApp } from "./helpers";
 
-/** 与 yachiyo-chat.spec.ts 保持一致的应用进入流程 */
-async function enterApp(page: Page): Promise<void> {
-  await page.goto("/");
-  await page.getByLabel("访问码").fill("yachiyo-local-access");
-  await page.getByRole("button", { name: "进入" }).click();
-  await expect(page.getByPlaceholder("什么都可以告诉我")).toBeVisible();
-}
-
-/** 通过 菜单 → 技能 入口打开技能面板 */
-async function openSkillsPanel(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "菜单" }).click();
-  await page.getByRole("button", { name: "技能" }).click();
-  await expect(page.getByRole("dialog", { name: "技能" })).toBeVisible();
+/** 联网选项位于设置中心的聊天偏好页。 */
+async function openPreferencesPanel(page: Page): Promise<void> {
+  await page.getByRole("button", { name: "菜单", exact: true }).click();
+  await page.getByRole("button", { name: "聊天偏好" }).click();
+  await expect(page.getByRole("dialog", { name: "设置中心" })).toBeVisible();
 }
 
 /** 点击面板右上角关闭按钮并等待面板完全收起（避免残留 overlay 拦截后续点击） */
-async function closeSkillsPanel(page: Page): Promise<void> {
-  // 菜单 drawer 关闭动画期间可能仍残留"关闭菜单"按钮，因此限定在技能面板内查找
-  const panel = page.getByRole("dialog", { name: "技能" });
+async function closePreferencesPanel(page: Page): Promise<void> {
+  // 菜单关闭动画期间可能仍残留同名按钮，限定目标面板避免命中抽屉。
+  const panel = page.getByRole("dialog", { name: "设置中心" });
   await panel.getByRole("button", { name: "关闭菜单" }).click();
   await expect(panel).toBeHidden();
 }
@@ -32,7 +25,7 @@ async function sendAndAwaitMockReply(page: Page, text: string): Promise<void> {
   );
 }
 
-/** 收集浏览器控制台 error，供用例结尾断言（沿用现有用例模式） */
+/** 收集浏览器控制台 error，供用例结尾断言 */
 function collectConsoleErrors(page: Page): string[] {
   const consoleErrors: string[] = [];
   page.on("console", (message) => {
@@ -46,13 +39,13 @@ test.describe("web search (mock)", () => {
     const consoleErrors = collectConsoleErrors(page);
     await enterApp(page);
 
-    // 打开技能面板并开启联网搜索（显示引用来源默认开启）
-    await openSkillsPanel(page);
+    // 打开聊天偏好并开启联网搜索（显示引用来源默认开启）
+    await openPreferencesPanel(page);
     const webSearchToggle = page.getByRole("button", { name: "切换技能启用状态: 联网搜索" });
     await expect(webSearchToggle).toHaveAttribute("aria-pressed", "false");
     await webSearchToggle.click();
     await expect(webSearchToggle).toHaveAttribute("aria-pressed", "true");
-    await closeSkillsPanel(page);
+    await closePreferencesPanel(page);
 
     await sendAndAwaitMockReply(page, "帮我查点资料");
 
@@ -78,7 +71,7 @@ test.describe("web search (mock)", () => {
     const consoleErrors = collectConsoleErrors(page);
     await enterApp(page);
 
-    await openSkillsPanel(page);
+    await openPreferencesPanel(page);
     // 开启联网搜索后，"显示引用来源"开关才可交互，再将其关闭
     const webSearchToggle = page.getByRole("button", { name: "切换技能启用状态: 联网搜索" });
     await webSearchToggle.click();
@@ -89,7 +82,7 @@ test.describe("web search (mock)", () => {
     await expect(showSourcesToggle).toHaveAttribute("aria-pressed", "true");
     await showSourcesToggle.click();
     await expect(showSourcesToggle).toHaveAttribute("aria-pressed", "false");
-    await closeSkillsPanel(page);
+    await closePreferencesPanel(page);
 
     await sendAndAwaitMockReply(page, "再帮我查点别的");
 
@@ -106,7 +99,7 @@ test.describe("web search (mock)", () => {
     const consoleErrors = collectConsoleErrors(page);
     await enterApp(page);
 
-    await openSkillsPanel(page);
+    await openPreferencesPanel(page);
     const webSearchToggle = page.getByRole("button", { name: "切换技能启用状态: 联网搜索" });
     await expect(webSearchToggle).toHaveAttribute("aria-pressed", "false");
     // 联网搜索关闭时，"显示引用来源"开关应处于 disabled 状态
@@ -115,7 +108,7 @@ test.describe("web search (mock)", () => {
     });
     await expect(showSourcesToggle).toBeDisabled();
     await expect(showSourcesToggle).toHaveAttribute("aria-pressed", "true");
-    await closeSkillsPanel(page);
+    await closePreferencesPanel(page);
 
     await sendAndAwaitMockReply(page, "随便聊聊");
 

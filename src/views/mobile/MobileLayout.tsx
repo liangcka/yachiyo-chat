@@ -5,14 +5,16 @@ import { Composer } from "../../components/Composer";
 import { ControlDock } from "../../components/ControlDock";
 import { ConversationView } from "../../components/ConversationView";
 import { HistoryPanel } from "../../components/HistoryPanel";
-import { LlmSettingsPanel } from "../../components/LlmSettingsPanel";
 import { MenuDrawer } from "../../components/MenuDrawer";
-import { SkillsPanel } from "../../components/SkillsPanel";
+import { OnboardingGuide } from "../../components/OnboardingGuide";
+import { SettingsPanel, type SettingsTabId } from "../../components/SettingsPanel";
 import { TopControls } from "../../components/TopControls";
-import { UserMemoryPanel } from "../../components/UserMemoryPanel";
 import { UpdatePrompt } from "../../pwa/UpdatePrompt";
 import { isRetryableChatErrorCode } from "../../services/chat-client";
+import { PROVIDER_METADATA } from "../../domain/llm";
 import { SKILLS } from "../../skills";
+import { NativeUpdatePrompt } from "../../update/NativeUpdateControls";
+import { useNativeUpdate } from "../../update/use-native-update";
 import { controllerErrorMessage, imageErrorMessage, type SharedViewProps } from "../layout-types";
 
 export function MobileLayout({
@@ -37,8 +39,12 @@ export function MobileLayout({
   onRecall,
   onRegenerate,
   onNewChat,
+  onboardingOpen,
+  onCloseOnboarding,
+  onOpenOnboarding,
   onRename,
   onDelete,
+  onSearchConversations,
   onClearData,
   onLocale,
   onSignOut,
@@ -54,18 +60,29 @@ export function MobileLayout({
   refreshLlm,
 }: SharedViewProps) {
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [llmOpen, setLlmOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [skillsOpen, setSkillsOpen] = useState(false);
-  const [memoryOpen, setMemoryOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<SettingsTabId>("model");
   const [dockCollapsed, setDockCollapsed] = useState(false);
   const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
   const [prevConversationId, setPrevConversationId] = useState(controller.activeConversation?.id);
   const baseViewportHeightRef = useRef(0);
+  const nativeUpdateBlocked =
+    (controller.phase !== "idle" && controller.phase !== "offline" && controller.phase !== "error") ||
+    composerValue.length > 0 || pendingImageDataUrl !== undefined ||
+    settingsOpen || historyOpen || menuOpen || onboardingOpen;
+  const nativeUpdate = useNativeUpdate({
+    blocked: nativeUpdateBlocked,
+    prepareForReload: controller.prepareForReload,
+  });
 
   if (controller.activeConversation?.id !== prevConversationId) {
     setPrevConversationId(controller.activeConversation?.id);
     setDockCollapsed(false);
+    setIsKeyboardOpen(false);
+    if (typeof document !== "undefined") {
+      document.documentElement.classList.remove("keyboard-open");
+    }
   }
 
   // 软键盘弹起或历史消息上滑时收缩四格小组件，优先保证输入与阅读视野
@@ -95,6 +112,14 @@ export function MobileLayout({
     if (typeof window === "undefined" || !window.visualViewport) return;
     const vv = window.visualViewport;
 
+    const isInputFocused = () => {
+      const activeEl = document.activeElement;
+      return (
+        activeEl instanceof HTMLElement &&
+        (activeEl.tagName === "TEXTAREA" || activeEl.tagName === "INPUT")
+      );
+    };
+
     const handleViewportChange = () => {
       const height = vv.height;
       document.documentElement.style.setProperty("--visual-viewport-height", `${height}px`);
@@ -112,6 +137,7 @@ export function MobileLayout({
             requestAnimationFrame(() => scrollChatToBottom(false));
           } else {
             document.documentElement.classList.remove("keyboard-open");
+            setDockCollapsed(false);
           }
           return keyboardOpen;
         }
@@ -122,6 +148,19 @@ export function MobileLayout({
     handleViewportChange();
     vv.addEventListener("resize", handleViewportChange);
 
+    // 当输入框失去焦点时，确保软键盘状态被彻底清除，杜绝无焦点时 ControlDock 被锁死隐藏
+    const handleFocusOut = () => {
+      setTimeout(() => {
+        if (!isInputFocused()) {
+          baseViewportHeightRef.current = vv.height;
+          document.documentElement.classList.remove("keyboard-open");
+          setIsKeyboardOpen(false);
+          setDockCollapsed(false);
+        }
+      }, 50);
+    };
+    window.addEventListener("focusout", handleFocusOut);
+
     const handleOrientationChange = () => {
       baseViewportHeightRef.current = 0;
     };
@@ -129,6 +168,7 @@ export function MobileLayout({
 
     return () => {
       vv.removeEventListener("resize", handleViewportChange);
+      window.removeEventListener("focusout", handleFocusOut);
       window.removeEventListener("orientationchange", handleOrientationChange);
       document.documentElement.style.removeProperty("--visual-viewport-height");
       document.documentElement.classList.remove("keyboard-open");
@@ -184,15 +224,35 @@ export function MobileLayout({
     updateBottomHeight();
   }, [isDockCollapsed, isKeyboardOpen, updateBottomHeight]);
 
+  // 当底栏因翻阅历史处于收缩状态且软键盘未打开时，点击底栏空白毛玻璃区域直接恢复展开
+  useEffect(() => {
+    const bottomEl = chatBottomRef.current;
+    if (!bottomEl) return;
+
+    const handleBottomClick = (event: MouseEvent) => {
+      if (isDockCollapsedRef.current && !isKeyboardOpenRef.current) {
+        const target = event.target as HTMLElement | null;
+        if (target && !target.closest("button") && !target.closest("textarea") && !target.closest("input")) {
+          setDockCollapsed(false);
+        }
+      }
+    };
+
+    bottomEl.addEventListener("click", handleBottomClick);
+    return () => {
+      bottomEl.removeEventListener("click", handleBottomClick);
+    };
+  }, []);
+
   // APK 原生壳：返回键先关弹层，2 秒内再按一次才退出
   useAndroidBack(
     () => {
-      if (llmOpen) {
-        setLlmOpen(false);
+      if (onboardingOpen) {
+        onCloseOnboarding();
         return true;
       }
-      if (skillsOpen) {
-        setSkillsOpen(false);
+      if (settingsOpen) {
+        setSettingsOpen(false);
         return true;
       }
       if (historyOpen) {
@@ -210,6 +270,10 @@ export function MobileLayout({
 
   const handleNewChat = useCallback(async () => {
     setDockCollapsed(false);
+    setIsKeyboardOpen(false);
+    if (typeof document !== "undefined") {
+      document.documentElement.classList.remove("keyboard-open");
+    }
     await onNewChat();
   }, [onNewChat]);
 
@@ -217,15 +281,45 @@ export function MobileLayout({
   const handleSelectConversation = useCallback(
     async (id: string) => {
       setDockCollapsed(false);
+      setIsKeyboardOpen(false);
+      if (typeof document !== "undefined") {
+        document.documentElement.classList.remove("keyboard-open");
+      }
       await selectConversation(id);
     },
     [selectConversation],
   );
 
-  const openLlmSettings = useCallback(async () => {
-    await refreshLlm();
-    setLlmOpen(true);
-  }, [refreshLlm]);
+  const handleSend = useCallback(
+    async (text: string) => {
+      setDockCollapsed(false);
+      await onSend(text);
+    },
+    [onSend],
+  );
+
+  const rememberMessage = controller.rememberMessage;
+  const handleRemember = useCallback((messageId: string) => {
+    showToast(copy.rememberMessagePending);
+    void rememberMessage(messageId).then((outcome) => {
+      if (outcome === "saved") showToast(copy.userMemorySaved);
+      else if (outcome === "unchanged") showToast(copy.rememberMessageUnchanged);
+      else if (outcome === "too-long") showToast(copy.rememberMessageTooLong, "error");
+      else if (outcome === "failed") showToast(copy.userMemorySaveFailed, "error");
+    });
+  }, [rememberMessage, copy.rememberMessagePending, copy.userMemorySaved, copy.rememberMessageUnchanged,
+    copy.rememberMessageTooLong, copy.userMemorySaveFailed, showToast]);
+
+  const openSettings = useCallback(
+    async (tab: SettingsTabId = "model") => {
+      if (tab === "model") {
+        await refreshLlm();
+      }
+      setSettingsTab(tab);
+      setSettingsOpen(true);
+    },
+    [refreshLlm],
+  );
 
   return (
     <>
@@ -263,6 +357,11 @@ export function MobileLayout({
         multiBubble={multiBubble}
         onLoadEarlier={() => void controller.loadEarlier()}
         onRecall={onRecall}
+        onRemember={
+          !isOnline || controller.phase === "streaming" || controller.phase === "compressing" || controller.phase === "offline"
+            ? undefined
+            : handleRemember
+        }
         onRegenerate={
           !isOnline ||
           controller.phase === "streaming" ||
@@ -289,6 +388,7 @@ export function MobileLayout({
           onDismissUpdate={() => pwa.setNeedRefresh(false)}
           onUpdate={() => void pwa.updateServiceWorker(true)}
         />
+        <NativeUpdatePrompt blocked={nativeUpdateBlocked} copy={copy} update={nativeUpdate} />
         {!isOnline || controller.phase === "offline" ? (
           <p className="status-banner">{copy.offline}</p>
         ) : null}
@@ -321,6 +421,20 @@ export function MobileLayout({
             controller.phase === "offline" ||
             !activeProviderSupportsImage
           }
+          onBlur={() => {
+            setTimeout(() => {
+              const activeEl = document.activeElement;
+              const inputFocused =
+                activeEl instanceof HTMLElement &&
+                (activeEl.tagName === "TEXTAREA" || activeEl.tagName === "INPUT");
+              if (!inputFocused && typeof window !== "undefined" && window.visualViewport) {
+                baseViewportHeightRef.current = window.visualViewport.height;
+                document.documentElement.classList.remove("keyboard-open");
+                setIsKeyboardOpen(false);
+                setDockCollapsed(false);
+              }
+            }, 50);
+          }}
           onChange={setComposerValue}
           onError={(code) => showToast(imageErrorMessage(code, copy), "error")}
           onFocus={() => {
@@ -336,7 +450,7 @@ export function MobileLayout({
             controller.setPendingImage(undefined);
             setPendingImageDataUrl(undefined);
           }}
-          onSend={onSend}
+          onSend={handleSend}
           onStop={controller.stop}
           pendingImageDataUrl={pendingImageDataUrl}
           phase={isOnline ? controller.phase : "offline"}
@@ -346,6 +460,11 @@ export function MobileLayout({
       </div>
 
       <MenuDrawer
+        activeModelLabel={
+          llmActiveProvider !== undefined
+            ? PROVIDER_METADATA[llmActiveProvider].label
+            : copy.defaultModelLabel
+        }
         copy={copy}
         locale={controller.locale}
         onClearData={onClearData}
@@ -366,12 +485,22 @@ export function MobileLayout({
         onHistory={() => setHistoryOpen(true)}
         onLocale={onLocale}
         onLlmSettings={() => {
-          void openLlmSettings();
+          void openSettings("model");
         }}
         onNewChat={handleNewChat}
+        onOpenSettings={(tab) => {
+          void openSettings(tab ?? "model");
+        }}
+        onPreferences={() => {
+          void openSettings("preferences");
+        }}
         onSignOut={onSignOut}
-        onSkills={() => setSkillsOpen(true)}
-        onUserMemory={() => setMemoryOpen(true)}
+        onSkills={() => {
+          void openSettings("skills");
+        }}
+        onUserMemory={() => {
+          void openSettings("memory");
+        }}
         open={menuOpen}
       />
 
@@ -382,49 +511,45 @@ export function MobileLayout({
         onClose={() => setHistoryOpen(false)}
         onDelete={onDelete}
         onRename={onRename}
+        onSearch={onSearchConversations}
         onSelect={handleSelectConversation}
         open={historyOpen}
       />
 
-      <LlmSettingsPanel
+      <SettingsPanel
         activeProvider={llmActiveProvider}
+        activeSkillIds={activeSkillIds}
         copy={copy}
         entries={llmEntries}
-        onActivate={onLlmActivate}
-        onClear={onLlmClear}
-        onClose={() => setLlmOpen(false)}
-        onSave={onLlmSave}
-        open={llmOpen}
-      />
-
-      <SkillsPanel
-        activeIds={activeSkillIds}
-        copy={copy}
+        initialTab={settingsTab}
         multiBubble={multiBubble}
-        onClose={() => setSkillsOpen(false)}
+        nativeUpdate={nativeUpdate}
+        onClose={() => setSettingsOpen(false)}
+        onOpenOnboarding={() => {
+          setSettingsOpen(false);
+          setMenuOpen(false);
+          onOpenOnboarding();
+        }}
+        onLlmActivate={onLlmActivate}
+        onLlmClear={onLlmClear}
+        onLlmSave={onLlmSave}
         onMultiBubbleChange={onMultiBubbleChange}
-        onToggle={(id, next) => void onSkillToggle(id, next)}
+        onSkillToggle={(id, next) => void onSkillToggle(id, next)}
         onWebSearchSettingsChange={onWebSearchSettingsChange}
-        open={skillsOpen}
+        open={settingsOpen}
         skills={SKILLS}
+        userMemory={controller.userMemory ?? ""}
         webSearchSettings={webSearchSettings}
       />
 
-      <UserMemoryPanel
+      <OnboardingGuide
         copy={copy}
-        memory={controller.userMemory ?? ""}
-        onClose={() => setMemoryOpen(false)}
-        onSave={async (memory) => {
-          const saved = await controller.updateUserMemory(memory);
-          if (saved) {
-            showToast(copy.userMemorySaved, "info");
-            setMemoryOpen(false);
-          } else {
-            showToast(copy.userMemorySaveFailed, "error");
-          }
-          return saved;
+        onClose={onCloseOnboarding}
+        onOpenSettings={() => {
+          onCloseOnboarding();
+          void openSettings("model");
         }}
-        open={memoryOpen}
+        open={onboardingOpen}
       />
     </>
   );

@@ -24,21 +24,24 @@ describe("buildSystemPrompt", () => {
   it("adds depth and memory-trust instructions to the runtime block", () => {
     const zhPrompt = buildSystemPrompt("zh-CN");
 
-    expect(zhPrompt).toContain("真实意图与情绪");
+    expect(zhPrompt).toContain("根据彩叶实际说的话理解意图与情绪");
     expect(zhPrompt).toContain("不得敷衍带过");
     expect(zhPrompt).toContain("既定事实");
+    expect(zhPrompt).toContain("彩叶明确纠正自己的近况、偏好或此前误记时，以她这次说明为准");
     expect(zhPrompt.indexOf("既定事实")).toBeLessThan(zhPrompt.indexOf("最多200个Unicode字符"));
 
     const jaPrompt = buildSystemPrompt("ja-JP");
-    expect(jaPrompt).toContain("本当の意図と感情");
+    expect(jaPrompt).toContain("実際に話した言葉から意図と感情を理解");
     expect(jaPrompt).toContain("確定した事実");
+    expect(jaPrompt).toContain("今回の説明を優先");
   });
 
   it("builds dedicated memory summarizer prompt in summary mode", () => {
     const zhPrompt = buildSystemPrompt("zh-CN", "summary");
     expect(zhPrompt).toContain("对话记忆整理助手");
     expect(zhPrompt).toContain("<conversation_memory>");
-    expect(zhPrompt).toContain("<user_profile>");
+    expect(zhPrompt).not.toContain("<user_profile>");
+    expect(zhPrompt).toContain("不超过2000个Unicode字符");
     expect(zhPrompt).toContain("核心事实");
     expect(zhPrompt).toContain("双方约定");
     expect(zhPrompt).toContain("不要带八千代角色口癖");
@@ -47,7 +50,8 @@ describe("buildSystemPrompt", () => {
     const jaPrompt = buildSystemPrompt("ja-JP", "summary");
     expect(jaPrompt).toContain("会話メモリー管理アシスタント");
     expect(jaPrompt).toContain("<conversation_memory>");
-    expect(jaPrompt).toContain("<user_profile>");
+    expect(jaPrompt).not.toContain("<user_profile>");
+    expect(jaPrompt).toContain("2000Unicode文字以内");
     expect(jaPrompt).toContain("核心的事実");
   });
 
@@ -210,6 +214,7 @@ describe("buildSystemPrompt", () => {
 
     expect(prompt).toContain("距离上一条对话过去约4小时");
     expect(prompt).toContain("彩叶可能中途休息、睡了一觉刚醒、或去忙了其他事情");
+    expect(prompt).toContain("时间间隔不能证明她睡过、通宵或外出");
   });
 
   it("renders Japanese sleep and interval guidance when locale is ja-JP", () => {
@@ -224,6 +229,7 @@ describe("buildSystemPrompt", () => {
 
     expect(prompt).toContain("生活リズムと睡眠への配慮：時間帯のみを理由に機械的に就寝を催促しないでください");
     expect(prompt).toContain("直前の会話から約1分しか経っていません（リアルタイムで連続対話中）");
+    expect(prompt).toContain("返信間隔だけで睡眠・徹夜・外出を断定しない");
   });
 
   it("formats previousTime and recognizes overnight cross-day difference", () => {
@@ -257,7 +263,7 @@ describe("buildSystemPrompt", () => {
       lastMessageIntervalMs: 10 * 60_000,
     });
 
-    expect(prompt).toContain("上一条对话时间：2026-10-03 23:55:00 星期六（跨越零点的深夜连续交流（刚跨过午夜，并非隔夜入睡醒来））");
+    expect(prompt).toContain("上一条对话时间：2026-10-03 23:55:00 星期六（跨过午夜且回复间隔较短）");
     expect(prompt).toContain("距离上一条对话过去约10分钟");
     expect(prompt).toContain("若上一条刚过去不久（如深夜跨过午夜零点连续对话），属于实时夜聊，绝不可误问“昨晚睡得好吗”");
   });
@@ -273,33 +279,51 @@ describe("buildSystemPrompt", () => {
     expect(jaPromptWithoutBubble).not.toContain("送信形式：日常のスマートフォンチャットです");
   });
 
-  it("reinforces naturalness and initiative rules at the tail of the runtime block", () => {
-    const zhPrompt = buildSystemPrompt("zh-CN");
-    expect(zhPrompt).toContain("真人质感与主动性：不复述彩叶的原话作开场");
-    expect(zhPrompt).toContain("安慰四段式");
-    expect(zhPrompt).toContain("每条最多一个");
-    expect(zhPrompt).toContain("理智正确但情感冷淡的回应一律视为失败");
-    // 关键质感约束位于记忆信任之后、硬性输出上限之前，利用近因权重压过被稀释的前置设定
-    expect(zhPrompt.indexOf("既定事实")).toBeLessThan(zhPrompt.indexOf("真人质感与主动性"));
-    expect(zhPrompt.indexOf("真人质感与主动性")).toBeLessThan(
-      zhPrompt.indexOf("最多200个Unicode字符"),
-    );
+  it("keeps contextual roleplay guidance consistent across runtime and search modes", () => {
+    for (const webSearch of [false, true]) {
+      const options = {
+        webSearch,
+        searchResults: webSearch
+          ? [{ title: "资料", url: "https://example.com/", snippet: "相关事实。" }]
+          : [],
+      };
+      const zhPrompt = buildSystemPrompt("zh-CN", "chat", options);
+      const zhRuntime = zhPrompt.split("<runtime>")[1]!.split("</runtime>")[0]!;
+      expect(zhRuntime).toContain("语气承接前几轮");
+      expect(zhRuntime).toContain("安慰四段式");
+      expect(zhRuntime).toContain("一次回复最多一个问题");
+      expect(zhRuntime).toContain("允许话题自然结束");
+      expect(zhRuntime).toContain("默认保留一处简短的全角括号动作描写");
+      expect(zhRuntime).toContain("仅发贴图或用户明确要求纯对白时不附加动作");
+      expect(zhRuntime.indexOf("既定事实")).toBeLessThan(zhRuntime.indexOf("真人质感与主动性"));
+      expect(zhRuntime.indexOf("真人质感与主动性")).toBeLessThan(
+        zhRuntime.indexOf(webSearch ? "最多1000个Unicode字符" : "最多200个Unicode字符"),
+      );
+      expect(zhPrompt).not.toMatch(/动作描写可省略|动作、昵称、波浪号和www都是可选项|句式与开场必须轮换|尽量留一个[「 ]?钩子/u);
 
-    const jaPrompt = buildSystemPrompt("ja-JP");
-    expect(jaPrompt).toContain("人間らしい質感と主体性");
-    expect(jaPrompt).toContain("冷たい返答は失敗とみなす");
+      const jaPrompt = buildSystemPrompt("ja-JP", "chat", options);
+      const jaRuntime = jaPrompt.split("<runtime>")[1]!.split("</runtime>")[0]!;
+      expect(jaRuntime).toContain("直前までの感情を引き継ぎ");
+      expect(jaRuntime).toContain("1回の返信で質問は一つまで");
+      expect(jaRuntime).toContain("話題が自然に終わっても構いません");
+      expect(jaRuntime).toContain("短い（動作や表情）を一か所添え");
+      expect(jaPrompt).not.toMatch(/動作・呼びかけ・波線・笑い表現は任意|フックを一つ|書き出しは必ず変える/u);
+    }
   });
 
   it("appends the DeepSeek vendor tightening block only for that provider", () => {
     const zhPrompt = buildSystemPrompt("zh-CN", "chat", { provider: "deepseek" });
     expect(zhPrompt).toContain("厂商适配（DeepSeek）");
-    expect(zhPrompt).toContain("这是手机即时消息，不是问答题");
+    expect(zhPrompt).toContain("她明确提问、求助或要求解释时");
+    expect(zhPrompt).not.toContain("不展开解释");
     expect(zhPrompt.indexOf("最多200个Unicode字符")).toBeLessThan(
       zhPrompt.indexOf("厂商适配（DeepSeek）"),
     );
 
     const jaPrompt = buildSystemPrompt("ja-JP", "chat", { provider: "deepseek" });
     expect(jaPrompt).toContain("ベンダー適応（DeepSeek）");
+    expect(jaPrompt).toContain("質問・相談・説明の依頼には");
+    expect(jaPrompt).not.toContain("説明を展開しない");
 
     expect(buildSystemPrompt("zh-CN", "chat", { provider: "openai" })).not.toContain(
       "厂商适配（DeepSeek）",

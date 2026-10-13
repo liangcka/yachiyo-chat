@@ -8,6 +8,8 @@
 
 export type ProviderId = "stepfun" | "deepseek" | "glm" | "openai" | "claude" | "gemini";
 
+export const DEFAULT_PROVIDER_ID: ProviderId = "glm";
+
 export const PROVIDER_IDS: readonly ProviderId[] = [
   "stepfun",
   "deepseek",
@@ -35,7 +37,7 @@ export interface LlmProviderMeta {
   readonly freeModels?: readonly string[];
   /** 该厂商是否存在支持图片输入的视觉模型(设置面板提示用) */
   readonly supportsImage: boolean;
-  /** 可发送图片的具体模型白名单;拍照/发图能力按所选模型判断 */
+  /** 可发送图片的型号，包含为已保存配置保留的旧型号；拍照/发图能力按所选模型判断 */
   readonly imageModels: readonly string[];
   readonly apiKeyHint: string;
 }
@@ -71,16 +73,16 @@ export const PROVIDER_METADATA: Readonly<Record<ProviderId, LlmProviderMeta>> = 
     group: "domestic",
     label: "智谱 GLM",
     models: [
-      "charglm-4",
       "glm-4.7-flash",
+      "charglm-4",
       "glm-5.3",
       "glm-5.3-flash",
-      "glm-4.6v-flash",
     ],
-    defaultModel: "charglm-4",
-    recommendedModel: "charglm-4",
-    freeModels: ["glm-4.6v-flash"],
+    defaultModel: "glm-4.7-flash",
+    recommendedModel: "glm-4.7-flash",
+    freeModels: ["glm-4.7-flash"],
     supportsImage: true,
+    // 保留已保存的视觉配置能力，GLM-4.6V-Flash 不再出现在预设模型列表中。
     imageModels: ["glm-5.3-flash", "glm-4.6v-flash"],
     apiKeyHint: "在 open.bigmodel.cn 控制台获取 API Key",
   },
@@ -180,7 +182,7 @@ export function isValidApiKey(value: string): boolean {
  * 格式化模型在 UI 界面中的展示名称。
  *
  * 大小写规范：
- * - GLM 保持全大写（如 GLM-5.3、GLM-5.3-flash、GLM-4.6v-flash、charGLM-4）
+ * - GLM 保持全大写，GLM-4.7-Flash 按官方名称展示（如 GLM-5.3、charGLM-4）
  * - GPT 保持全大写（如 GPT-6-luna、GPT-5.6-sol）
  * - Gemini 开头首字母大写（如 Gemini-3.8-flash）
  * - Claude 开头首字母大写（如 Claude-sonnet-5-5）
@@ -194,6 +196,7 @@ export function formatModelDisplayName(model: string): string {
     return `charGLM${lower.slice(7)}`;
   }
   if (lower === "glm" || lower.startsWith("glm-")) {
+    if (lower === "glm-4.7-flash") return "GLM-4.7-Flash";
     return `GLM${lower.slice(3)}`;
   }
   if (lower === "gpt" || lower.startsWith("gpt-")) {

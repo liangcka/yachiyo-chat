@@ -5,6 +5,7 @@ export type MessageStatus = "complete" | "streaming" | "failed" | "stopped";
 export interface Conversation {
   id: string;
   title: string;
+  titleSource?: "manual" | "generated";
   locale: Locale;
   createdAt: number;
   updatedAt: number;

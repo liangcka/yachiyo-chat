@@ -10,12 +10,14 @@ import { ChatClientError } from "../services/chat-client";
 import { LlmSettingsService } from "../services/llm-settings";
 import { SessionClientError } from "../services/session-client";
 import { WebSearchSettingsService } from "../services/web-search-settings";
+import { copyFor } from "../i18n/messages";
 
 class MemoryRepository implements AppRepository {
   conversations: Conversation[] = [];
   messages: ChatMessage[] = [];
   images: StoredImage[] = [];
   locale: Locale = "zh-CN";
+  onboardingCompleted = true;
   private sequence = 0;
 
   async createConversation(locale: Locale, now = Date.now()): Promise<Conversation> {
@@ -120,6 +122,14 @@ class MemoryRepository implements AppRepository {
     return this.locale;
   }
 
+  async getOnboardingCompleted(): Promise<boolean> {
+    return this.onboardingCompleted;
+  }
+
+  async setOnboardingCompleted(completed: boolean): Promise<void> {
+    this.onboardingCompleted = completed;
+  }
+
   async setConversationLocale(id: string, locale: Locale): Promise<void> {
     const conversation = await this.getConversation(id);
     if (conversation !== undefined) conversation.locale = locale;
@@ -174,6 +184,64 @@ function fakeServices(options: {
 }
 
 describe("App flows", () => {
+  it("新手引导在认证后显示，跳过后记住状态，设置里可重看", async () => {
+    const user = userEvent.setup();
+    const copy = copyFor("zh-CN");
+    const repository = new MemoryRepository();
+    repository.onboardingCompleted = false;
+    const services = fakeServices({ authenticated: false, repository });
+    const view = render(<App services={services} />);
+    await screen.findByLabelText("访问码");
+    expect(screen.queryByRole("dialog", { name: copy.onboardingTitle })).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText("访问码"), "correct horse moonlight");
+    await user.click(screen.getByRole("button", { name: "进入" }));
+    const guide = await screen.findByRole("dialog", { name: copy.onboardingTitle });
+    await user.click(within(guide).getByRole("button", { name: copy.onboardingSkip }));
+    await waitFor(() => expect(repository.onboardingCompleted).toBe(true));
+    view.unmount();
+
+    render(<App services={fakeServices({ repository })} />);
+    await screen.findByPlaceholderText("什么都可以告诉我");
+    expect(screen.queryByRole("dialog", { name: copy.onboardingTitle })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "菜单" }));
+    await user.click(screen.getByRole("button", { name: copy.allSettings }));
+    await user.click(screen.getByRole("button", { name: copy.onboardingEntry }));
+    expect(await screen.findByRole("dialog", { name: copy.onboardingTitle })).toBeVisible();
+    expect(screen.getByText(copy.onboardingWelcomeTitle)).toBeVisible();
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: copy.allSettings })).not.toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: copy.onboardingSkip }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: copy.onboardingTitle })).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "菜单" })).toHaveFocus();
+  });
+
+  it("新手引导可前往默认 GLM 模型设置并完成引导", async () => {
+    const user = userEvent.setup();
+    const copy = copyFor("zh-CN");
+    const repository = new MemoryRepository();
+    repository.onboardingCompleted = false;
+    render(<App services={fakeServices({ repository })} />);
+    const guide = await screen.findByRole("dialog", { name: copy.onboardingTitle });
+    await user.click(within(guide).getByRole("button", { name: copy.onboardingNext }));
+    await user.click(within(guide).getByRole("button", { name: copy.onboardingNext }));
+    await user.click(within(guide).getByRole("button", { name: copy.onboardingOpenSettings }));
+    const settings = await screen.findByRole("dialog", { name: copy.allSettings });
+    expect(within(settings).getByLabelText(copy.llmModel)).toHaveValue("glm-4.7-flash");
+    await waitFor(() => expect(repository.onboardingCompleted).toBe(true));
+  });
+
+  it("新手引导状态保存失败时仍可关闭并提示存储错误", async () => {
+    const user = userEvent.setup();
+    const copy = copyFor("zh-CN");
+    const repository = new MemoryRepository();
+    repository.onboardingCompleted = false;
+    vi.spyOn(repository, "setOnboardingCompleted").mockRejectedValue(new Error("storage unavailable"));
+    render(<App services={fakeServices({ repository })} />);
+    const guide = await screen.findByRole("dialog", { name: copy.onboardingTitle });
+    await user.click(within(guide).getByRole("button", { name: copy.onboardingSkip }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: copy.onboardingTitle })).not.toBeInTheDocument());
+    expect(await screen.findByText(copy.storageFull)).toBeVisible();
+  });
+
   it("authenticates and switches the complete interface to Japanese", async () => {
     const user = userEvent.setup();
     const services = fakeServices({ authenticated: false });
@@ -255,9 +323,9 @@ describe("App flows", () => {
       expect(stream.mock.calls[0]?.[0].webSearch).toBeUndefined();
       expect(screen.queryByLabelText("参考来源")).not.toBeInTheDocument();
 
-      // 菜单 → 技能 → 开启联网搜索
+      // 菜单 → 聊天偏好 → 开启联网搜索
       await user.click(screen.getByRole("button", { name: "菜单" }));
-      await user.click(screen.getByRole("button", { name: "技能" }));
+      await user.click(screen.getByRole("button", { name: "聊天偏好" }));
       await waitFor(() =>
         expect(screen.queryByRole("button", { name: "新建对话" })).not.toBeInTheDocument(),
       );
@@ -291,7 +359,7 @@ describe("App flows", () => {
 
       // 关闭"显示引用来源"后不再渲染来源列表
       await user.click(screen.getByRole("button", { name: "菜单" }));
-      await user.click(screen.getByRole("button", { name: "技能" }));
+      await user.click(screen.getByRole("button", { name: "聊天偏好" }));
       await waitFor(() =>
         expect(screen.queryByRole("button", { name: "新建对话" })).not.toBeInTheDocument(),
       );

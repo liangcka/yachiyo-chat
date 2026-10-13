@@ -11,10 +11,12 @@ const serviceWorker = vi.hoisted(() => ({
   update: vi.fn(async () => undefined),
 }));
 
-vi.mock("virtual:pwa-register/react", () => ({
-  useRegisterSW: () => ({
-    needRefresh: [serviceWorker.needRefresh, serviceWorker.setNeedRefresh],
-    offlineReady: [serviceWorker.offlineReady, serviceWorker.setOfflineReady],
+vi.mock("./use-pwa-update", () => ({
+  usePwaUpdate: () => ({
+    needRefresh: serviceWorker.needRefresh,
+    setNeedRefresh: serviceWorker.setNeedRefresh,
+    offlineReady: serviceWorker.offlineReady,
+    setOfflineReady: serviceWorker.setOfflineReady,
     updateServiceWorker: serviceWorker.update,
   }),
 }));

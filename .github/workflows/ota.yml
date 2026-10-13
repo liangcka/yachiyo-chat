@@ -1,0 +1,129 @@
+name: Android OTA
+
+on:
+  workflow_run:
+    workflows: [CI]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+
+concurrency:
+  group: android-ota-stable
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    name: 构建并发布 Android 热更新
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SOURCE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          persist-credentials: false
+
+      - name: 仅发布通过 CI 的 main 当前提交
+        id: eligible
+        shell: bash
+        run: |
+          set -euo pipefail
+          current="$(gh api "repos/$GH_REPO/commits/main" --jq .sha)"
+          if [[ "$current" != "$SOURCE_SHA" ]]; then
+            echo "main 已更新，跳过旧提交。"
+            exit 0
+          fi
+          passed="$(gh run list --workflow ci.yml --branch main --commit "$SOURCE_SHA" --status completed --json conclusion --jq 'any(.[]; .conclusion == "success")')"
+          if [[ "$passed" != "true" ]]; then
+            echo "当前提交没有成功的 CI 记录，停止发布。" >&2
+            exit 1
+          fi
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        if: steps.eligible.outputs.ready == 'true'
+        with:
+          cache: npm
+          node-version: 22
+
+      - name: 安装依赖
+        if: steps.eligible.outputs.ready == 'true'
+        run: npm ci
+
+      - name: 验证资源包加密与签名
+        if: steps.eligible.outputs.ready == 'true'
+        run: node --test scripts/package-ota.test.mjs
+
+      - name: 分配不可变发布版本
+        if: steps.eligible.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(date -u +%Y%m%d%H%M%S)"
+          echo "VITE_BUNDLE_VERSION=$version" >> "$GITHUB_ENV"
+          echo "OTA_TAG=ota-$version-${SOURCE_SHA:0:7}" >> "$GITHUB_ENV"
+
+      - name: 构建前端资源
+        if: steps.eligible.outputs.ready == 'true'
+        run: npm run build
+
+      - name: 生成加密资源包与签名清单
+        if: steps.eligible.outputs.ready == 'true'
+        env:
+          OTA_PRIVATE_KEY: ${{ secrets.OTA_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$OTA_PRIVATE_KEY" ]]; then
+            echo "缺少 OTA_PRIVATE_KEY 仓库 Secret。" >&2
+            exit 1
+          fi
+          node scripts/package-ota.mjs
+
+      - name: 校验草稿附件后发布
+        if: steps.eligible.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          current="$(gh api "repos/$GH_REPO/commits/main" --jq .sha)"
+          if [[ "$current" != "$SOURCE_SHA" ]]; then
+            echo "main 已更新，跳过旧资源包。"
+            exit 0
+          fi
+          native_version="$(node --input-type=module -e 'import { readFileSync } from "node:fs"; console.log(JSON.parse(readFileSync("mobile-release.json", "utf8")).nativeVersion);')"
+          cat > .ota/release-notes.md <<EOF
+          Android 前端热更新，资源版本：$VITE_BUNDLE_VERSION。
+
+          首次安装或尚未满足当前原生基线的设备，请安装 [Android v$native_version](https://github.com/liangcka/yachiyo-chat/releases/tag/v$native_version) 中的 APK；已安装兼容版本的设备会在应用内检查此资源更新。
+
+          此发布包含加密资源包与签名清单。原生插件、权限或 Android 工程变更仍需发布新版 APK。
+
+          对应提交：$SOURCE_SHA。
+          EOF
+          bundle="yachiyo-web-$VITE_BUNDLE_VERSION.zip"
+          gh release create "$OTA_TAG" ".ota/artifacts/$bundle" .ota/artifacts/app-update.json \
+            --draft --target "$SOURCE_SHA" --title "Android 热更新 $VITE_BUNDLE_VERSION" \
+            --notes-file .ota/release-notes.md
+          gh release download "$OTA_TAG" --dir .ota/verification \
+            --pattern "$bundle" --pattern app-update.json
+          cmp ".ota/artifacts/$bundle" ".ota/verification/$bundle"
+          cmp .ota/artifacts/app-update.json .ota/verification/app-update.json
+          current="$(gh api "repos/$GH_REPO/commits/main" --jq .sha)"
+          if [[ "$current" != "$SOURCE_SHA" ]]; then
+            echo "main 已更新，保留草稿且不切换正式更新。"
+            exit 0
+          fi
+          gh release edit "$OTA_TAG" --draft=false --latest
+          echo "已发布：https://github.com/$GH_REPO/releases/tag/$OTA_TAG" >> "$GITHUB_STEP_SUMMARY"

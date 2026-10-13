@@ -5,6 +5,7 @@ import { StarfieldCanvas } from "./components/StarfieldCanvas";
 import { ToastRegion } from "./components/ToastRegion";
 import { ConversationRepository } from "./data/conversation-repository";
 import { YachiyoDatabase } from "./data/db";
+import type { ConversationSearchResult } from "./domain/conversation-search";
 import type { Conversation, Locale, StoredImage } from "./domain/chat";
 import { PROVIDER_METADATA, type ActiveLlmConfig, type ProviderId } from "./domain/llm";
 import {
@@ -34,10 +35,13 @@ import { MobileLayout } from "./views/mobile/MobileLayout";
 
 export interface AppRepository extends ChatRepository {
   renameConversation(id: string, title: string): Promise<void>;
-  deleteConversation(id: string): Promise<void>;
+  deleteConversation(id: string): Promise<string | void>;
   clearAll(): Promise<void>;
   getMultiBubble?(): Promise<boolean>;
   setMultiBubble?(multiBubble: boolean): Promise<void>;
+  getOnboardingCompleted?(): Promise<boolean>;
+  setOnboardingCompleted?(completed: boolean): Promise<void>;
+  searchConversations?(query: string): Promise<ConversationSearchResult[]>;
 }
 
 export interface SessionService {
@@ -118,6 +122,7 @@ export function App({ services }: AppProps) {
   const [webSearchSettings, setWebSearchSettings] = useState<WebSearchSettings>(defaultWebSearchSettings);
   const [toast, setToast] = useState<ToastState>();
   const [multiBubble, setMultiBubble] = useState(true);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
 
   const activeLlmConfig = useMemo<ActiveLlmConfig | undefined>(() => {
     if (llmActiveProvider === undefined) return undefined;
@@ -161,6 +166,25 @@ export function App({ services }: AppProps) {
     setToast({ id: ++toastSequenceRef.current, message, tone });
   }, []);
   const showSessionFailure = useEffectEvent(() => showToast(copy.genericFailure, "error"));
+
+  useEffect(() => {
+    let cancelled = false;
+    const repository = activeServices.repository;
+    void (repository.getOnboardingCompleted?.() ?? Promise.resolve(false))
+      .catch(() => false)
+      .then((completed) => {
+        if (!cancelled) setOnboardingOpen(!completed);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeServices.repository]);
+
+  const handleCloseOnboarding = useCallback((): void => {
+    setOnboardingOpen(false);
+    void activeServices.repository.setOnboardingCompleted?.(true)
+      .catch(() => showToast(copy.storageFull, "error"));
+  }, [activeServices.repository, copy.storageFull, showToast]);
 
   const readLlmSettings = useCallback(async () => {
     const [records, active] = await Promise.all([
@@ -275,6 +299,13 @@ export function App({ services }: AppProps) {
     }
   }, [activeServices, copy.storageFull, showToast]);
 
+  const onSearchConversations = useMemo(() => {
+    const repository = activeServices.repository;
+    return repository.searchConversations === undefined
+      ? undefined
+      : (query: string) => repository.searchConversations!(query);
+  }, [activeServices.repository]);
+
   const refreshLlm = useCallback(async () => {
     try {
       const llmSettings = await readLlmSettings();
@@ -342,7 +373,7 @@ export function App({ services }: AppProps) {
     return () => {
       cancelled = true;
     };
-  }, [activeServices, authentication, controller.activeConversation?.id]);
+  }, [activeServices, authentication, controller.activeConversation?.id, controller.activeConversation?.title]);
 
   const blobUrlsRef = useRef<Map<string, string>>(new Map());
 
@@ -515,7 +546,7 @@ export function App({ services }: AppProps) {
 
   const handleDelete = async (id: string) => {
     const deletingActive = controller.activeConversation?.id === id;
-    await activeServices.repository.deleteConversation(id);
+    if (!await controller.deleteConversation(id)) return;
     if (deletingActive) {
       const remaining = await activeServices.repository.listConversations();
       if (remaining[0] === undefined) await controller.newConversation();
@@ -525,12 +556,14 @@ export function App({ services }: AppProps) {
   };
 
   const handleClearData = async () => {
+    await controller.stop();
     for (const url of blobUrlsRef.current.values()) {
       URL.revokeObjectURL(url);
     }
     blobUrlsRef.current.clear();
     setImageUrls(new Map());
     await activeServices.repository.clearAll();
+    await controller.updateUserMemory("");
     await activeServices.repository.setLocale(controller.locale);
     await llmService.clearAll();
     setActiveSkillIds([]);
@@ -633,12 +666,16 @@ export function App({ services }: AppProps) {
     llmEntries,
     onClearData: handleClearData,
     onDelete: handleDelete,
+    onSearchConversations,
     onImage: handleImage,
     onLlmActivate: handleLlmActivate,
     onLlmClear: handleLlmClear,
     onLlmSave: handleLlmSave,
     onLocale: handleLocale,
     onNewChat: handleNewChat,
+    onboardingOpen,
+    onCloseOnboarding: handleCloseOnboarding,
+    onOpenOnboarding: () => setOnboardingOpen(true),
     onRecall: handleRecall,
     onRegenerate: handleRegenerate,
     onRename: handleRename,

@@ -53,6 +53,17 @@ function requestContainsImage(request: ClientChatRequest): boolean {
   return request.messages.some((message) => message.imageDataUrl !== undefined);
 }
 
+function maximumResponseCharacters(request: ClientChatRequest): number {
+  if (request.mode === "metadata") {
+    // JSON 可将单个 Unicode 字符编码为两个转义代理项，解码后的字段长度由客户端验证。
+    return 25_000;
+  }
+  if (request.mode === "summary") {
+    return 4000;
+  }
+  return request.webSearch === true ? 1000 : 200;
+}
+
 /** 构造注入搜索结果后的服务端内部请求对象 */
 function enrichRequest(
   request: ClientChatRequest,
@@ -144,7 +155,7 @@ export async function onRequestPost(context: ChatContext): Promise<Response> {
     return handleUserKeyRequest(context, request);
   }
   if (context.env.APP_MODE === "mock") {
-    return mockChatResponse(request.locale, request.mode, request.webSearch === true);
+    return mockChatResponse(request.locale, request.mode, request.webSearch === true, request.messages);
   }
 
   const limit = dailyRequestLimit(context.env);
@@ -222,7 +233,7 @@ async function handleUserKeyRequest(
     }
     return problemResponse("PROVIDER_ERROR", 502);
   }
-  const maxCharacters = request.mode === "summary" || request.webSearch === true ? 1000 : 200;
+  const maxCharacters = maximumResponseCharacters(request);
   return proxyProviderStream(
     upstream,
     {
@@ -275,7 +286,7 @@ async function handleServerFallback(
     await upstream.body?.cancel();
     return problemResponse("PROVIDER_ERROR", 502);
   }
-  const maxCharacters = request.mode === "summary" || request.webSearch === true ? 1000 : 200;
+  const maxCharacters = maximumResponseCharacters(request);
   return proxyProviderStream(
     upstream,
     {

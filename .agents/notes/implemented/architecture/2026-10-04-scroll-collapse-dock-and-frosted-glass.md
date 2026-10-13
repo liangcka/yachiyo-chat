@@ -6,10 +6,12 @@ Status: implemented
 在聊天界面中，底部常驻的四格小组件（ControlDock：设置、表情、音量、麦克风）与文字对话框（Composer）占据了较多的垂直屏幕空间。当用户向上滑动浏览长消息或历史对话记录时，透明底栏会导致消息文字与底栏控制按钮产生视觉重叠与干扰，且压缩了阅读视野。
 
 ## Decision
-1. **滚动与手势感知联动与方向修正（Scroll & Gesture Direction Correction）**：
-   - 严格贴合用户认知直觉：**用户往上滑（向上翻看历史消息记录，`scrollTop` 减小）时**触发四格收缩（`dockCollapsed = true`）；**用户往下滑（向下翻看最新消息或滑回底部，`scrollTop` 增大）时**触发展开（`dockCollapsed = false`）；
-   - 触底安全检测（`distanceFromBottom <= 32px`）时始终保持/恢复展开；
-   - 移动端触摸手势（`onTouchMove`）同步对齐上述方向。
+1. **滚动与手势感知联动、底部安全区与防死锁设计（Scroll & Gesture Direction & Bottom Safe Zone）**：
+   - **严格贴合用户认知直觉**：用户在远离底部浏览历史记录时，向下拉动（`scrollTop` 减小）触发四格收缩（`dockCollapsed = true`）；向上推移（`scrollTop` 增大）触发展开（`dockCollapsed = false`）；
+   - **底部 64px 物理安全区守卫（Bottom Safe Zone Guard）**：当视口处于最新消息底部附近（`distanceFromBottom <= 64px`）时，强制保持展开状态，严禁触发任何收缩。杜绝键盘收起视口变大、图片异步撑开或几何微调引起的被动滚动误触发折叠；
+   - **新消息与贴底无条件展开**：当初始加载、发送新消息、接收到回复或贴底时，显式恢复底栏展开；
+   - **键盘收起联动恢复**：软键盘收回后自动重置折叠状态为 false；
+   - **点击空白逃生恢复（Fail-safe Tap-to-Expand）**：当底栏因历史翻阅处于收缩状态时，点击底栏毛玻璃空白区域即可直接唤出恢复四格展开。
 
 2. **解决消息遮挡与 Flexbox 布局陷阱（Flex-end Overflow & Spacer Architecture）**：
    - 移除 `.message-list` 上的 `justify-content: flex-end`（该属性在内容溢出时会导致浏览器忽略 `padding-bottom`，硬生生将底部的消息压在屏幕最下边缘从而被输入框盖住）；

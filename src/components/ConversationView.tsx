@@ -7,6 +7,8 @@ import { MessageBubble } from "./MessageBubble";
 
 const FOLLOW_THRESHOLD_PX = 80;
 const SCROLL_DELTA_THRESHOLD = 8;
+/** 处于底部附近的像素安全区；此区域内保持展开四格小组件且严禁自动收缩 */
+const BOTTOM_EXPAND_THRESHOLD_PX = 64;
 /** 消息数超过该阈值才启用虚拟滚动；小会话走原生渲染路径（行为与旧版完全一致） */
 const VIRTUALIZATION_THRESHOLD = 40;
 /** 虚拟模式下的过扫描行数，保证快速滚动时上下边缘不露白 */
@@ -41,6 +43,7 @@ export interface ConversationViewProps {
   multiBubble?: boolean;
   onRecall?: () => void;
   onRegenerate?: (messageId?: string) => void;
+  onRemember?: (messageId: string) => void;
   /** 点击后向上翻页加载更早历史（UI 窗口化） */
   onLoadEarlier?: () => void;
   /** 是否还有更早历史可加载；false 时隐藏入口 */
@@ -58,6 +61,7 @@ export function ConversationView({
   multiBubble,
   onRecall,
   onRegenerate,
+  onRemember,
   onLoadEarlier,
   hasMoreHistory,
   onToast,
@@ -129,14 +133,20 @@ export function ConversationView({
           } else {
             target.scrollTop = targetScroll;
           }
+          lastScrollTopRef.current = target.scrollTop;
+        } else {
+          lastScrollTopRef.current = 0;
         }
       }
       followingRef.current = true;
+      if (!isKeyboardOpen) {
+        updateCollapseState(false);
+      }
       if (containerRef.current) {
         syncTopScrimOpacity(containerRef.current, onScrolledFromTopChange);
       }
     },
-    [onScrolledFromTopChange],
+    [onScrolledFromTopChange, updateCollapseState],
   );
 
   useEffect(() => {
@@ -155,7 +165,10 @@ export function ConversationView({
 
     if (messages.length === 0) {
       updateCollapseState(false);
-    } else if (isInitialMessage || isNewMessage || (isStreamingDelta && followingRef.current)) {
+    } else if (isInitialMessage || isNewMessage) {
+      updateCollapseState(false);
+      scrollToBottom();
+    } else if (isStreamingDelta && followingRef.current) {
       scrollToBottom();
     } else if (containerRef.current) {
       syncTopScrimOpacity(containerRef.current, onScrolledFromTopChange);
@@ -191,6 +204,7 @@ export function ConversationView({
               const targetScroll = target.scrollHeight - target.clientHeight;
               if (targetScroll > 0) {
                 target.scrollTop = targetScroll;
+                lastScrollTopRef.current = target.scrollTop;
               }
             }
           }
@@ -235,6 +249,11 @@ export function ConversationView({
         onImageLoad={handleImageLoad}
         showSources={showSources}
         onRecall={message.role === "user" && index === lastUserMessageIndex ? onRecall : undefined}
+        onRemember={
+          message.role === "user" && message.status === "complete" && message.text.trim().length > 0 && onRemember !== undefined
+            ? () => onRemember(message.id)
+            : undefined
+        }
         onRegenerate={
           message.role === "assistant" &&
           index === lastAssistantMessageIndex &&
@@ -245,7 +264,7 @@ export function ConversationView({
         onToast={onToast}
       />
     ),
-    [handleImageLoad, imageUrls, lastAssistantMessageIndex, lastUserMessageIndex, locale, multiBubble, onRecall, onRegenerate, onToast, showSources],
+    [handleImageLoad, imageUrls, lastAssistantMessageIndex, lastUserMessageIndex, locale, multiBubble, onRecall, onRegenerate, onRemember, onToast, showSources],
   );
 
   const memoryCard = summary ? (
@@ -302,29 +321,30 @@ export function ConversationView({
         return;
       }
 
-      const delta = currentScrollTop - lastScrollTopRef.current;
-      const distanceFromBottom = maxScroll - currentScrollTop;
-
-      if (delta <= -SCROLL_DELTA_THRESHOLD) {
-        // 用户往上滑（向上翻看历史消息） -> 收缩四格小组件，浮现毛玻璃
-        updateCollapseState(true);
-        lastScrollTopRef.current = currentScrollTop;
-      } else if (delta >= SCROLL_DELTA_THRESHOLD) {
-        // 用户往下滑（向下翻看最新消息） -> 展开四格小组件，恢复透明
-        updateCollapseState(false);
-        lastScrollTopRef.current = currentScrollTop;
-      }
-
-      // 若滑回最底部附近且当前非软键盘激活状态，自动恢复展开
-      const isInputActive =
-        typeof document !== "undefined" &&
-        document.activeElement instanceof HTMLElement &&
-        (document.activeElement.tagName === "TEXTAREA" || document.activeElement.tagName === "INPUT");
       const isKeyboardOpen =
         typeof document !== "undefined" &&
         document.documentElement.classList.contains("keyboard-open");
-      if (distanceFromBottom <= 32 && !isInputActive && !isKeyboardOpen) {
+      const distanceFromBottom = maxScroll - currentScrollTop;
+
+      // 处于底部安全区附近（<= 64px）时：若软键盘未开启，无条件保持展开，且严禁触发任何收缩
+      if (distanceFromBottom <= BOTTOM_EXPAND_THRESHOLD_PX) {
+        if (!isKeyboardOpen) {
+          updateCollapseState(false);
+        }
+        lastScrollTopRef.current = currentScrollTop;
+        return;
+      }
+
+      const delta = currentScrollTop - lastScrollTopRef.current;
+
+      if (delta <= -SCROLL_DELTA_THRESHOLD) {
+        // 用户离开底部并向上滑动浏览历史消息（scrollTop 减小） -> 收缩四格小组件，浮现毛玻璃
+        updateCollapseState(true);
+        lastScrollTopRef.current = currentScrollTop;
+      } else if (delta >= SCROLL_DELTA_THRESHOLD) {
+        // 用户向下滑动回看最新消息（scrollTop 增大） -> 展开四格小组件，恢复透明
         updateCollapseState(false);
+        lastScrollTopRef.current = currentScrollTop;
       }
     },
     [onScrolledFromTopChange, updateCollapseState],
@@ -346,11 +366,27 @@ export function ConversationView({
 
       if (maxScroll > 0 && Math.abs(deltaY) >= 20) {
         dismissKeyboardIfActive();
+
+        const currentScrollTop = target.scrollTop;
+        const distanceFromBottom = maxScroll - currentScrollTop;
+
+        // 底部安全区保护：处于底部附近滑动绝不折叠，若键盘未打开则保持展开
+        if (distanceFromBottom <= BOTTOM_EXPAND_THRESHOLD_PX) {
+          const isKeyboardOpen =
+            typeof document !== "undefined" &&
+            document.documentElement.classList.contains("keyboard-open");
+          if (!isKeyboardOpen) {
+            updateCollapseState(false);
+          }
+          touchStartYRef.current = currentY;
+          return;
+        }
+
         if (deltaY < 0) {
-          // 手势上滑（向上翻阅内容） -> 收缩四格
+          // 手指从上往下滑动（Pull Down），向上翻阅更早的历史内容 -> 收缩四格
           updateCollapseState(true);
         } else if (deltaY > 0) {
-          // 手势下滑（向下回看新消息） -> 展开四格
+          // 手指从下往上滑动（Swipe Up），向下回看最新消息 -> 展开四格
           updateCollapseState(false);
         }
         touchStartYRef.current = currentY;

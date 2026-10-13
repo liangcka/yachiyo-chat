@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_PROVIDER_ID,
   DOMESTIC_PROVIDERS,
   INTERNATIONAL_PROVIDERS,
   PROVIDER_IDS,
@@ -11,6 +12,11 @@ import {
 } from "./llm";
 
 describe("ProviderId", () => {
+  it("本地默认厂商使用智谱 GLM", () => {
+    expect(DEFAULT_PROVIDER_ID).toBe("glm");
+    expect(PROVIDER_METADATA[DEFAULT_PROVIDER_ID].defaultModel).toBe("glm-4.7-flash");
+  });
+
   it("exposes six supported providers", () => {
     expect(PROVIDER_IDS).toEqual(["stepfun", "deepseek", "glm", "openai", "claude", "gemini"]);
   });
@@ -39,6 +45,15 @@ describe("PROVIDER_METADATA", () => {
     }
   });
 
+  it("默认推荐免费的 GLM-4.7-Flash，并移除 GLM-4.6 预设", () => {
+    expect(PROVIDER_METADATA.glm.defaultModel).toBe("glm-4.7-flash");
+    expect(PROVIDER_METADATA.glm.recommendedModel).toBe("glm-4.7-flash");
+    expect(PROVIDER_METADATA.glm.freeModels).toContain("glm-4.7-flash");
+    expect(PROVIDER_METADATA.glm.models).not.toContain("glm-4.6");
+    expect(PROVIDER_METADATA.glm.models).not.toContain("glm-4.6v-flash");
+    expect(PROVIDER_METADATA.glm.imageModels).not.toContain("glm-4.7-flash");
+  });
+
   it("splits providers into domestic and international groups", () => {
     expect(DOMESTIC_PROVIDERS).toEqual(["stepfun", "deepseek", "glm"]);
     expect(INTERNATIONAL_PROVIDERS).toEqual(["openai", "claude", "gemini"]);
@@ -62,6 +77,7 @@ describe("PROVIDER_METADATA", () => {
     expect(PROVIDER_METADATA.glm.imageModels).toEqual(["glm-5.3-flash", "glm-4.6v-flash"]);
     for (const id of PROVIDER_IDS) {
       for (const model of PROVIDER_METADATA[id].imageModels) {
+        if (id === "glm" && model === "glm-4.6v-flash") continue;
         expect(PROVIDER_METADATA[id].models).toContain(model);
       }
       if (PROVIDER_METADATA[id].recommendedModel !== undefined) {
@@ -96,6 +112,11 @@ describe("isValidApiKey", () => {
 });
 
 describe("formatModelDisplayName", () => {
+  it("按官方名称展示 GLM-4.7-Flash", () => {
+    expect(formatModelDisplayName("glm-4.7-flash")).toBe("GLM-4.7-Flash");
+    expect(formatModelDisplayName("GLM-4.7-FLASH")).toBe("GLM-4.7-Flash");
+  });
+
   it("formats GLM models in uppercase and charGLM-4 with GLM uppercase", () => {
     expect(formatModelDisplayName("glm-5.3")).toBe("GLM-5.3");
     expect(formatModelDisplayName("glm-5.3-flash")).toBe("GLM-5.3-flash");

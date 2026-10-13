@@ -1,6 +1,7 @@
 import type { useChatController } from "../app/use-chat-controller";
 import type { LlmProviderEntry } from "../components/LlmSettingsPanel";
 import type { Conversation, Locale } from "../domain/chat";
+import type { ConversationSearchResult } from "../domain/conversation-search";
 import type { ProviderId } from "../domain/llm";
 import type { ImageProcessingErrorCode, ProcessedImage } from "../features/capture/image-processor";
 import type { UiCopy } from "../i18n/messages";
@@ -30,8 +31,12 @@ export interface SharedViewProps {
   onRecall: () => Promise<void>;
   onRegenerate: (messageId?: string) => Promise<void>;
   onNewChat: () => Promise<void>;
+  onboardingOpen: boolean;
+  onCloseOnboarding: () => void;
+  onOpenOnboarding: () => void;
   onRename: (id: string, title: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
+  onSearchConversations?: (query: string) => Promise<ConversationSearchResult[]>;
   onClearData: () => Promise<void>;
   onLocale: (locale: Locale) => Promise<void>;
   onSignOut: () => Promise<void>;

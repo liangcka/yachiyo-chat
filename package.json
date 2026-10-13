@@ -28,22 +28,26 @@
     "test:perf": "npm run build && playwright test --config playwright.perf.config.ts",
     "mob:sync": "npm run build && cap sync android",
     "mob:build": "npm run mob:sync && cd android && gradlew.bat assembleRelease",
+    "ota:package": "node scripts/package-ota.mjs",
+    "test:ota": "node --test scripts/package-ota.test.mjs",
     "relay:dev": "npm --prefix relay-worker run dev",
     "relay:deploy": "npm --prefix relay-worker run deploy",
     "cf:types": "wrangler types --path=./types/runtime-types.d.ts"
   },
   "dependencies": {
-    "@capacitor/android": "^8.5.0",
+    "@capacitor/android": "8.5.1",
     "@capacitor/app": "^8.1.1",
-    "@capacitor/core": "^8.5.0",
+    "@capacitor/core": "8.5.1",
+    "@capgo/capacitor-updater": "8.52.1",
     "@tanstack/react-virtual": "^3.14.10",
     "dexie": "^4.4.4",
     "lucide-react": "^1.24.0",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
   },
   "devDependencies": {
-    "@capacitor/cli": "^8.5.0",
+    "@capacitor/cli": "8.5.1",
+    "@capgo/cli": "8.81.0",
     "@cloudflare/vitest-pool-workers": "^0.22.0",
     "@emnapi/runtime": "^1.11.3",
     "@eslint/js": "^9.39.5",

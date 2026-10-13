@@ -1,5 +1,7 @@
 apply plugin: 'com.android.application'
 
+def mobileRelease = new groovy.json.JsonSlurper().parse(rootProject.file('../mobile-release.json'))
+
 // 签名信息来自 android/keystore.properties（不入库）；缺失时退化为未签名 release
 def keystoreProperties = new Properties()
 def keystorePropertiesFile = rootProject.file("keystore.properties")
@@ -14,8 +16,8 @@ android {
         applicationId "app.yachiyo.chat"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 12
-        versionName "0.1.12"
+        versionCode mobileRelease.nativeBuild
+        versionName mobileRelease.nativeVersion
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

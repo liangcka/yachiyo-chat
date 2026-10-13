@@ -1,11 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-
-async function enterApp(page: Page): Promise<void> {
-  await page.goto("/");
-  await page.getByLabel("访问码").fill("yachiyo-local-access");
-  await page.getByRole("button", { name: "进入" }).click();
-  await expect(page.getByPlaceholder("什么都可以告诉我")).toBeVisible();
-}
+import { enterApp } from "./helpers";
 
 /** 新会话不再渲染初始问候气泡，布局断言前先发一条消息等 mock 回复出现 */
 async function sendMockMessage(page: Page): Promise<void> {
@@ -38,7 +32,7 @@ async function verticalGap(upper: Locator, lower: Locator): Promise<number> {
 test("renders a clean two-bar menu button", async ({ page }) => {
   await enterApp(page);
 
-  const menuButton = page.getByRole("button", { name: "菜单" });
+  const menuButton = page.getByRole("button", { name: "菜单", exact: true });
   await expect(menuButton.locator("svg path, svg line")).toHaveCount(2);
   await expect(menuButton).toHaveCSS("box-shadow", "none");
 });
@@ -144,7 +138,7 @@ test("switches language, exposes camera input, and becomes read-only offline", a
 }) => {
   await enterApp(page);
 
-  await page.getByRole("button", { name: "菜单" }).click();
+  await page.getByRole("button", { name: "菜单", exact: true }).click();
   await page.getByRole("button", { name: "日本語" }).click();
   await expect(page.getByPlaceholder("何でも話してね")).toBeVisible();
 

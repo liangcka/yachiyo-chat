@@ -1,4 +1,5 @@
 import type { ChatMessage, ChatSource, Conversation, Locale, StoredImage, TokenUsage } from "../domain/chat";
+import { isUntitledConversation } from "../domain/conversation-metadata";
 
 export type ChatPhase = "loading" | "idle" | "streaming" | "offline" | "error" | "compressing";
 
@@ -9,7 +10,7 @@ export interface ChatState {
   locale: Locale;
   pendingImage?: StoredImage;
   errorCode?: string;
-  /** 跨会话共享的用户长期记忆（压缩时从对话中提炼，新对话也可见） */
+  /** 完整对话后自动整理的跨会话长期记忆。 */
   userMemory?: string;
   /**
    * 流式增量暂存槽位：delta/thought-delta 只写入这里（O(1)），不重建 messages 数组；
@@ -53,10 +54,10 @@ export type ChatAction =
       summary: string;
       compressedUpTo?: number;
       compressedUpToId?: string;
-      userMemory?: string;
     }
   | { type: "user-memory-updated"; memory: string }
-  | { type: "messages-reverted"; messages: ChatMessage[] }
+  | { type: "conversation-metadata-updated"; conversation: Conversation }
+  | { type: "messages-reverted"; messages: ChatMessage[]; fromCreatedAt?: number }
   | { type: "load-earlier-loaded"; messages: ChatMessage[] };
 
 export const initialChatState: ChatState = {
@@ -217,6 +218,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         : { ...state, phase: "error" };
     case "conversation-selected":
       return {
+        userMemory: state.userMemory,
         activeConversation: action.conversation,
         errorCode: undefined,
         locale: action.conversation.locale,
@@ -232,7 +234,13 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         activeConversation:
           state.activeConversation === undefined
             ? undefined
-            : { ...state.activeConversation, locale: action.locale },
+            : {
+                ...state.activeConversation,
+                locale: action.locale,
+                ...(isUntitledConversation(state.activeConversation)
+                  ? { title: action.locale === "ja-JP" ? "新しい会話" : "新的对话" }
+                  : {}),
+              },
         locale: action.locale,
       };
     case "pending-image-changed":
@@ -262,13 +270,25 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
                   : {}),
               },
         phase: "idle",
-        ...(action.userMemory !== undefined ? { userMemory: action.userMemory } : {}),
       };
     case "user-memory-updated":
       return { ...state, userMemory: action.memory };
+    case "conversation-metadata-updated":
+      return state.activeConversation?.id !== action.conversation.id ? state : {
+        ...state,
+        activeConversation: {
+          ...state.activeConversation,
+          title: action.conversation.title,
+          titleSource: action.conversation.titleSource,
+        },
+      };
     case "messages-reverted":
       return {
         ...state,
+        activeConversation: state.activeConversation?.compressedUpTo !== undefined &&
+          action.fromCreatedAt !== undefined && action.fromCreatedAt <= state.activeConversation.compressedUpTo
+          ? { ...state.activeConversation, summary: undefined, compressedUpTo: undefined, compressedUpToId: undefined, lastCompressedAt: undefined }
+          : state.activeConversation,
         errorCode: undefined,
         messages: action.messages,
         phase: state.phase === "offline" ? "offline" : "idle",

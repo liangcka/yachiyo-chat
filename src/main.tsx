@@ -1,7 +1,16 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { CapacitorUpdater } from "@capgo/capacitor-updater";
 import { App } from "./App";
+import { isNativeApp } from "./services/app-platform";
 import "./styles/global.css";
+
+// 启动确认不依赖登录、网络或数据库，离线启动同样能保留已验证的资源包。
+if (isNativeApp()) {
+  void CapacitorUpdater.notifyAppReady().catch(() => {
+    console.error("无法确认原生资源包启动状态");
+  });
+}
 
 const rootElement = document.getElementById("root");
 

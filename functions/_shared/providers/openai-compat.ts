@@ -56,15 +56,14 @@ const DEEPSEEK_HIGH_TIER_MODELS: readonly string[] = ["deepseek-v4-pro"];
  *
  * 思考 token 先于正文生成，档位直接决定首字延迟。本应用的主要负载是 15~50 字的即时
  * 消息，为闲聊付高档思考代价并不划算，因此默认压到最低档，仅在需要跨源整合（联网）、
- * 多模态识图或确属深度长提问时逐级升档。summary 模式属于结构化记忆抽取，且阻塞在发信
- * 之前、延迟对用户直接可感，固定最低档。
+ * 多模态识图或确属深度长提问时逐级升档。summary 与 metadata 属于结构化整理，固定最低档。
  */
 export function resolveDeepSeekReasoningEffort(
   model: string,
   request: EnrichedChatRequest,
   containsImage: boolean,
 ): ReasoningEffort {
-  if (request.mode === "summary") {
+  if (request.mode === "summary" || request.mode === "metadata") {
     return "low";
   }
   const lastMessage = request.messages.at(-1);
@@ -128,11 +127,14 @@ export function buildOpenAICompatBody(
   const enableGlmThinking = options.glmThinking === true && isGlmThinkingModel(model);
   const enableDeepSeekThinking = options.deepseekThinking === true;
   const enableThinking = enableDeepSeekThinking || enableGlmThinking;
-  const thinkingEffort = enableDeepSeekThinking
-    ? resolveDeepSeekReasoningEffort(model, request, containsImage)
-    : containsImage
-      ? "medium"
-      : "high";
+  const structuredOutput = request.mode === "summary" || request.mode === "metadata";
+  const thinkingEffort = structuredOutput
+    ? "low"
+    : enableDeepSeekThinking
+      ? resolveDeepSeekReasoningEffort(model, request, containsImage)
+      : containsImage
+        ? "medium"
+        : "high";
   return {
     model,
     messages: [
@@ -157,9 +159,9 @@ export function buildOpenAICompatBody(
     stream: true,
     stream_options: { include_usage: true },
     // 推理模型的思考 token 计入 max_tokens 预算，过小会被思考耗尽导致正文为空
-    max_tokens: request.mode === "summary" ? 4096 : 8192,
+    max_tokens: structuredOutput ? 4096 : 8192,
     ...(options.reasoningEffort === true
-      ? { reasoning_effort: containsImage ? "medium" : "low" }
+      ? { reasoning_effort: !structuredOutput && containsImage ? "medium" : "low" }
       : {}),
     ...(enableThinking
       ? {

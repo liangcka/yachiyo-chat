@@ -1,0 +1,114 @@
+.memory-history {
+  margin-top: 1.5rem;
+  border-top: 1px solid var(--glass-border);
+  padding-top: 1rem;
+}
+
+.memory-history h2 {
+  margin: 0 0 0.75rem;
+  color: var(--text-primary);
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.memory-history__list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  gap: 0.75rem;
+  list-style: none;
+}
+
+.memory-history__item {
+  border: 1px solid var(--glass-border);
+  border-radius: 0.75rem;
+  padding: 0.75rem;
+  background: var(--glass-soft);
+}
+
+.memory-history summary {
+  cursor: pointer;
+  color: var(--text-primary);
+  line-height: 1.6;
+}
+
+.memory-history time {
+  display: block;
+  margin-left: 1rem;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.memory-history__changes {
+  margin: 0.75rem 0 0;
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+.memory-history__changes dt {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.memory-history__changes dd {
+  margin: 0.25rem 0 0.75rem;
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+}
+
+.memory-history__undo {
+  margin-top: 0.75rem;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-control);
+  min-height: 2.75rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--glass);
+  color: var(--text-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.8125rem;
+}
+
+.memory-history__undo:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.memory-history__error {
+  color: var(--text-primary);
+  font-size: 0.875rem;
+}
+
+.message-bubble__remember-shortcut {
+  position: absolute;
+  z-index: 50;
+  right: 0;
+  bottom: calc(100% + 0.5rem);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-control);
+  min-height: 2.75rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--space-1);
+  color: var(--text-primary);
+  font: inherit;
+  white-space: nowrap;
+}
+
+.message-bubble__remember-shortcut:not(:focus) {
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  border: 0;
+  pointer-events: none;
+}
+
+.memory-history summary:focus-visible,
+.memory-history__undo:focus-visible {
+  outline: 2px solid var(--text-primary);
+  outline-offset: 3px;
+}

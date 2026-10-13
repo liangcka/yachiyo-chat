@@ -35,6 +35,8 @@ types/runtime-types.d.ts
 *.pem
 *.key
 *.bks
+.ota/
+.capgo_key_v2*
 
 # 本地交接文档
 交接文档.md

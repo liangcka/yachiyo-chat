@@ -12,7 +12,7 @@ export interface StreamChatMessage {
 export interface StreamChatRequest {
   locale: Locale;
   messages: StreamChatMessage[];
-  mode?: "chat" | "summary";
+  mode?: "chat" | "summary" | "metadata";
   /** 发送消息时的客户端本地格式化时间戳 */
   currentTime?: string;
   /** 上一条历史消息的客户端本地格式化时间戳 */

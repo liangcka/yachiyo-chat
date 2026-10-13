@@ -93,7 +93,8 @@ export function buildGeminiContents(
 }
 
 export function buildGeminiBody(request: EnrichedChatRequest): unknown {
-  const useGoogleSearch = request.webSearch === true && request.mode !== "summary";
+  const structuredOutput = request.mode === "summary" || request.mode === "metadata";
+  const useGoogleSearch = request.webSearch === true && !structuredOutput;
   return {
     contents: buildGeminiContents(request.messages, request.locale),
     ...(useGoogleSearch ? { tools: [{ googleSearch: {} }] } : {}),
@@ -116,7 +117,7 @@ export function buildGeminiBody(request: EnrichedChatRequest): unknown {
     // Gemini 3 系列默认开启 thinking 且思考 token 计入 maxOutputTokens，
     // 预算过小会被思考耗尽导致正文为空；thinkingLevel low 适配角色聊天场景
     generationConfig: {
-      maxOutputTokens: request.mode === "summary" ? 4096 : 8192,
+      maxOutputTokens: structuredOutput ? 4096 : 8192,
       thinkingConfig: { thinkingLevel: "low" },
     },
   };

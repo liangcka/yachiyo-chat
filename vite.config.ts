@@ -1,6 +1,7 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
+import release from "./mobile-release.json";
 
 export default defineConfig({
   server: {
@@ -17,6 +18,20 @@ export default defineConfig({
     emptyOutDir: true,
   },
   plugins: [
+    {
+      name: "mobile-bundle-version",
+      generateBundle() {
+        this.emitFile({
+          type: "asset",
+          fileName: "bundle-info.json",
+          source: JSON.stringify({
+            version: process.env.VITE_BUNDLE_VERSION ?? release.bundleVersion,
+            runtimeVersion: release.runtimeVersion,
+            nativeBuild: release.nativeBuild,
+          }),
+        });
+      },
+    },
     react(),
     VitePWA({
       registerType: "prompt",

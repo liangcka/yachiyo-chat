@@ -43,11 +43,23 @@ describe("LlmSettingsPanel", () => {
   it("shows the default-service hint when no active provider is set", () => {
     mount();
     expect(screen.getByText("未配置，使用默认服务")).toBeInTheDocument();
+    expect(screen.getByLabelText("厂商")).toHaveValue("glm");
+    expect(screen.getByLabelText("模型")).toHaveValue("glm-4.7-flash");
+  });
+
+  it("GLM 预设列表不再包含 GLM-4.6 系列", () => {
+    mount();
+    const models = within(screen.getByLabelText("模型")).getAllByRole("option");
+
+    expect(models.map((option) => (option as HTMLOptionElement).value)).toEqual([
+      "glm-4.7-flash", "charglm-4", "glm-5.3", "glm-5.3-flash",
+    ]);
   });
 
   it("shows the active provider label when one is active", () => {
     mount({ activeProvider: "claude" });
     expect(screen.getByText("当前使用: Anthropic (Claude)")).toBeInTheDocument();
+    expect(screen.getByLabelText("厂商")).toHaveValue("claude");
   });
 
   it("disables save while the key is empty", () => {
@@ -64,7 +76,7 @@ describe("LlmSettingsPanel", () => {
     expect(screen.getByRole("button", { name: "保存" })).toBeEnabled();
 
     await user.click(screen.getByRole("button", { name: "保存" }));
-    expect(onSave).toHaveBeenCalledWith("stepfun", VALID_KEY, "step-3.7-flash");
+    expect(onSave).toHaveBeenCalledWith("glm", VALID_KEY, "glm-4.7-flash");
   });
 
   it("loads the existing entry when switching to a configured provider", async () => {
@@ -87,7 +99,7 @@ describe("LlmSettingsPanel", () => {
       <LlmSettingsPanel
         copy={copy}
         open
-        entries={[{ provider: "stepfun", apiKey: VALID_KEY, model: "step-3.7-flash" }]}
+        entries={[{ provider: "glm", apiKey: VALID_KEY, model: "glm-4.7-flash" }]}
         onClose={vi.fn()}
         onSave={vi.fn(async () => undefined)}
         onClear={vi.fn(async () => undefined)}
@@ -101,12 +113,12 @@ describe("LlmSettingsPanel", () => {
     const user = userEvent.setup();
     const onClear = vi.fn(async () => undefined);
     mount({
-      entries: [{ provider: "stepfun", apiKey: VALID_KEY, model: "step-3.7-flash" }],
+      entries: [{ provider: "glm", apiKey: VALID_KEY, model: "glm-4.7-flash" }],
       onClear,
     });
 
     await user.click(screen.getByRole("button", { name: "清除配置" }));
-    expect(onClear).toHaveBeenCalledWith("stepfun");
+    expect(onClear).toHaveBeenCalledWith("glm");
   });
 
   it("reveals the activate button for a configured non-active provider", async () => {
@@ -147,6 +159,9 @@ describe("LlmSettingsPanel", () => {
     const user = userEvent.setup();
     mount();
 
+    expect(screen.getByText("该厂商暂不支持图片输入")).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("模型"), "glm-5.3-flash");
     expect(screen.queryByText("该厂商暂不支持图片输入")).not.toBeInTheDocument();
 
     await user.selectOptions(screen.getByLabelText("厂商"), "deepseek");
@@ -157,15 +172,11 @@ describe("LlmSettingsPanel", () => {
 
   it("renders recommendation badge for recommended models", () => {
     mount();
-    // 默认展示 stepfun，默认模型 step-3.7-flash 具有推荐徽标
     expect(screen.getAllByText("推荐").length).toBeGreaterThan(0);
   });
 
-  it("renders free badge for free models", async () => {
-    const user = userEvent.setup();
+  it("默认模型展示免费徽章", () => {
     mount();
-    await user.selectOptions(screen.getByLabelText("厂商"), "glm");
-    await user.selectOptions(screen.getByLabelText("模型"), "glm-4.6v-flash");
     expect(screen.getAllByText("免费").length).toBeGreaterThan(0);
   });
 
@@ -173,12 +184,11 @@ describe("LlmSettingsPanel", () => {
     const user = userEvent.setup();
     mount();
 
-    // 默认厂商 stepfun：step 全小写
-    expect(screen.getAllByText("step-3.7-flash").length).toBeGreaterThan(0);
-
-    // 切换至 glm：GLM 大写、charGLM-4 大写
-    await user.selectOptions(screen.getByLabelText("厂商"), "glm");
+    expect(screen.getAllByText("GLM-4.7-Flash").length).toBeGreaterThan(0);
     expect(screen.getAllByText("charGLM-4").length).toBeGreaterThan(0);
+
+    await user.selectOptions(screen.getByLabelText("厂商"), "stepfun");
+    expect(screen.getAllByText("step-3.7-flash").length).toBeGreaterThan(0);
 
     // 切换至 claude：Claude 首字母大写
     await user.selectOptions(screen.getByLabelText("厂商"), "claude");

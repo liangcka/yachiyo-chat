@@ -1,6 +1,7 @@
 import { usePanel } from "../app/use-panel";
 import type { Locale } from "../domain/chat";
 import type { UiCopy } from "../i18n/messages";
+import type { SettingsTabId } from "./SettingsPanel";
 import { DangerFooter } from "./drawer/DangerFooter";
 import { DrawerHeader } from "./drawer/DrawerHeader";
 import { DrawerNav } from "./drawer/DrawerNav";
@@ -20,25 +21,31 @@ export interface MenuDrawerProps {
   onSkills: () => void;
   onCompress: () => void;
   onUserMemory: () => void;
+  activeModelLabel?: string;
+  onPreferences?: () => void;
+  onOpenSettings?: (tab?: SettingsTabId) => void;
 }
 
 /** 侧边栏抽屉组装层：布局、弹层基础设施与各功能分区。 */
 export function MenuDrawer({
+  activeModelLabel,
   copy,
   locale,
   onClearData,
   onClose,
+  onCompress,
   onHistory,
-  onLocale,
   onLlmSettings,
+  onLocale,
   onNewChat,
+  onOpenSettings,
+  onPreferences,
   onSignOut,
   onSkills,
-  onCompress,
   onUserMemory,
   open,
 }: MenuDrawerProps) {
-  // 解构消费 usePanel 结果（与 HistoryPanel 一致）：避免编译器把成员访问视为渲染期读 ref
+  // 解构消费 usePanel 结果：避免编译器把成员访问视为渲染期读 ref
   const { closing, closeRef, handleKeyDown, panelRef, render } = usePanel<HTMLDialogElement>(
     open,
     onClose,
@@ -63,7 +70,12 @@ export function MenuDrawer({
         className={`drawer ${closing ? "drawer--closing" : ""}`}
         onKeyDown={handleKeyDown}
       >
-        <DrawerHeader closeRef={closeRef} copy={copy} onClose={onClose} />
+        <DrawerHeader
+          activeModelLabel={activeModelLabel}
+          closeRef={closeRef}
+          copy={copy}
+          onClose={onClose}
+        />
         <DrawerNav
           copy={copy}
           onClose={onClose}
@@ -71,6 +83,8 @@ export function MenuDrawer({
           onHistory={onHistory}
           onLlmSettings={onLlmSettings}
           onNewChat={onNewChat}
+          onOpenSettings={onOpenSettings}
+          onPreferences={onPreferences}
           onSkills={onSkills}
           onUserMemory={onUserMemory}
         />

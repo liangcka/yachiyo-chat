@@ -59,6 +59,36 @@ describe("LlmSettingsService", () => {
     expect(record.model).toBe("gemini-3.8-flash");
   });
 
+  it.each(["", "glm-unknown", "glm-4.6", "glm-4.6v-flash"])(
+    "保存 GLM 配置时将无效或已移除的型号 %s 回落为 GLM-4.7-Flash",
+    async (model) => {
+      const record = await service.saveProvider("glm", VALID_KEY, model);
+
+      expect(record.model).toBe("glm-4.7-flash");
+      expect(await service.getActiveConfig()).toMatchObject({
+        provider: "glm",
+        model: "glm-4.7-flash",
+      });
+    },
+  );
+
+  it("保留用户显式选择的其他 GLM 型号", async () => {
+    await service.saveProvider("glm", VALID_KEY, "charglm-4");
+
+    expect(await service.getActiveConfig()).toMatchObject({ model: "charglm-4" });
+  });
+
+  it.each(["glm-4.6", "glm-4.6v-flash"])(
+    "读取已保存的 %s 配置时保留用户选择",
+    async (model) => {
+      await service.put({ provider: "glm", apiKey: VALID_KEY, model, updatedAt: 1 });
+      await service.setActiveProvider("glm");
+
+      expect(await service.getActiveConfig()).toMatchObject({ provider: "glm", model });
+      expect(await service.get("glm")).toMatchObject({ model, updatedAt: 1 });
+    },
+  );
+
   it("getActiveConfig returns undefined when active provider has no record", async () => {
     await service.saveProvider("openai", VALID_KEY, "gpt-5.6-luna");
     await service.clear("openai");

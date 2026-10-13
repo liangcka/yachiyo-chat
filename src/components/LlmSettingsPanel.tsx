@@ -2,6 +2,7 @@ import { Check, ChevronDown, Eye, EyeOff, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useClosing } from "../app/use-closing";
 import {
+  DEFAULT_PROVIDER_ID,
   DOMESTIC_PROVIDERS,
   INTERNATIONAL_PROVIDERS,
   PROVIDER_METADATA,
@@ -48,7 +49,7 @@ export function LlmSettingsPanel({
   const providerRef = useRef<HTMLDivElement>(null);
   const modelRef = useRef<HTMLDivElement>(null);
   const [selectedProvider, setSelectedProvider] = useState<ProviderId>(
-    activeProvider ?? DOMESTIC_PROVIDERS[0],
+    activeProvider ?? DEFAULT_PROVIDER_ID,
   );
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [modelInput, setModelInput] = useState("");
@@ -64,7 +65,7 @@ export function LlmSettingsPanel({
   if (open !== prevOpen) {
     setPrevOpen(open);
     if (open) {
-      const newProvider = activeProvider ?? DOMESTIC_PROVIDERS[0];
+      const newProvider = activeProvider ?? DEFAULT_PROVIDER_ID;
       setSelectedProvider(newProvider);
       const entry = entries.find((item) => item.provider === newProvider);
       const meta = getProviderMeta(newProvider);
