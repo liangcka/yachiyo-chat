@@ -2,6 +2,7 @@
 import { webcrypto } from "node:crypto";
 import type { BundleInfo } from "@capgo/capacitor-updater";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import mobileRelease from "../../mobile-release.json";
 import {
   NativeUpdateService,
   verifyReleaseManifest,
@@ -163,7 +164,7 @@ describe("Android 手动热更新", () => {
     await service.check();
     expect(service.getSnapshot()).toMatchObject({
       status: "current", availableVersion: null,
-      apkReleaseUrl: "https://github.com/liangcka/yachiyo-chat/releases/tag/v0.1.13",
+      apkReleaseUrl: `https://github.com/liangcka/yachiyo-chat/releases/tag/v${mobileRelease.nativeVersion}`,
     });
     expect(deps.updater.download).not.toHaveBeenCalled();
   });
