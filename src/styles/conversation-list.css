@@ -1,0 +1,234 @@
+.conversation-list {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+.conversation-list__search {
+  display: flex;
+  min-height: 2.75rem;
+  padding: 0 0.7rem;
+  flex-shrink: 0;
+  gap: 0.55rem;
+  align-items: center;
+  border: 1px solid var(--glass-border);
+  border-radius: 0.9rem;
+  color: var(--text-muted);
+  background: rgb(2 10 31 / 32%);
+}
+
+.conversation-list__search:focus-within {
+  border-color: rgb(210 228 255 / 65%);
+  box-shadow: 0 0 0 2px rgb(210 228 255 / 20%);
+}
+
+.conversation-list__search input {
+  min-width: 0;
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  color: var(--text-primary);
+  background: transparent;
+  font: inherit;
+  font-size: 0.85rem;
+}
+
+.conversation-list__search input::placeholder {
+  color: var(--text-dim);
+}
+
+.conversation-list__search input:focus-visible {
+  outline: 0;
+}
+
+.conversation-list__search input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.conversation-list__search button {
+  display: grid;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0.65rem;
+  color: var(--text-muted);
+  background: transparent;
+  place-items: center;
+}
+
+/* 列表在侧边栏内独立滚动；滚到底后手势顺延给抽屉，继续下滑即可露出设置分区 */
+.conversation-list__body {
+  min-height: 0;
+  margin-top: 0.65rem;
+  flex: 1 1 auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.conversation-list__group + .conversation-list__group {
+  margin-top: 0.85rem;
+}
+
+.conversation-list__group-title {
+  margin: 0 0 0.4rem;
+  padding: 0 0.2rem;
+  color: var(--text-dim);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.conversation-list__group > ol {
+  display: grid;
+  padding: 0;
+  margin: 0;
+  gap: 0.5rem;
+  list-style: none;
+}
+
+.conversation-list__item {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.42rem;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 1rem;
+  background: rgb(151 177 216 / 10%);
+}
+
+.conversation-list__item[data-active="true"] {
+  border-color: rgb(188 216 255 / 30%);
+  background: rgb(120 164 221 / 19%);
+}
+
+.conversation-list__select {
+  display: flex;
+  min-width: 0;
+  min-height: 3rem;
+  padding: 0.35rem 0.5rem;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  border: 0;
+  color: var(--text-primary);
+  background: transparent;
+  text-align: left;
+}
+
+.conversation-list__select strong {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-list__select time {
+  margin-top: 0.2rem;
+  color: var(--text-dim);
+  font-size: 0.68rem;
+}
+
+.conversation-list__excerpt {
+  display: -webkit-box;
+  width: 100%;
+  margin-top: 0.35rem;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.conversation-list mark {
+  border-radius: 0.15rem;
+  color: var(--text-primary);
+  background: rgb(188 216 255 / 25%);
+}
+
+.conversation-list__item > button:not(.conversation-list__select),
+.conversation-list__item form button {
+  display: grid;
+  width: 2.55rem;
+  height: 2.55rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0.8rem;
+  color: var(--text-muted);
+  background: rgb(202 218 240 / 10%);
+  place-items: center;
+}
+
+.conversation-list__item form {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 0.35rem;
+}
+
+.conversation-list__item form input {
+  min-width: 0;
+  padding: 0 0.75rem;
+  border: 1px solid var(--glass-border);
+  border-radius: 0.8rem;
+  color: var(--text-primary);
+  background: rgb(2 10 31 / 42%);
+  transition: border-color var(--motion-duration-fast) var(--motion-ease-standard),
+              box-shadow var(--motion-duration-fast) var(--motion-ease-standard);
+}
+
+.conversation-list__item form input:focus,
+.conversation-list__item form input:focus-visible {
+  outline: none;
+  border-color: rgb(210 228 255 / 65%);
+  box-shadow: 0 0 0 2px rgb(210 228 255 / 30%);
+}
+
+.conversation-list__confirm {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.5rem;
+}
+
+.conversation-list__confirm p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.conversation-list .danger-action {
+  color: #ffc7ce;
+}
+
+.conversation-list__empty {
+  margin: 0;
+  padding: 1.5rem 0;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+.conversation-list__search-error {
+  padding: 1.5rem 0;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.conversation-list__search-error button {
+  min-height: 2.75rem;
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--glass-border);
+  border-radius: 0.8rem;
+  color: var(--text-primary);
+  background: rgb(202 218 240 / 10%);
+}

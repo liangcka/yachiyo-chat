@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { StreamChatRequest } from "../src/services/chat-client";
-import { dismissOnboarding, enterApp } from "./helpers";
+import { dismissOnboarding, enterApp, openConversationList } from "./helpers";
 
 test.use({ serviceWorkers: "block" });
 
@@ -44,16 +44,12 @@ test("完整回复后自动生成标题并持久化到历史列表", async ({ pa
   page.on("pageerror", (error) => errors.push(error.message));
   await enterApp(page);
   await sendMessage(page, "今天想聊聊日常");
-  await page.getByRole("button", { name: "菜单", exact: true }).click();
-  await page.getByRole("button", { name: "历史记录", exact: true }).click();
-  await expect(page.getByRole("dialog", { name: "历史记录" }).getByText("日常闲聊", { exact: true }))
+  await expect((await openConversationList(page)).getByText("日常闲聊", { exact: true }))
     .toBeVisible({ timeout: 10_000 });
 
   await page.reload();
   await expect(page.getByPlaceholder("什么都可以告诉我")).toBeVisible();
-  await page.getByRole("button", { name: "菜单", exact: true }).click();
-  await page.getByRole("button", { name: "历史记录", exact: true }).click();
-  await expect(page.getByRole("dialog", { name: "历史记录" }).getByText("日常闲聊", { exact: true }))
+  await expect((await openConversationList(page)).getByText("日常闲聊", { exact: true }))
     .toBeVisible();
   expect(errors).toEqual([]);
 });
@@ -98,9 +94,7 @@ test("自动记忆合并更新，切换对话和刷新后仍可只读查看", as
   const chatRequest = requests.filter(({ mode }) => mode !== "metadata").at(-1);
   expect(chatRequest?.messages.some(({ text }) => text.includes(mergedMemories[2]!))).toBe(true);
 
-  await page.getByRole("button", { name: "菜单", exact: true }).click();
-  await page.getByRole("button", { name: "历史记录", exact: true }).click();
-  const history = page.getByRole("dialog", { name: "历史记录" });
+  const history = await openConversationList(page);
   await history.getByRole("button", { name: /饮品偏好/ }).click();
   await expect(history).toBeHidden();
   await expect(page.getByRole("article", { name: "八千代的回复" })).toHaveCount(3);

@@ -165,8 +165,7 @@ test.describe("motion system", () => {
     await expectEffectiveAnimation(toast);
 
     await page.locator(".top-controls__menu").click();
-    await page.getByRole("button", { name: "历史记录", exact: true }).click();
-    const firstHistoryItem = page.locator(".history-panel > ol > li").first();
+    const firstHistoryItem = page.locator(".conversation-list__item").first();
     await expect(firstHistoryItem).toBeVisible();
     await expectEffectiveAnimation(firstHistoryItem);
   });

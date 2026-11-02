@@ -169,6 +169,13 @@ export interface LlmSettingsRecord {
   readonly updatedAt: number;
 }
 
+/** 设置界面展示的单个厂商配置条目（不含持久化时间戳）。 */
+export interface LlmProviderEntry {
+  readonly provider: ProviderId;
+  readonly apiKey: string;
+  readonly model: string;
+}
+
 /** 当前选择的厂商配置；服务端内置模型的个人 Key 不参与请求。 */
 export interface ActiveLlmConfig {
   readonly provider: ProviderId;

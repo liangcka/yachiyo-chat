@@ -1,68 +1,80 @@
-import type { useChatController } from "../app/use-chat-controller";
-import type { LlmProviderEntry } from "../components/LlmSettingsPanel";
+import type { ChatController } from "../app/chat/contracts";
+import type { ShowToast } from "../app/use-toast";
 import type { Conversation, Locale } from "../domain/chat";
 import type { ConversationSearchResult } from "../domain/conversation-search";
-import type { ProviderId } from "../domain/llm";
-import type { ImageProcessingErrorCode, ProcessedImage } from "../features/capture/image-processor";
+import type { LlmProviderEntry, ProviderId } from "../domain/llm";
+import type { ProcessedImage } from "../features/capture/image-processor";
 import type { UiCopy } from "../i18n/messages";
 import type { usePwaUpdate } from "../pwa/use-pwa-update";
 import type { WebSearchSettings } from "../services/web-search-settings";
 
+export interface ComposerModel {
+  value: string;
+  setValue(value: string): void;
+  pendingImageDataUrl?: string;
+  /** 当前模型是否支持识图；不支持时禁用拍照与相册入口 */
+  imageSupported: boolean;
+  processImage(file: File): Promise<ProcessedImage>;
+  attachImage(image: ProcessedImage): void;
+  removeImage(): void;
+  send(text: string): void;
+}
+
+export interface MessageActionsModel {
+  recall(): Promise<void>;
+  regenerate(messageId?: string): Promise<void>;
+}
+
+export interface ConversationsModel {
+  items: Conversation[];
+  refresh(): Promise<void>;
+  search?: (query: string) => Promise<ConversationSearchResult[]>;
+  create(): Promise<void>;
+  rename(id: string, title: string): Promise<void>;
+  remove(id: string): Promise<void>;
+}
+
+export interface SettingsModel {
+  llm: {
+    entries: readonly LlmProviderEntry[];
+    activeProvider?: ProviderId;
+    refresh(): Promise<void>;
+    save(provider: ProviderId, apiKey: string, model: string): Promise<void>;
+    clear(provider: ProviderId): Promise<void>;
+    activate(provider: ProviderId): Promise<void>;
+  };
+  activeSkillIds: readonly string[];
+  toggleSkill(id: string, next: boolean): Promise<void>;
+  webSearch: WebSearchSettings;
+  changeWebSearch(partial: Partial<WebSearchSettings>): void;
+  multiBubble: boolean;
+  changeMultiBubble(enabled: boolean): Promise<void>;
+}
+
+export interface OnboardingModel {
+  open: boolean;
+  close(): void;
+  reopen(): void;
+}
+
+export interface AccountModel {
+  setLocale(locale: Locale): Promise<void>;
+  clearData(): Promise<void>;
+  signOut(): Promise<void>;
+}
+
+/** 视图层契约：App 负责状态与持久化编排，布局只消费这些模型并管理纯界面状态。 */
 export interface SharedViewProps {
-  controller: ReturnType<typeof useChatController>;
+  controller: ChatController;
   copy: UiCopy;
   isOnline: boolean;
-  conversations: Conversation[];
   imageUrls: ReadonlyMap<string, string>;
-  pendingImageDataUrl?: string;
-  composerValue: string;
-  setComposerValue: (value: string) => void;
-  activeProviderSupportsImage: boolean;
-  activeSkillIds: string[];
-  llmActiveProvider?: ProviderId;
-  llmEntries: readonly LlmProviderEntry[];
-  webSearchSettings: WebSearchSettings;
   pwa: ReturnType<typeof usePwaUpdate>;
-  processImage: (file: File) => Promise<ProcessedImage>;
-  setPendingImageDataUrl: (url?: string) => void;
-
-  onSend: (value: string) => void;
-  onImage: (image: ProcessedImage) => void;
-  onRecall: () => Promise<void>;
-  onRegenerate: (messageId?: string) => Promise<void>;
-  onNewChat: () => Promise<void>;
-  onboardingOpen: boolean;
-  onCloseOnboarding: () => void;
-  onOpenOnboarding: () => void;
-  onRename: (id: string, title: string) => Promise<void>;
-  onDelete: (id: string) => Promise<void>;
-  onSearchConversations?: (query: string) => Promise<ConversationSearchResult[]>;
-  onClearData: () => Promise<void>;
-  onLocale: (locale: Locale) => Promise<void>;
-  onSignOut: () => Promise<void>;
-  onLlmSave: (provider: ProviderId, apiKey: string, model: string) => Promise<void>;
-  onLlmClear: (provider: ProviderId) => Promise<void>;
-  onLlmActivate: (provider: ProviderId) => Promise<void>;
-  onSkillToggle: (id: string, next: boolean) => Promise<void>;
-  onWebSearchSettingsChange: (partial: Partial<WebSearchSettings>) => void;
-  multiBubble?: boolean;
-  onMultiBubbleChange?: (enabled: boolean) => void;
-  showToast: (message: string, tone?: "info" | "error") => void;
-  refreshHistory: () => Promise<void>;
-  refreshLlm: () => Promise<void>;
-}
-
-export function imageErrorMessage(code: ImageProcessingErrorCode, copy: UiCopy): string {
-  if (code === "IMAGE_INVALID") return copy.imageInvalid;
-  if (code === "IMAGE_TOO_LARGE") return copy.imageTooLarge;
-  return copy.genericFailure;
-}
-
-export function controllerErrorMessage(code: string, copy: UiCopy): string {
-  if (code === "DAILY_QUOTA_EXCEEDED") return copy.quotaReached;
-  if (code === "SESSION_REQUIRED") return copy.sessionExpired;
-  if (code === "NETWORK_ERROR") return copy.offline;
-  if (code === "CONVERSATION_LIMIT") return copy.conversationLimit;
-  if (code === "STORAGE_ERROR") return copy.storageFull;
-  return copy.genericFailure;
+  showToast: ShowToast;
+  composer: ComposerModel;
+  messageActions: MessageActionsModel;
+  conversations: ConversationsModel;
+  settings: SettingsModel;
+  onboarding: OnboardingModel;
+  account: AccountModel;
 }

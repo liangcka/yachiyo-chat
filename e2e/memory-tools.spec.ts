@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { StreamChatRequest } from "../src/services/chat-client";
-import { enterApp } from "./helpers";
+import { enterApp, openConversationList, sideMenu } from "./helpers";
 
 test.use({ serviceWorkers: "block" });
 
@@ -142,9 +142,7 @@ test("搜索标题以外的旧消息，展示命中片段并打开所属对话",
   await expect(page.getByRole("article", { name: "我的消息", exact: true })).toHaveCount(0);
   await sendMessage(page, "今晚吃什么");
   await expect.poll(() => metadataCount).toBe(2);
-  await page.getByRole("button", { name: "菜单", exact: true }).click();
-  await page.getByRole("button", { name: "历史记录", exact: true }).click();
-  const history = page.getByRole("dialog", { name: "历史记录" });
+  const history = await openConversationList(page);
   const query = history.getByRole("searchbox", { name: "搜索对话" });
   await query.fill("京都");
   const result = history.getByRole("button", { name: /旅行旧事.*去年在京都散步时看到了樱花/u });
@@ -197,15 +195,13 @@ for (const target of ["较早", "当前"] as const) {
     const secondMetadata = requests.filter(({ mode }) => mode === "metadata")[1]!;
     expect(JSON.parse(secondMetadata.messages[0]!.text)).toMatchObject({ existingMemory: "" });
 
-    await page.getByRole("button", { name: "菜单", exact: true }).click();
-    await page.getByRole("button", { name: "历史记录", exact: true }).click();
-    const history = page.getByRole("dialog", { name: "历史记录" });
+    const history = await openConversationList(page);
     const removedTitle = target === "较早" ? "水果偏好" : "饮品偏好";
     const item = history.getByRole("listitem").filter({ hasText: removedTitle });
     await item.getByRole("button", { name: "删除", exact: true }).click();
     await item.getByRole("button", { name: "确定", exact: true }).click();
     await expect(history.getByText(removedTitle, { exact: true })).toHaveCount(0);
-    await history.getByRole("button", { name: "关闭菜单", exact: true }).click();
+    await sideMenu(page).getByRole("button", { name: "关闭菜单", exact: true }).click();
     await expect(history).toBeHidden();
     const expectedMemory = target === "较早" ? "喜欢绿茶。" : "喜欢草莓。";
     memory = await openMemory(page);

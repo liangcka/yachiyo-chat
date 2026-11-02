@@ -74,6 +74,19 @@
   display: none;
 }
 
+/* 窄屏放不下四个页签时改为 2×2，避免末尾页签被隐藏滚动条藏起来 */
+@media (max-width: 26rem) {
+  .settings-panel__tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    overflow-x: visible;
+  }
+
+  .settings-panel__tab-btn {
+    min-width: 0;
+  }
+}
+
 .settings-panel__tab-btn {
   display: flex;
   align-items: center;

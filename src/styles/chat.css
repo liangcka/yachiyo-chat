@@ -992,10 +992,46 @@
   background: rgb(12 29 67 / 94%);
   box-shadow: 1.4rem 0 4rem rgb(2 6 20 / 24%);
   will-change: transform;
+  display: flex;
+  flex-direction: column;
 }
 
-.drawer__header,
-.history-panel > header {
+/* 侧边栏纵向排布：只有会话列表随视口伸缩并在内部滚动，其余分区保持自然高度；
+   列表至少占约半屏，放不下的设置与账户分区由抽屉整体滚动露出 */
+.drawer > * {
+  flex-shrink: 0;
+}
+
+.drawer__quick-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin-top: 1rem;
+  gap: 0.5rem;
+}
+
+.drawer__conversations {
+  display: flex;
+  min-height: 14rem;
+  min-height: min(24rem, 52dvh);
+  margin-top: 1.15rem;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.drawer__conversations > .drawer__section-title {
+  margin: 0;
+  padding: 0 0.15rem;
+}
+
+/* 设置中心等面板在视口内水平垂直居中，四周保留安全区间距 */
+.overlay--centered {
+  align-items: center;
+  justify-content: center;
+  padding: calc(var(--safe-top) + 0.7rem) 0.7rem calc(var(--safe-bottom) + 0.7rem);
+}
+
+.drawer__header {
   display: flex;
   min-height: 3.3rem;
   align-items: center;
@@ -1054,8 +1090,7 @@
   white-space: nowrap;
 }
 
-.drawer__header button,
-.history-panel > header button {
+.drawer__header button {
   display: grid;
   width: 2.8rem;
   height: 2.8rem;
@@ -1071,12 +1106,6 @@
   display: flex;
   flex-direction: column;
   margin-top: 1.15rem;
-  gap: 1.1rem;
-}
-
-.drawer__nav-section {
-  display: flex;
-  flex-direction: column;
   gap: 0.45rem;
 }
 
@@ -1120,6 +1149,25 @@
   gap: 0.5rem;
 }
 
+.drawer__section-items--grid {
+  grid-template-columns: 1fr 1fr;
+}
+
+/* 双列入口宽度有限，略收字号让日文标签尽量单行显示 */
+.drawer__section-items--grid .drawer__nav-btn,
+.drawer__quick-actions .drawer__nav-btn {
+  padding: 0.65rem 0.75rem;
+  gap: 0.55rem;
+  font-size: 0.9rem;
+  line-height: 1.25;
+}
+
+.drawer__nav-btn--primary {
+  border-color: rgb(188 216 255 / 30%);
+  background: rgb(120 164 221 / 22%);
+  font-weight: 600;
+}
+
 .drawer__actions {
   display: grid;
   margin-top: 1.35rem;
@@ -1156,8 +1204,12 @@
 }
 
 .drawer__language {
-  margin-top: 1.3rem;
-  padding: 1rem;
+  display: flex;
+  margin-top: 1rem;
+  padding: 0.5rem 0.5rem 0.5rem 0.9rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
   border: 1px solid rgb(255 255 255 / 10%);
   border-radius: 1.1rem;
   background: rgb(7 19 49 / 34%);
@@ -1165,7 +1217,7 @@
 
 .drawer__language h2 {
   display: flex;
-  margin: 0 0 0.75rem;
+  margin: 0;
   align-items: center;
   gap: 0.55rem;
   color: var(--text-muted);
@@ -1174,6 +1226,7 @@
 
 .drawer__language > div {
   display: grid;
+  min-width: 9.5rem;
   grid-template-columns: 1fr 1fr;
   padding: 0.22rem;
   border-radius: var(--radius-control);
@@ -1181,7 +1234,7 @@
 }
 
 .drawer__language button {
-  min-height: 2.55rem;
+  min-height: 2.35rem;
   border: 0;
   border-radius: var(--radius-control);
   color: var(--text-muted);
@@ -1197,12 +1250,11 @@
 
 .drawer__footer {
   display: grid;
-  margin-top: 1.3rem;
+  margin-top: 1rem;
   gap: 0.6rem;
 }
 
-.drawer .danger-action,
-.history-panel .danger-action {
+.drawer .danger-action {
   color: #ffc7ce;
 }
 
@@ -1228,148 +1280,13 @@
 }
 
 .drawer__confirm button,
-.history-panel__confirm button {
+.conversation-list__confirm button {
   min-height: 2.5rem;
   padding: 0.45rem 0.85rem;
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-control);
   color: var(--text-primary);
   background: var(--glass-soft);
-}
-
-.overlay--history {
-  align-items: flex-end;
-  padding: 0.7rem;
-}
-
-.history-panel {
-  width: 100%;
-  max-height: min(78%, 38rem);
-  padding: 1rem;
-  overflow: hidden;
-  border: 1px solid var(--glass-border);
-  border-radius: 1.7rem;
-  background: rgb(13 32 74 / 96%);
-  box-shadow: 0 -1rem 4rem rgb(2 6 20 / 28%);
-}
-
-.history-panel h1 {
-  margin: 0;
-  font-size: 1.15rem;
-}
-
-.history-panel > ol {
-  display: grid;
-  max-height: calc(78dvh - 5.6rem);
-  padding: 0;
-  margin: 0.85rem 0 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  gap: 0.55rem;
-  list-style: none;
-}
-
-.history-panel > ol > li {
-  position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.42rem;
-  border: 1px solid rgb(255 255 255 / 10%);
-  border-radius: 1rem;
-  background: rgb(151 177 216 / 10%);
-}
-
-.history-panel > ol > li[data-active="true"] {
-  border-color: rgb(188 216 255 / 30%);
-  background: rgb(120 164 221 / 19%);
-}
-
-.history-panel__select {
-  display: flex;
-  min-width: 0;
-  min-height: 3rem;
-  padding: 0.35rem 0.5rem;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: center;
-  border: 0;
-  color: var(--text-primary);
-  background: transparent;
-  text-align: left;
-}
-
-.history-panel__select strong {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.history-panel__select time {
-  margin-top: 0.2rem;
-  color: var(--text-dim);
-  font-size: 0.68rem;
-}
-
-.history-panel li > button:not(.history-panel__select),
-.history-panel li form button {
-  display: grid;
-  width: 2.55rem;
-  height: 2.55rem;
-  padding: 0;
-  border: 0;
-  border-radius: 0.8rem;
-  color: var(--text-muted);
-  background: rgb(202 218 240 / 10%);
-  place-items: center;
-}
-
-.history-panel li form {
-  display: grid;
-  grid-column: 1 / -1;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 0.35rem;
-}
-
-.history-panel li form input {
-  min-width: 0;
-  padding: 0 0.75rem;
-  border: 1px solid var(--glass-border);
-  border-radius: 0.8rem;
-  color: var(--text-primary);
-  background: rgb(2 10 31 / 42%);
-  transition: border-color var(--motion-duration-fast) var(--motion-ease-standard),
-              box-shadow var(--motion-duration-fast) var(--motion-ease-standard);
-}
-
-.history-panel li form input:focus,
-.history-panel li form input:focus-visible {
-  outline: none;
-  border-color: rgb(210 228 255 / 65%);
-  box-shadow: 0 0 0 2px rgb(210 228 255 / 30%);
-}
-
-.history-panel__confirm {
-  display: grid;
-  grid-column: 1 / -1;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 0.45rem;
-  padding: 0.5rem;
-}
-
-.history-panel__confirm p {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 0.78rem;
-}
-
-.history-panel__empty {
-  padding: 2rem 0;
-  color: var(--text-dim);
-  text-align: center;
 }
 
 .toast-region {
@@ -2322,7 +2239,6 @@
   animation: motion-drawer-in var(--motion-duration-panel) var(--motion-ease-enter) backwards;
 }
 
-.history-panel,
 .llm-panel,
 .skills-panel,
 .settings-panel {
@@ -2347,8 +2263,8 @@
 
 .composer__input-wrap,
 .access-gate__field,
-.history-panel > ol > li,
-.history-panel li form input,
+.conversation-list__item,
+.conversation-list__item form input,
 .llm-panel__field select,
 .llm-panel__key input {
   transition-property: background-color, border-color, box-shadow, opacity;
@@ -2363,7 +2279,7 @@
   box-shadow: 0 0 0 3px rgb(143 184 244 / 10%), inset 0 1px 0 rgb(255 255 255 / 13%);
 }
 
-.history-panel li form input:focus,
+.conversation-list__item form input:focus,
 .llm-panel__field select:focus,
 .llm-panel__key input:focus {
   border-color: rgb(210 228 255 / 48%);
@@ -2403,7 +2319,7 @@
     background-color: rgb(255 255 255 / 6%);
   }
 
-  .history-panel > ol > li:hover,
+  .conversation-list__item:hover,
   .skills-panel__item:hover,
   .preference-card:hover {
     border-color: rgb(188 216 255 / 24%);
@@ -2477,8 +2393,6 @@
   animation: motion-error-nudge var(--motion-duration-base) var(--motion-ease-standard) backwards;
 }
 
-.history-panel > header,
-.history-panel > ol,
 .llm-panel > header,
 .llm-panel__active,
 .llm-panel__field,
@@ -2489,7 +2403,6 @@
   animation: motion-panel-content var(--motion-duration-panel) var(--motion-ease-enter) backwards;
 }
 
-.history-panel > ol,
 .llm-panel__active,
 .skills-panel__list {
   animation-delay: var(--motion-stagger-step);
@@ -2503,24 +2416,24 @@
   animation-delay: calc(var(--motion-stagger-step) * 3);
 }
 
-.history-panel > ol > li:nth-child(-n + 4) {
+.conversation-list__group:first-child .conversation-list__item:nth-child(-n + 4) {
   animation: motion-fade-in var(--motion-duration-base) var(--motion-ease-enter) backwards;
   animation-delay: calc(var(--motion-stagger-step) * var(--stagger-index, 0));
 }
 
-.history-panel > ol > li:nth-child(1) { --stagger-index: 2; }
-.history-panel > ol > li:nth-child(2) { --stagger-index: 3; }
-.history-panel > ol > li:nth-child(3) { --stagger-index: 4; }
-.history-panel > ol > li:nth-child(4) { --stagger-index: 5; }
+.conversation-list__group:first-child .conversation-list__item:nth-child(1) { --stagger-index: 2; }
+.conversation-list__group:first-child .conversation-list__item:nth-child(2) { --stagger-index: 3; }
+.conversation-list__group:first-child .conversation-list__item:nth-child(3) { --stagger-index: 4; }
+.conversation-list__group:first-child .conversation-list__item:nth-child(4) { --stagger-index: 5; }
 
 .drawer__language button[aria-pressed="true"] {
   animation: motion-toggle-selected var(--motion-duration-base) var(--motion-ease-emphasized) backwards;
 }
 
 .drawer__confirm,
-.history-panel__confirm,
+.conversation-list__confirm,
 .llm-panel__feedback,
-.history-panel__empty {
+.conversation-list__empty {
   animation: motion-confirm-in var(--motion-duration-base) var(--motion-ease-enter) backwards;
 }
 
@@ -2534,7 +2447,6 @@
 .drawer--closing {
   animation: motion-drawer-out var(--motion-duration-panel) var(--motion-ease-enter) forwards;
 }
-.history-panel--closing,
 .llm-panel--closing,
 .skills-panel--closing,
 .settings-panel--closing {

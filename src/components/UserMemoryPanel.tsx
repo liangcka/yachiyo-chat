@@ -38,7 +38,7 @@ export function UserMemoryPanel({
   if (!render) return null;
 
   return (
-    <div className={`overlay overlay--history ${closing ? "overlay--closing" : ""}`}>
+    <div className={`overlay overlay--centered ${closing ? "overlay--closing" : ""}`}>
       <section
         aria-label={copy.userMemoryTitle}
         aria-modal="true"

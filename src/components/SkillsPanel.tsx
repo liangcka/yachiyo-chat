@@ -100,7 +100,7 @@ export function SkillsPanel({
   const { enabled, showSources, smart } = webSearchSettings;
 
   return (
-    <div className={`overlay overlay--history ${closing ? "overlay--closing" : ""}`}>
+    <div className={`overlay overlay--centered ${closing ? "overlay--closing" : ""}`}>
       <section
         aria-label={copy.skillsTitle}
         aria-modal="true"

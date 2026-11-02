@@ -1,158 +1,108 @@
-import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
-import { useChatController, type ChatRepository, type StreamChatFunction } from "./app/use-chat-controller";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import { resolveAppServices, type AppServices } from "./app/app-services";
+import { controllerErrorMessage, imageErrorMessage } from "./app/error-messages";
+import { useAuthentication } from "./app/use-authentication";
+import { useChatController } from "./app/use-chat-controller";
+import { useChatPreferences } from "./app/use-chat-preferences";
+import { useComposerDraft } from "./app/use-composer-draft";
+import { useConversationList } from "./app/use-conversation-list";
+import { useGlobalImagePaste } from "./app/use-global-image-paste";
+import { useImageUrls } from "./app/use-image-urls";
+import { useLlmSettings } from "./app/use-llm-settings";
+import { useOnboarding } from "./app/use-onboarding";
+import { resolveToastMessage, useToast } from "./app/use-toast";
 import { AccessGate } from "./components/AccessGate";
 import { StarfieldCanvas } from "./components/StarfieldCanvas";
 import { ToastRegion } from "./components/ToastRegion";
-import { ConversationRepository } from "./data/conversation-repository";
-import { YachiyoDatabase } from "./data/db";
-import type { ConversationSearchResult } from "./domain/conversation-search";
-import type { Conversation, Locale, StoredImage } from "./domain/chat";
-import { PROVIDER_METADATA, type ActiveLlmConfig, type ProviderId } from "./domain/llm";
-import {
-  ImageProcessingError,
-  processImage,
-  type ImageProcessingErrorCode,
-  type ProcessedImage,
-} from "./features/capture/image-processor";
-import { copyFor, type UiCopy } from "./i18n/messages";
+import type { Locale } from "./domain/chat";
+import { PROVIDER_METADATA } from "./domain/llm";
+import { ImageProcessingError } from "./features/capture/image-processor";
+import { copyFor } from "./i18n/messages";
 import { UpdatePrompt } from "./pwa/UpdatePrompt";
 import { useOnlineStatus } from "./pwa/use-online-status";
 import { usePwaUpdate } from "./pwa/use-pwa-update";
 import { clearWebCaches } from "./services/api-origins";
 import { isNativeApp } from "./services/app-platform";
-import { streamChat } from "./services/chat-client";
-import { LlmSettingsService } from "./services/llm-settings";
-import { SessionClient } from "./services/session-client";
-import { SkillSettingsService } from "./services/skill-settings";
-import {
-  WebSearchSettingsService,
-  defaultWebSearchSettings,
-  type WebSearchSettings,
-} from "./services/web-search-settings";
-import { SKILLS } from "./skills";
 import type { SharedViewProps } from "./views/layout-types";
 import { MobileLayout } from "./views/mobile/MobileLayout";
-
-export interface AppRepository extends ChatRepository {
-  renameConversation(id: string, title: string): Promise<void>;
-  deleteConversation(id: string): Promise<string | void>;
-  clearAll(): Promise<void>;
-  getMultiBubble?(): Promise<boolean>;
-  setMultiBubble?(multiBubble: boolean): Promise<void>;
-  getOnboardingCompleted?(): Promise<boolean>;
-  setOnboardingCompleted?(completed: boolean): Promise<void>;
-  searchConversations?(query: string): Promise<ConversationSearchResult[]>;
-}
-
-export interface SessionService {
-  check(signal?: AbortSignal): Promise<boolean>;
-  authenticate(accessCode: string, signal?: AbortSignal): Promise<void>;
-  signOut(signal?: AbortSignal): Promise<void>;
-}
-
-export interface AppServices {
-  repository: AppRepository;
-  session: SessionService;
-  streamChat: StreamChatFunction;
-  processImage: (file: File) => Promise<ProcessedImage>;
-  llmSettings?: LlmSettingsService;
-  skillSettings?: SkillSettingsService;
-  webSearchSettings?: WebSearchSettingsService;
-}
 
 export interface AppProps {
   services?: AppServices;
 }
 
-const productionDatabase = new YachiyoDatabase();
-const productionLlmService = new LlmSettingsService(productionDatabase);
-const productionSkillService = new SkillSettingsService(productionDatabase);
-const productionWebSearchService = new WebSearchSettingsService(productionDatabase);
-const productionServices: AppServices = {
-  processImage,
-  repository: new ConversationRepository(productionDatabase),
-  session: new SessionClient(),
-  streamChat,
-  llmSettings: productionLlmService,
-  skillSettings: productionSkillService,
-  webSearchSettings: productionWebSearchService,
-};
-
-interface ToastState {
-  id: number;
-  message: string;
-  tone: "info" | "error";
+function LoadingIndicator({ label }: { label: string }) {
+  return (
+    <div aria-label={label} className="chat-loading" role="status">
+      <span />
+      <span />
+      <span />
+    </div>
+  );
 }
 
-type AuthenticationState = "checking" | "authenticated" | "unauthenticated";
-
-function imageErrorMessage(code: ImageProcessingErrorCode, copy: UiCopy): string {
-  if (code === "IMAGE_INVALID") return copy.imageInvalid;
-  if (code === "IMAGE_TOO_LARGE") return copy.imageTooLarge;
-  return copy.genericFailure;
-}
-
-function controllerErrorMessage(code: string, copy: UiCopy): string {
-  if (code === "DAILY_QUOTA_EXCEEDED") return copy.quotaReached;
-  if (code === "SESSION_REQUIRED") return copy.sessionExpired;
-  if (code === "NETWORK_ERROR") return copy.offline;
-  if (code === "CONVERSATION_LIMIT") return copy.conversationLimit;
-  if (code === "STORAGE_ERROR") return copy.storageFull;
-  return copy.genericFailure;
-}
-
+/** 应用组合根：装配各领域 hook，编排跨领域的会话与数据操作，再交给布局渲染。 */
 export function App({ services }: AppProps) {
-  const activeServices = services ?? productionServices;
-  const llmService = activeServices.llmSettings ?? productionLlmService;
-  const skillService = activeServices.skillSettings ?? productionSkillService;
-  const webSearchService = activeServices.webSearchSettings ?? productionWebSearchService;
+  const appServices = useMemo(() => resolveAppServices(services), [services]);
+  const { repository, session } = appServices;
   const { isOnline } = useOnlineStatus();
   const pwa = usePwaUpdate();
+  const { toast, showToast } = useToast();
+  const notifyGenericFailure = useCallback(() => showToast((copy) => copy.genericFailure, "error"), [showToast]);
+  const notifyStorageFull = useCallback(() => showToast((copy) => copy.storageFull, "error"), [showToast]);
 
-  const [authentication, setAuthentication] = useState<AuthenticationState>(() =>
-    navigator.onLine ? "checking" : "authenticated",
-  );
-  const [composerValue, setComposerValue] = useState("");
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [imageUrls, setImageUrls] = useState<ReadonlyMap<string, string>>(new Map());
-  const [llmActiveProvider, setLlmActiveProvider] = useState<ProviderId>();
-  const [llmEntries, setLlmEntries] = useState<readonly { provider: ProviderId; apiKey: string; model: string }[]>([]);
-  const [pendingImageDataUrl, setPendingImageDataUrl] = useState<string>();
-  const [activeSkillIds, setActiveSkillIds] = useState<string[]>([]);
-  const [webSearchSettings, setWebSearchSettings] = useState<WebSearchSettings>(defaultWebSearchSettings);
-  const [toast, setToast] = useState<ToastState>();
-  const [multiBubble, setMultiBubble] = useState(true);
-  const [onboardingOpen, setOnboardingOpen] = useState(false);
-
-  const activeLlmConfig = useMemo<ActiveLlmConfig | undefined>(() => {
-    if (llmActiveProvider === undefined) return undefined;
-    const entry = llmEntries.find((item) => item.provider === llmActiveProvider);
-    if (entry === undefined) return undefined;
-    return {
-      provider: entry.provider,
-      apiKey: entry.apiKey,
-      model: entry.model,
-    };
-  }, [llmActiveProvider, llmEntries]);
-
-  const activeSkills = useMemo(
-    () => SKILLS.filter((skill) => activeSkillIds.includes(skill.id)),
-    [activeSkillIds],
-  );
+  const llm = useLlmSettings(appServices.llmSettings, notifyGenericFailure);
+  const preferences = useChatPreferences({
+    repository,
+    skillService: appServices.skillSettings,
+    webSearchService: appServices.webSearchSettings,
+  });
+  const onboarding = useOnboarding(repository, notifyStorageFull);
 
   const controller = useChatController({
-    repository: activeServices.repository,
-    streamChat: activeServices.streamChat,
-    activeLlmConfig,
-    activeSkills,
-    multiBubble,
-    webSearchEnabled: webSearchSettings.enabled,
-    webSearchSmart: webSearchSettings.smart,
+    repository,
+    streamChat: appServices.streamChat,
+    activeLlmConfig: llm.activeConfig,
+    activeSkills: preferences.activeSkills,
+    multiBubble: preferences.multiBubble,
+    webSearchEnabled: preferences.webSearch.enabled,
+    webSearchSmart: preferences.webSearch.smart,
   });
-  const setControllerOnline = controller.setOnline;
   const copy = copyFor(controller.locale);
-  const handledErrorRef = useRef<string | undefined>(undefined);
-  const toastSequenceRef = useRef(0);
+  const {
+    deleteConversation,
+    newConversation,
+    recall,
+    regenerate,
+    selectConversation,
+    setLocale,
+    setOnline,
+    stop,
+    updateUserMemory,
+  } = controller;
+
+  const { load: loadLlm } = llm;
+  const { load: loadPreferences } = preferences;
+  const loadAuthenticatedState = useCallback(async () => {
+    await Promise.all([loadLlm().catch(notifyGenericFailure), loadPreferences()]);
+  }, [loadLlm, loadPreferences, notifyGenericFailure]);
+  const authentication = useAuthentication({
+    session,
+    isOnline,
+    loadAuthenticatedState,
+    onCheckFailed: notifyGenericFailure,
+  });
+  const authenticated = authentication.state === "authenticated";
+
+  const conversations = useConversationList({
+    repository,
+    enabled: authenticated,
+    activeConversation: controller.activeConversation,
+    onStorageError: notifyStorageFull,
+  });
+  const { refresh: refreshConversations } = conversations;
+  const getImage = useCallback((id: string) => repository.getImage(id), [repository]);
+  const images = useImageUrls(getImage, controller.messages);
+  const draft = useComposerDraft({ controller, getImage, registerImageUrl: images.register });
 
   useEffect(() => {
     const previousLanguage = document.documentElement.lang;
@@ -162,281 +112,18 @@ export function App({ services }: AppProps) {
     };
   }, [controller.locale]);
 
-  const showToast = useCallback((message: string, tone: ToastState["tone"] = "info") => {
-    setToast({ id: ++toastSequenceRef.current, message, tone });
-  }, []);
-  const showSessionFailure = useEffectEvent(() => showToast(copy.genericFailure, "error"));
-
   useEffect(() => {
-    let cancelled = false;
-    const repository = activeServices.repository;
-    void (repository.getOnboardingCompleted?.() ?? Promise.resolve(false))
-      .catch(() => false)
-      .then((completed) => {
-        if (!cancelled) setOnboardingOpen(!completed);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeServices.repository]);
-
-  const handleCloseOnboarding = useCallback((): void => {
-    setOnboardingOpen(false);
-    void activeServices.repository.setOnboardingCompleted?.(true)
-      .catch(() => showToast(copy.storageFull, "error"));
-  }, [activeServices.repository, copy.storageFull, showToast]);
-
-  const readLlmSettings = useCallback(async () => {
-    const [records, active] = await Promise.all([
-      llmService.list(),
-      llmService.getActiveProvider(),
-    ]);
-    return {
-      active,
-      entries: records.map((record) => ({
-        provider: record.provider,
-        apiKey: record.apiKey,
-        model: record.model,
-      })),
-    };
-  }, [llmService]);
-
-  const syncWebSearchSettings = useCallback(async () => {
-    const webSearch = await webSearchService
-      .getWebSearchSettings()
-      .catch(() => defaultWebSearchSettings);
-    setWebSearchSettings(webSearch);
-    return webSearch;
-  }, [webSearchService]);
-
-  useEffect(() => {
-    if (!isOnline) {
-      const timeout = setTimeout(() => {
-        setAuthentication((current) => (current === "checking" ? "authenticated" : current));
-      }, 0);
-      return () => clearTimeout(timeout);
-    }
-    const abortController = new AbortController();
-    let cancelled = false;
-    void activeServices.session
-      .check(abortController.signal)
-      .then(async (authenticated) => {
-        let llmSettings: Awaited<ReturnType<typeof readLlmSettings>> | undefined;
-        if (authenticated) {
-          try {
-            llmSettings = await readLlmSettings();
-          } catch {
-            if (!cancelled) showSessionFailure();
-          }
-          setActiveSkillIds(await skillService.getActiveSkillIds().catch(() => []));
-          if (!cancelled) {
-            await syncWebSearchSettings();
-          }
-        }
-        if (cancelled) return;
-        if (llmSettings !== undefined) {
-          setLlmEntries(llmSettings.entries);
-          setLlmActiveProvider(llmSettings.active);
-        }
-        setAuthentication(authenticated ? "authenticated" : "unauthenticated");
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setAuthentication("unauthenticated");
-          showSessionFailure();
-        }
-      });
-    return () => {
-      cancelled = true;
-      abortController.abort();
-    };
-  }, [activeServices, isOnline, readLlmSettings, skillService, syncWebSearchSettings]);
-
-  useEffect(() => {
-    const timeout = setTimeout(() => setControllerOnline(isOnline), 0);
+    const timeout = setTimeout(() => setOnline(isOnline), 0);
     return () => clearTimeout(timeout);
-  }, [isOnline, setControllerOnline]);
+  }, [isOnline, setOnline]);
 
   // 原生壳启动自愈：清掉旧版 APK 可能残留的 Service Worker 与缓存
   useEffect(() => {
     if (isNativeApp()) void clearWebCaches();
   }, []);
 
-  useEffect(() => {
-    if (toast === undefined) return;
-    const timeout = setTimeout(() => setToast(undefined), 5_200);
-    return () => clearTimeout(timeout);
-  }, [toast]);
-
-  useEffect(() => {
-    let cancelled = false;
-    void activeServices.repository
-      .getMultiBubble?.()
-      .then((saved) => {
-        if (typeof saved === "boolean" && !cancelled) {
-          setMultiBubble(saved);
-        }
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [activeServices.repository]);
-
-  const handleMultiBubbleChange = useCallback(
-    async (enabled: boolean) => {
-      setMultiBubble(enabled);
-      await activeServices.repository.setMultiBubble?.(enabled).catch(() => undefined);
-    },
-    [activeServices.repository],
-  );
-
-  const refreshHistory = useCallback(async () => {
-    try {
-      setConversations(await activeServices.repository.listConversations());
-    } catch {
-      showToast(copy.storageFull, "error");
-    }
-  }, [activeServices, copy.storageFull, showToast]);
-
-  const onSearchConversations = useMemo(() => {
-    const repository = activeServices.repository;
-    return repository.searchConversations === undefined
-      ? undefined
-      : (query: string) => repository.searchConversations!(query);
-  }, [activeServices.repository]);
-
-  const refreshLlm = useCallback(async () => {
-    try {
-      const llmSettings = await readLlmSettings();
-      setLlmEntries(llmSettings.entries);
-      setLlmActiveProvider(llmSettings.active);
-    } catch {
-      showToast(copy.genericFailure, "error");
-    }
-  }, [copy.genericFailure, readLlmSettings, showToast]);
-
-  const handleLlmSave = useCallback(
-    async (provider: ProviderId, apiKey: string, model: string) => {
-      await llmService.saveProvider(provider, apiKey, model);
-      await refreshLlm();
-    },
-    [llmService, refreshLlm],
-  );
-
-  const handleLlmClear = useCallback(
-    async (provider: ProviderId) => {
-      await llmService.clear(provider);
-      await refreshLlm();
-    },
-    [llmService, refreshLlm],
-  );
-
-  const handleLlmActivate = useCallback(
-    async (provider: ProviderId) => {
-      await llmService.setActiveProvider(provider);
-      setLlmActiveProvider(provider);
-    },
-    [llmService],
-  );
-
-  const handleSkillToggle = useCallback(
-    async (id: string, next: boolean) => {
-      setActiveSkillIds((current) => {
-        const updated = next
-          ? [...new Set([...current, id])]
-          : current.filter((skillId) => skillId !== id);
-        void skillService.setActiveSkillIds(updated).catch(() => undefined);
-        return updated;
-      });
-    },
-    [skillService],
-  );
-
-  const handleWebSearchSettingsChange = useCallback(
-    (partial: Partial<WebSearchSettings>) => {
-      setWebSearchSettings((current) => {
-        const next = { ...current, ...partial };
-        void webSearchService.set(next).catch(() => undefined);
-        return next;
-      });
-    },
-    [webSearchService],
-  );
-
-  useEffect(() => {
-    if (authentication !== "authenticated") return;
-    let cancelled = false;
-    void activeServices.repository.listConversations().then((items) => {
-      if (!cancelled) setConversations(items);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeServices, authentication, controller.activeConversation?.id, controller.activeConversation?.title]);
-
-  const blobUrlsRef = useRef<Map<string, string>>(new Map());
-
-  // 稳定签名：只有 imageId 集合变化时才触发 Blob 加载 effect
-  const messageImageIdsKey = useMemo(
-    () =>
-      controller.messages.flatMap(({ imageId }) => (imageId === undefined ? [] : [imageId]))
-        .sort()
-        .join("\n"),
-    [controller.messages],
-  );
-  const messageImageIds = useMemo(() => {
-    const key = messageImageIdsKey;
-    return key.length === 0 ? [] : key.split("\n");
-  }, [messageImageIdsKey]);
-
-  useEffect(() => {
-    if (typeof URL.createObjectURL !== "function") {
-      return;
-    }
-    let cancelled = false;
-    const missingIds = messageImageIds.filter((id) => !blobUrlsRef.current.has(id));
-
-    if (missingIds.length > 0) {
-      const loadImages = async (retryCount = 0) => {
-        const entries = await Promise.all(
-          missingIds.map(async (id) => {
-            if (blobUrlsRef.current.has(id)) return [id, blobUrlsRef.current.get(id)!] as const;
-            const image = await activeServices.repository.getImage(id);
-            if (image === undefined) return undefined;
-            const url = URL.createObjectURL(image.blob);
-            blobUrlsRef.current.set(id, url);
-            return [id, url] as const;
-          }),
-        );
-        if (!cancelled && entries.some((entry) => entry !== undefined)) {
-          setImageUrls(new Map(blobUrlsRef.current));
-        }
-        const stillMissing = missingIds.filter((id) => !blobUrlsRef.current.has(id));
-        if (!cancelled && stillMissing.length > 0 && retryCount < 3) {
-          setTimeout(() => {
-            if (!cancelled) void loadImages(retryCount + 1);
-          }, 150 * (retryCount + 1));
-        }
-      };
-      void loadImages();
-    }
-
-    return () => {
-      cancelled = true;
-    };
-  }, [activeServices, messageImageIds]);
-
-  useEffect(() => {
-    const cache = blobUrlsRef.current;
-    return () => {
-      for (const url of cache.values()) {
-        URL.revokeObjectURL(url);
-      }
-      cache.clear();
-    };
-  }, []);
-
+  const handledErrorRef = useRef<string | undefined>(undefined);
+  const { expire } = authentication;
   useEffect(() => {
     const errorCode = controller.errorCode;
     if (errorCode === undefined) {
@@ -446,280 +133,129 @@ export function App({ services }: AppProps) {
     if (handledErrorRef.current === errorCode) return;
     handledErrorRef.current = errorCode;
     const timeout = setTimeout(() => {
-      if (errorCode === "SESSION_REQUIRED") setAuthentication("unauthenticated");
-      showToast(controllerErrorMessage(errorCode, copy), "error");
+      if (errorCode === "SESSION_REQUIRED") expire();
+      showToast((current) => controllerErrorMessage(errorCode, current), "error");
     }, 0);
     return () => clearTimeout(timeout);
-  }, [controller.errorCode, copy, showToast]);
+  }, [controller.errorCode, expire, showToast]);
 
-  const handleAuthenticate = async (accessCode: string) => {
-    await activeServices.session.authenticate(accessCode);
-    try {
-      const llmSettings = await readLlmSettings();
-      setLlmEntries(llmSettings.entries);
-      setLlmActiveProvider(llmSettings.active);
-      setActiveSkillIds(await skillService.getActiveSkillIds());
-      await syncWebSearchSettings();
-    } catch {
-      showToast(copy.genericFailure, "error");
-    }
-    setAuthentication("authenticated");
-  };
-
-  const handleImage = useCallback(
-    (image: ProcessedImage) => {
-      const conversationId = controller.activeConversation?.id;
-      if (conversationId === undefined) return;
-      const imageId = crypto.randomUUID();
-      const storedImage: StoredImage = {
-        blob: image.blob,
-        conversationId,
-        height: image.height,
-        id: imageId,
-        mimeType: image.mimeType,
-        width: image.width,
-      };
-      if (typeof URL.createObjectURL === "function") {
-        const url = URL.createObjectURL(image.blob);
-        blobUrlsRef.current.set(imageId, url);
-        setImageUrls(new Map(blobUrlsRef.current));
-      }
-      controller.setPendingImage(storedImage);
-      setPendingImageDataUrl(image.dataUrl);
-    },
-    [controller],
-  );
-
-  const handleSend = (value: string) => {
-    void controller.send(value);
-    setComposerValue("");
-    setPendingImageDataUrl(undefined);
-  };
-
+  const { restore: restoreDraft, clear: clearDraft } = draft;
   const handleRecall = useCallback(async () => {
-    const recalled = await controller.recall();
-    if (recalled) {
-      if (recalled.text !== undefined) {
-        setComposerValue(recalled.text);
-      }
-      if (recalled.imageId) {
-        const image = await activeServices.repository.getImage(recalled.imageId);
-        if (image) {
-          controller.setPendingImage(image);
-          if (typeof URL.createObjectURL === "function") {
-            const url = URL.createObjectURL(image.blob);
-            blobUrlsRef.current.set(image.id, url);
-            setImageUrls(new Map(blobUrlsRef.current));
-            setPendingImageDataUrl(url);
-          }
-        }
-      }
-      showToast(copy.recallSuccess, "info");
-      await refreshHistory();
-    }
-  }, [activeServices, controller, copy.recallSuccess, refreshHistory, showToast]);
+    const recalled = await recall();
+    if (recalled === undefined) return;
+    await restoreDraft(recalled);
+    showToast(copy.recallSuccess, "info");
+    await refreshConversations();
+  }, [copy.recallSuccess, recall, refreshConversations, restoreDraft, showToast]);
 
-  const handleRegenerate = useCallback(
-    async (messageId?: string) => {
-      await controller.regenerate(messageId);
-      await refreshHistory();
-    },
-    [controller, refreshHistory],
-  );
+  const handleRegenerate = useCallback(async (messageId?: string) => {
+    await regenerate(messageId);
+    await refreshConversations();
+  }, [refreshConversations, regenerate]);
+
+  const handleNewChat = useCallback(async () => {
+    await newConversation();
+    clearDraft();
+    await refreshConversations();
+  }, [clearDraft, newConversation, refreshConversations]);
 
   const handleLocale = async (locale: Locale) => {
-    await controller.setLocale(locale);
-    await refreshHistory();
+    await setLocale(locale);
+    await refreshConversations();
   };
 
-  const handleNewChat = async () => {
-    await controller.newConversation();
-    setComposerValue("");
-    setPendingImageDataUrl(undefined);
-    await refreshHistory();
-  };
-
-  const handleRename = async (id: string, title: string) => {
-    await activeServices.repository.renameConversation(id, title);
-    await refreshHistory();
-  };
-
+  const activeConversationId = controller.activeConversation?.id;
   const handleDelete = async (id: string) => {
-    const deletingActive = controller.activeConversation?.id === id;
-    if (!await controller.deleteConversation(id)) return;
-    if (deletingActive) {
-      const remaining = await activeServices.repository.listConversations();
-      if (remaining[0] === undefined) await controller.newConversation();
-      else await controller.selectConversation(remaining[0].id);
+    if (!await deleteConversation(id)) return;
+    if (activeConversationId === id) {
+      const [next] = await repository.listConversations();
+      if (next === undefined) await newConversation();
+      else await selectConversation(next.id);
     }
-    await refreshHistory();
+    await refreshConversations();
   };
 
   const handleClearData = async () => {
-    await controller.stop();
-    for (const url of blobUrlsRef.current.values()) {
-      URL.revokeObjectURL(url);
-    }
-    blobUrlsRef.current.clear();
-    setImageUrls(new Map());
-    await activeServices.repository.clearAll();
-    await controller.updateUserMemory("");
-    await activeServices.repository.setLocale(controller.locale);
-    await llmService.clearAll();
-    setActiveSkillIds([]);
-    await skillService.clear();
-    setWebSearchSettings(defaultWebSearchSettings);
-    await webSearchService.clear().catch(() => undefined);
-    setMultiBubble(true);
-    await activeServices.repository.setMultiBubble?.(true).catch(() => undefined);
-    setLlmEntries([]);
-    setLlmActiveProvider(undefined);
-    await controller.newConversation();
-    setComposerValue("");
-    setPendingImageDataUrl(undefined);
-    await refreshHistory();
+    await stop();
+    images.revokeAll();
+    await repository.clearAll();
+    await updateUserMemory("");
+    await repository.setLocale(controller.locale);
+    await llm.reset();
+    await preferences.reset();
+    await newConversation();
+    clearDraft();
+    await refreshConversations();
   };
 
   const handleSignOut = async () => {
-    await controller.stop();
-    await activeServices.session.signOut();
-    setAuthentication("unauthenticated");
+    await stop();
+    await authentication.signOut();
   };
 
-  const activeProviderSupportsImage =
-    activeLlmConfig === undefined ||
-    PROVIDER_METADATA[activeLlmConfig.provider].imageModels.includes(activeLlmConfig.model);
+  const activeConfig = llm.activeConfig;
+  const imageSupported =
+    activeConfig === undefined ||
+    PROVIDER_METADATA[activeConfig.provider].imageModels.includes(activeConfig.model);
+  const generating =
+    controller.phase === "streaming" || controller.phase === "compressing" || controller.phase === "loading";
 
-  useEffect(() => {
-    const handleGlobalPaste = (event: ClipboardEvent) => {
-      if (event.defaultPrevented) return;
-      if (
-        authentication !== "authenticated" ||
-        controller.phase === "streaming" ||
-        controller.phase === "compressing" ||
-        controller.phase === "loading"
-      ) {
-        return;
-      }
-      const target = event.target as HTMLElement | null;
-      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) {
-        return;
-      }
-      const items = event.clipboardData?.items;
-      if (!items) return;
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        if (item.type.startsWith("image/")) {
-          const file = item.getAsFile();
-          if (file) {
-            event.preventDefault();
-            if (!isOnline || controller.phase === "offline") {
-              showToast(copy.offline, "error");
-              return;
-            }
-            if (!activeProviderSupportsImage) {
-              showToast(copy.llmNoImageSupport, "error");
-              return;
-            }
-            void (activeServices.processImage ?? processImage)(file)
-              .then((image) => handleImage(image))
-              .catch((error) => {
-                showToast(
-                  imageErrorMessage(
-                    error instanceof ImageProcessingError ? error.code : "IMAGE_DECODE_FAILED",
-                    copy,
-                  ),
-                  "error",
-                );
-              });
-            return;
-          }
-        }
-      }
-    };
+  useGlobalImagePaste(authenticated && !generating, (file) => {
+    if (!isOnline || controller.phase === "offline") {
+      showToast(copy.offline, "error");
+      return;
+    }
+    if (!imageSupported) {
+      showToast(copy.llmNoImageSupport, "error");
+      return;
+    }
+    void appServices.processImage(file)
+      .then(draft.attachImage)
+      .catch((error: unknown) => {
+        const code = error instanceof ImageProcessingError ? error.code : "IMAGE_DECODE_FAILED";
+        showToast(imageErrorMessage(code, copy), "error");
+      });
+  });
 
-    window.addEventListener("paste", handleGlobalPaste);
-    return () => {
-      window.removeEventListener("paste", handleGlobalPaste);
-    };
-  }, [
-    activeProviderSupportsImage,
-    activeServices.processImage,
-    authentication,
-    controller.phase,
-    copy,
-    handleImage,
-    isOnline,
-    showToast,
-  ]);
-
-  const sharedProps: SharedViewProps = {
-    activeProviderSupportsImage,
-    activeSkillIds,
-    composerValue,
+  const viewProps: SharedViewProps = {
     controller,
-    conversations,
     copy,
-    imageUrls,
     isOnline,
-    llmActiveProvider,
-    llmEntries,
-    onClearData: handleClearData,
-    onDelete: handleDelete,
-    onSearchConversations,
-    onImage: handleImage,
-    onLlmActivate: handleLlmActivate,
-    onLlmClear: handleLlmClear,
-    onLlmSave: handleLlmSave,
-    onLocale: handleLocale,
-    onNewChat: handleNewChat,
-    onboardingOpen,
-    onCloseOnboarding: handleCloseOnboarding,
-    onOpenOnboarding: () => setOnboardingOpen(true),
-    onRecall: handleRecall,
-    onRegenerate: handleRegenerate,
-    onRename: handleRename,
-    onSend: handleSend,
-    onSignOut: handleSignOut,
-    onSkillToggle: handleSkillToggle,
-    onWebSearchSettingsChange: handleWebSearchSettingsChange,
-    multiBubble,
-    onMultiBubbleChange: handleMultiBubbleChange,
-    pendingImageDataUrl,
-    processImage: activeServices.processImage,
+    imageUrls: images.imageUrls,
     pwa,
-    refreshHistory,
-    refreshLlm,
-    setComposerValue,
-    setPendingImageDataUrl,
     showToast,
-    webSearchSettings,
+    composer: { ...draft, imageSupported, processImage: appServices.processImage },
+    messageActions: { recall: handleRecall, regenerate: handleRegenerate },
+    conversations: {
+      items: conversations.items,
+      refresh: refreshConversations,
+      search: conversations.search,
+      create: handleNewChat,
+      rename: conversations.rename,
+      remove: handleDelete,
+    },
+    settings: {
+      llm,
+      activeSkillIds: preferences.activeSkillIds,
+      toggleSkill: preferences.toggleSkill,
+      webSearch: preferences.webSearch,
+      changeWebSearch: preferences.changeWebSearch,
+      multiBubble: preferences.multiBubble,
+      changeMultiBubble: preferences.changeMultiBubble,
+    },
+    onboarding,
+    account: { setLocale: handleLocale, clearData: handleClearData, signOut: handleSignOut },
   };
-
-  const authenticatedContent =
-    controller.phase === "loading" ? (
-      <div aria-label={copy.verifying} className="chat-loading" role="status">
-        <span />
-        <span />
-        <span />
-      </div>
-    ) : (
-      <MobileLayout {...sharedProps} />
-    );
 
   return (
     <main className="app-shell" aria-label="Yachiyo Chat">
       <div className="chat-stage">
         <StarfieldCanvas />
-        {authentication === "checking" ? (
-          <div aria-label={copy.verifying} className="chat-loading" role="status">
-            <span />
-            <span />
-            <span />
-          </div>
-        ) : authentication === "unauthenticated" ? (
+        {authentication.state === "checking" ? (
+          <LoadingIndicator label={copy.verifying} />
+        ) : authentication.state === "unauthenticated" ? (
           <>
-            <AccessGate copy={copy} onAuthenticate={handleAuthenticate} />
+            <AccessGate copy={copy} onAuthenticate={authentication.authenticate} />
             <div className="access-gate__prompt">
               <UpdatePrompt
                 copy={copy}
@@ -731,12 +267,14 @@ export function App({ services }: AppProps) {
               />
             </div>
           </>
+        ) : controller.phase === "loading" ? (
+          <LoadingIndicator label={copy.verifying} />
         ) : (
-          authenticatedContent
+          <MobileLayout {...viewProps} />
         )}
         <ToastRegion
           announcementId={toast?.id}
-          message={toast?.message}
+          message={toast === undefined ? undefined : resolveToastMessage(toast.message, copy)}
           tone={toast?.tone}
         />
       </div>

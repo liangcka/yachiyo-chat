@@ -1,13 +1,13 @@
 import { BookOpen, Brain, Cpu, SlidersHorizontal, Sparkles, X } from "lucide-react";
 import { useState } from "react";
 import { usePanel } from "../app/use-panel";
-import type { ProviderId } from "../domain/llm";
+import type { LlmProviderEntry, ProviderId } from "../domain/llm";
 import type { UiCopy } from "../i18n/messages";
 import type { WebSearchSettings } from "../services/web-search-settings";
 import type { SkillDefinition } from "../skills";
 import { NativeUpdateSettings } from "../update/NativeUpdateControls";
 import type { NativeUpdateState } from "../update/use-native-update";
-import { LlmSettingsTab, type LlmProviderEntry } from "./settings/LlmSettingsTab";
+import { LlmSettingsTab } from "./settings/LlmSettingsTab";
 import { PreferencesTab } from "./settings/PreferencesTab";
 import { SkillsTab } from "./settings/SkillsTab";
 import { UserMemoryTab } from "./settings/UserMemoryTab";
@@ -97,7 +97,7 @@ export function SettingsPanel({
   };
 
   return (
-    <div className={`overlay overlay--history ${closing ? "overlay--closing" : ""}`}>
+    <div className={`overlay overlay--centered ${closing ? "overlay--closing" : ""}`}>
       <button
         aria-label={`${copy.closeMenu} ·`}
         className="overlay__backdrop"

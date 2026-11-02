@@ -308,3 +308,26 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       };
   }
 }
+
+/**
+ * 派生叠加视图：流式期间增量写在 state.streaming 槽位里，这里把累积文本叠到
+ * 对应消息上再交给 UI，保证组件层看到的仍是"最后一条消息的 text 在增长"。
+ */
+export function selectVisibleMessages(state: ChatState): ChatMessage[] {
+  const streaming = state.streaming;
+  if (streaming === undefined) return state.messages;
+  const index = state.messages.findIndex((message) => message.id === streaming.messageId);
+  if (index < 0) return state.messages;
+  return state.messages.map((message, i) =>
+    i === index
+      ? {
+          ...message,
+          ...(streaming.text !== undefined ? { text: message.text + streaming.text } : {}),
+          thought:
+            streaming.thought === undefined
+              ? message.thought
+              : ((message.thought ?? "") + streaming.thought) || undefined,
+        }
+      : message,
+  );
+}

@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { App, type AppRepository, type AppServices, type SessionService } from "../App";
+import { App } from "../App";
+import type { AppRepository, AppServices, SessionService } from "../app/app-services";
 import { YachiyoDatabase } from "../data/db";
 import type { ChatMessage, Conversation, Locale, StoredImage } from "../domain/chat";
 import type { ProcessedImage } from "../features/capture/image-processor";
@@ -707,8 +708,7 @@ describe("App flows", () => {
 
     // 此时存在第 2 个空会话，切换回第 1 个非空会话后再次触发新建对话，应直接复用已有的空会话而不变成 3 个会话
     await user.click(screen.getByRole("button", { name: "菜单" }));
-    await user.click(screen.getByRole("button", { name: "历史记录" }));
-    const historyCheck = screen.getByRole("dialog", { name: "历史记录" });
+    const historyCheck = within(screen.getByRole("dialog", { name: "菜单" })).getByRole("region", { name: "历史记录" });
     const itemsCheck = within(historyCheck).getAllByRole("listitem");
     await user.click(within(itemsCheck[1]!).getByRole("button", { name: /新的对话/ }));
     await screen.findByText("第一段对话的内容");
@@ -718,8 +718,8 @@ describe("App flows", () => {
     expect(services.repository.conversations).toHaveLength(2);
 
     await user.click(screen.getByRole("button", { name: "菜单" }));
-    await user.click(screen.getByRole("button", { name: "历史记录" }));
-    const history = screen.getByRole("dialog", { name: "历史记录" });
+    const drawer = screen.getByRole("dialog", { name: "菜单" });
+    const history = within(drawer).getByRole("region", { name: "历史记录" });
     expect(within(history).getAllByRole("listitem")).toHaveLength(2);
 
     const firstItem = within(history).getAllByRole("listitem")[0];
@@ -734,7 +734,7 @@ describe("App flows", () => {
     await user.click(within(firstItem).getByRole("button", { name: "确定" }));
     await waitFor(() => expect(services.repository.conversations).toHaveLength(1));
 
-    await user.click(within(history).getByRole("button", { name: "关闭菜单" }));
+    await user.click(within(drawer).getByRole("button", { name: "关闭菜单" }));
     await user.click(screen.getByRole("button", { name: "菜单" }));
     await user.click(screen.getByRole("button", { name: "清除本地数据" }));
     await user.click(screen.getByRole("button", { name: "确定" }));

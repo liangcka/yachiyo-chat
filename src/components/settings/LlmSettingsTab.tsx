@@ -9,15 +9,10 @@ import {
   getProviderMeta,
   isServerManagedModel,
   isValidApiKey,
+  type LlmProviderEntry,
   type ProviderId,
 } from "../../domain/llm";
 import type { UiCopy } from "../../i18n/messages";
-
-export interface LlmProviderEntry {
-  provider: ProviderId;
-  apiKey: string;
-  model: string;
-}
 
 export interface LlmSettingsTabProps {
   copy: UiCopy;

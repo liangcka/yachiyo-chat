@@ -182,7 +182,7 @@ export function LlmSettingsPanel({
   };
 
   return (
-    <div className={`overlay overlay--history ${closing ? "overlay--closing" : ""}`}>
+    <div className={`overlay overlay--centered ${closing ? "overlay--closing" : ""}`}>
       <section aria-label={copy.llmSettings} aria-modal="true" className={`llm-panel ${closing ? "llm-panel--closing" : ""}`} role="dialog">
         <header>
           <h1>{copy.llmSettings}</h1>

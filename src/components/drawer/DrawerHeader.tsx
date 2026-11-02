@@ -9,7 +9,7 @@ export interface DrawerHeaderProps {
   activeModelLabel?: string;
 }
 
-/** 抽屉顶部标头：应用标识、当前生效模型微标与关闭按钮。 */
+/** 侧边栏顶部标头：应用标识、当前生效模型微标与关闭按钮。 */
 export function DrawerHeader({
   activeModelLabel,
   closeRef,
@@ -20,7 +20,7 @@ export function DrawerHeader({
     <header className="drawer__header">
       <div className="drawer__header-titles">
         <span>{copy.appName}</span>
-        <strong>{copy.settings}</strong>
+        <strong>{copy.menu}</strong>
         {activeModelLabel ? (
           <div className="drawer__model-badge" title={`${copy.activeModelLabel}: ${activeModelLabel}`}>
             <span aria-hidden="true" className="drawer__model-badge-dot" />

@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 
 export async function dismissOnboarding(page: Page): Promise<void> {
   const guide = page.getByRole("dialog", { name: "新手引导" });
@@ -15,4 +15,14 @@ export async function enterApp(page: Page, options: { skipOnboarding?: boolean }
   if (options.skipOnboarding !== false) {
     await dismissOnboarding(page);
   }
+}
+
+export function sideMenu(page: Page): Locator {
+  return page.getByRole("dialog", { name: "菜单", exact: true });
+}
+
+/** 打开侧边栏并返回其中内嵌的会话列表区域 */
+export async function openConversationList(page: Page): Promise<Locator> {
+  await page.getByRole("button", { name: "菜单", exact: true }).click();
+  return sideMenu(page).getByRole("region", { name: "历史记录" });
 }

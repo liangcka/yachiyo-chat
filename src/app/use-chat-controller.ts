@@ -1,136 +1,59 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { ChatMessage, ChatSource, Conversation, Locale, StoredImage, TokenUsage } from "../domain/chat";
 import { isServerManagedModel, type ActiveLlmConfig } from "../domain/llm";
-import { isUntitledConversation, type ConversationMetadata } from "../domain/conversation-metadata";
-import { generateConversationMetadata } from "./conversation-metadata";
 import type { UserMemoryRevision } from "../domain/user-memory";
 import type { SkillDefinition } from "../skills";
+import {
+  ChatClientError,
+  isRetryableChatErrorCode,
+  streamChat as streamChatRequest,
+} from "../services/chat-client";
+import {
+  chatReducer,
+  initialChatState,
+  selectVisibleMessages,
+  type ChatAction,
+  type ChatPhase,
+  type ChatState,
+} from "./chat-reducer";
+import type {
+  ChatController,
+  ChatControllerOptions,
+  ChatRepository,
+  RecalledMessageData,
+  RememberMessageResult,
+  StreamChatFunction,
+} from "./chat/contracts";
+import {
+  claimReusableEmptyConversation,
+  historyLoadStep,
+  loadMessageWindow,
+  type MessageWindow,
+} from "./chat/conversation-loading";
+import {
+  buildRequestMessages,
+  buildRequestTiming,
+  compressionTriggerUncompressedMessages,
+  countUncompressedMessages,
+  requestLimits,
+} from "./chat/request-context";
+import { createStreamBatcher, type StreamBatcher } from "./chat/stream-batcher";
+import { generateConversationMetadata } from "./conversation-metadata";
 import {
   buildConversationSummaryBatch,
   parseConversationSummary,
   selectConversationSummaryMessages,
 } from "./conversation-summary";
 
-import {
-  ChatClientError,
-  isRetryableChatErrorCode,
-  streamChat as streamChatRequest,
-  type StreamChatMessage,
-  type StreamChatOptions,
-  type StreamChatRequest,
-  type StreamChatResult,
-} from "../services/chat-client";
-import {
-  chatReducer,
-  initialChatState,
-  type ChatAction,
-  type ChatState,
-} from "./chat-reducer";
-
-export interface ChatRepository {
-  createConversation(locale: Locale, now?: number): Promise<Conversation>;
-  listConversations(): Promise<Conversation[]>;
-  getConversation(id: string): Promise<Conversation | undefined>;
-  listMessages(
-    conversationId: string,
-    options?: { beforeCreatedAt?: number; limit?: number },
-  ): Promise<ChatMessage[]>;
-  putMessage(message: ChatMessage): Promise<void>;
-  updateConversationSummary(
-    id: string,
-    summary: string,
-    now?: number,
-    compressedUpTo?: number,
-    compressedUpToId?: string,
-    signal?: AbortSignal,
-  ): Promise<void>;
-  getUserMemory(): Promise<string>;
-  /** 自动整理只读取当前会话的事实，避免把其他会话的记忆复制到新来源。 */
-  getConversationMemory?(conversationId: string): Promise<string>;
-  updateUserMemory(memory: string): Promise<void>;
-  listUserMemoryHistory?(): Promise<UserMemoryRevision[]>;
-  undoUserMemoryChange?(revisionId: string): Promise<string | undefined>;
-  rememberMessageMemory?(
-    conversationId: string,
-    messageId: string,
-    expectedMemory: string,
-    memory: string,
-    signal?: AbortSignal,
-  ): Promise<string | undefined>;
-  applyConversationMetadata?(
-    conversationId: string,
-    messageId: string,
-    expectedMemory: string,
-    metadata: ConversationMetadata,
-    signal?: AbortSignal,
-  ): Promise<{ conversation?: Conversation; memory?: string }>;
-  /** 将存储中的会话消息截断为给定前缀（定点删除水位线之后的部分） */
-  replaceMessages(conversationId: string, messages: ChatMessage[]): Promise<void>;
-  deleteMessagesFrom(conversationId: string, fromCreatedAt: number): Promise<void>;
-  /** 撤回消息并恢复其记忆更新，返回事务提交后的当前记忆。 */
-  recallMessagesFrom?(conversationId: string, fromCreatedAt: number): Promise<string>;
-  putImage(image: StoredImage): Promise<void>;
-  getImage(id: string): Promise<StoredImage | undefined>;
-  setLocale(locale: Locale): Promise<void>;
-  getLocale(): Promise<Locale>;
-  setConversationLocale(id: string, locale: Locale): Promise<void>;
-  renameConversation?(id: string, title: string): Promise<void>;
-  touchConversation?(id: string, now?: number): Promise<void>;
-  deleteConversation?(id: string): Promise<string | void>;
-}
-
-export type StreamChatFunction = (
-  request: StreamChatRequest,
-  options: StreamChatOptions,
-) => Promise<StreamChatResult>;
-
-export interface ChatControllerOptions {
-  repository: ChatRepository;
-  streamChat?: StreamChatFunction;
-  activeLlmConfig?: ActiveLlmConfig;
-  /** 已启用的技能，内容将作为技能指令注入每次请求 */
-  activeSkills?: readonly SkillDefinition[];
-  /** 联网搜索开关，开启后普通聊天请求携带 webSearch: true（summary 压缩不携带） */
-  webSearchEnabled?: boolean;
-  /** 智能搜索开关，开启后普通聊天请求携带 smartSearch: true（需联网搜索同时开启） */
-  webSearchSmart?: boolean;
-  /** 分条消息发送开关，关闭后普通聊天请求携带 multiBubble: false */
-  multiBubble?: boolean;
-  now?: () => number;
-  id?: () => string;
-}
-
-export interface RecalledMessageData {
-  text: string;
-  imageId?: string;
-}
-
-export type RememberMessageResult = "saved" | "unchanged" | "failed" | "cancelled" | "too-long";
-
-export interface ChatController extends ChatState {
-  send(text: string): Promise<void>;
-  retry(): Promise<void>;
-  stop(): Promise<void>;
-  recall(): Promise<RecalledMessageData | undefined>;
-  regenerate(messageId?: string): Promise<void>;
-  compressConversation(manual?: boolean): Promise<boolean>;
-  updateUserMemory(memory: string): Promise<boolean>;
-  userMemoryHistory: readonly UserMemoryRevision[];
-  refreshUserMemoryHistory(): Promise<void>;
-  undoUserMemoryChange(revisionId: string): Promise<boolean>;
-  rememberMessage(messageId: string): Promise<RememberMessageResult>;
-  newConversation(): Promise<void>;
-  selectConversation(id: string): Promise<void>;
-  deleteConversation(id: string): Promise<boolean>;
-  /** 向上翻页：加载当前窗口之前更早的历史消息（UI 窗口化） */
-  loadEarlier(): Promise<void>;
-  setLocale(locale: Locale): Promise<void>;
-  setPendingImage(image?: StoredImage): void;
-  setOnline(online: boolean): void;
-  clearError(): void;
-  /** 等待已启动的生成、消息与记忆写入完成；存储失败时拒绝重载，不中止聊天。 */
-  prepareForReload(): Promise<void>;
-}
+export type {
+  ChatController,
+  ChatControllerOptions,
+  ChatRepository,
+  RecalledMessageData,
+  RememberMessageResult,
+  StreamChatFunction,
+} from "./chat/contracts";
+export { formatClientTimestamp } from "./chat/request-context";
 
 interface ControllerServices {
   repository: ChatRepository;
@@ -139,12 +62,10 @@ interface ControllerServices {
   id: () => string;
 }
 
-interface InitialData {
+interface InitialData extends MessageWindow {
   conversation: Conversation;
   locale: Locale;
-  messages: ChatMessage[];
   userMemory?: string;
-  hasMoreHistory?: boolean;
 }
 
 interface ActiveRun {
@@ -166,178 +87,31 @@ interface ActiveRun {
 }
 
 const partialPersistenceInterval = 250;
-/** UI 窗口化：初始只加载最近 windowSize 条历史，向上滚动时按 historyLoadStep 条上翻 */
-const historyWindowSize = 50;
-const historyLoadStep = 30;
-/** 流式 delta/thought 用 requestAnimationFrame 合并后再 dispatch，避免逐 chunk 触发全列表 reducer */
-const maximumRequestCharacters = 24_000;
-const maximumRequestMessageCharacters = 4_000;
-const maximumRequestMessages = 20;
-/** 未压缩历史消息达到该数量时，发送前自动触发增量压缩（为摘要/长期记忆前缀预留槽位） */
-const compressionTriggerUncompressedMessages = maximumRequestMessages - 4;
+const compressionFailureCooldown = 120_000;
+const backgroundTaskTimeout = 30_000;
+const fallbackProvider = "glm";
+const fallbackModel = "glm-4.7-flash";
 
-interface PendingStreamDelta {
-  messageId: string;
-  text: string;
-  type: "delta" | "thought-delta";
+/** 发起新请求类操作的忙碌判定：加载、生成、压缩或离线期间拒绝。 */
+function isRequestBlocked(phase: ChatPhase): boolean {
+  return phase === "loading" || phase === "streaming" || phase === "compressing" || phase === "offline";
 }
 
-interface StreamBatcher {
-  /** 追加一个待合并的流式增量；返回 true 表示本次调度了 rAF 刷新 */
-  push(action: PendingStreamDelta): boolean;
-  /** 立即同步派发所有未合并的增量（终态/中止/卸载前必须调用） */
-  flush(): void;
-}
-
-function createStreamBatcher(
-  emitAction: (action: ChatAction) => void,
-): StreamBatcher {
-  let pending = new Map<string, PendingStreamDelta>();
-  let frameHandle: number | undefined;
-
-  const flush = () => {
-    if (frameHandle !== undefined) {
-      cancelAnimationFrame(frameHandle);
-      frameHandle = undefined;
-    }
-    if (pending.size === 0) return;
-    const batch = [...pending.values()];
-    pending = new Map();
-    for (const action of batch) {
-      emitAction(action);
-    }
-  };
-
-  const schedule = () => {
-    if (typeof window === "undefined" || typeof window.requestAnimationFrame !== "function") {
-      flush();
-      return false;
-    }
-    frameHandle = window.requestAnimationFrame(() => {
-      frameHandle = undefined;
-      flush();
-    });
-    return true;
-  };
-
-  return {
-    push(action) {
-      const key = `${action.type}:${action.messageId}`;
-      pending.set(key, {
-        ...pending.get(key),
-        text: (pending.get(key)?.text ?? "") + action.text,
-        messageId: action.messageId,
-        type: action.type,
-      });
-      if (frameHandle === undefined) return schedule();
-      return false;
-    },
-    flush,
-  };
-}
-
-function blobToDataUrl(image: StoredImage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.addEventListener("load", () => {
-      if (typeof reader.result === "string") resolve(reader.result);
-      else reject(new TypeError("Image could not be encoded."));
-    });
-    reader.addEventListener("error", () => reject(new TypeError("Image could not be encoded.")));
-    reader.readAsDataURL(image.blob);
-  });
-}
-
-function isHistoryMessage(message: ChatMessage): boolean {
-  return message.status === "complete" || message.status === "stopped";
-}
-
-const weekdaysZh = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"] as const;
-const weekdaysJa = ["日曜日", "月曜日", "火曜日", "水曜日", "木曜日", "金曜日", "土曜日"] as const;
-
-export function formatClientTimestamp(timestamp: number, locale: Locale): string {
-  const date = new Date(timestamp);
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, "0");
-  const day = `${date.getDate()}`.padStart(2, "0");
-  const hours = `${date.getHours()}`.padStart(2, "0");
-  const minutes = `${date.getMinutes()}`.padStart(2, "0");
-  const seconds = `${date.getSeconds()}`.padStart(2, "0");
-  const weekday = locale === "ja-JP" ? weekdaysJa[date.getDay()] : weekdaysZh[date.getDay()];
-  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds} ${weekday}`;
-}
-
-function truncateUnicode(value: string, maximum: number): string {
-  let result = "";
-  let length = 0;
-  for (const character of value) {
-    if (length >= maximum) break;
-    result += character;
-    length += 1;
+/** ES2022 目标环境（含旧版 Android WebView）不保证提供 Array.prototype.findLastIndex。 */
+function lastIndexWhere<T>(items: readonly T[], predicate: (item: T) => boolean): number {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    if (predicate(items[index]!)) return index;
   }
-  return result;
+  return -1;
 }
 
-function requestHistory(
-  messages: ChatMessage[],
-  reserveCharacters = 0,
-  maxMessages = maximumRequestMessages,
-  compressedUpTo?: number,
-): Array<{ message: ChatMessage; text: string }> {
-  // 早于压缩边界的消息已被摘要取代，不再重复进入请求（retained-tail 语义）
-  const eligible = messages.filter(
-    (message) =>
-      isHistoryMessage(message) &&
-      (compressedUpTo === undefined || message.createdAt > compressedUpTo),
-  );
-  const selected: Array<{ message: ChatMessage; text: string }> = [];
-  let totalCharacters = reserveCharacters;
-
-  for (let index = eligible.length - 1; index >= 0 && selected.length < maxMessages; index -= 1) {
-    const message = eligible[index];
-    if (message === undefined) continue;
-    const text = truncateUnicode(message.text, maximumRequestMessageCharacters);
-    const isLastMessage = index === eligible.length - 1;
-    if (!isLastMessage && text.trim().length === 0) continue;
-    const characterLength = [...text].length;
-    if (totalCharacters + characterLength > maximumRequestCharacters) break;
-    selected.unshift({ message, text });
-    totalCharacters += characterLength;
-  }
-
-  return selected;
-}
-
-/** 仅统计压缩边界之后（未被摘要取代）的 eligible 消息数 */
-function countUncompressedMessages(messages: ChatMessage[], compressedUpTo?: number): number {
-  return messages.filter(
-    (message) =>
-      isHistoryMessage(message) &&
-      (compressedUpTo === undefined || message.createdAt > compressedUpTo),
-  ).length;
-}
-
-/**
- * 派生叠加视图：流式期间增量写在 state.streaming 槽位里，这里把累积文本叠到
- * 对应消息上再交给 UI，保证组件层看到的仍是"最后一条消息的 text 在增长"。
- */
-function overlayStreamedText(state: ChatState): ChatMessage[] {
-  const streaming = state.streaming;
-  if (streaming === undefined) return state.messages;
-  const index = state.messages.findIndex((message) => message.id === streaming.messageId);
-  if (index < 0) return state.messages;
-  return state.messages.map((message, i) =>
-    i === index
-      ? {
-          ...message,
-          ...(streaming.text !== undefined ? { text: message.text + streaming.text } : {}),
-          thought:
-            streaming.thought === undefined
-              ? message.thought
-              : ((message.thought ?? "") + streaming.thought) || undefined,
-        }
-      : message,
-  );
+/** 渲染期最新值的只读镜像：异步流程读取发起时刻之后的最新选项。 */
+function useLatestRef<T>(value: T) {
+  const ref = useRef(value);
+  useEffect(() => {
+    ref.current = value;
+  }, [value]);
+  return ref;
 }
 
 export function useChatController(options: ChatControllerOptions): ChatController {
@@ -351,26 +125,12 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     !isServerManagedModel(options.activeLlmConfig.provider, options.activeLlmConfig.model)
     ? options.activeLlmConfig
     : undefined;
-  const activeLlmConfigRef = useRef<ActiveLlmConfig | undefined>(personalLlmConfig);
-  useEffect(() => {
-    activeLlmConfigRef.current = personalLlmConfig;
-  }, [personalLlmConfig]);
-  const activeSkillsRef = useRef<readonly SkillDefinition[] | undefined>(options.activeSkills);
-  useEffect(() => {
-    activeSkillsRef.current = options.activeSkills;
-  }, [options.activeSkills]);
-  const webSearchEnabledRef = useRef<boolean>(options.webSearchEnabled ?? false);
-  useEffect(() => {
-    webSearchEnabledRef.current = options.webSearchEnabled ?? false;
-  }, [options.webSearchEnabled]);
-  const webSearchSmartRef = useRef<boolean>(options.webSearchSmart ?? false);
-  useEffect(() => {
-    webSearchSmartRef.current = options.webSearchSmart ?? false;
-  }, [options.webSearchSmart]);
-  const multiBubbleRef = useRef<boolean>(options.multiBubble ?? true);
-  useEffect(() => {
-    multiBubbleRef.current = options.multiBubble ?? true;
-  }, [options.multiBubble]);
+  const activeLlmConfigRef = useLatestRef<ActiveLlmConfig | undefined>(personalLlmConfig);
+  const activeSkillsRef = useLatestRef<readonly SkillDefinition[] | undefined>(options.activeSkills);
+  const webSearchEnabledRef = useLatestRef(options.webSearchEnabled ?? false);
+  const webSearchSmartRef = useLatestRef(options.webSearchSmart ?? false);
+  const multiBubbleRef = useLatestRef(options.multiBubble ?? true);
+
   const [state, dispatch] = useReducer(chatReducer, initialChatState);
   const [userMemoryHistory, setUserMemoryHistory] = useState<readonly UserMemoryRevision[]>([]);
   const memoryHistoryRequestRef = useRef(0);
@@ -389,6 +149,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
   const sendingRef = useRef(false);
   const sendingCompletionRef = useRef<{ promise: Promise<void>; resolve: () => void } | undefined>(undefined);
   const lastTimestampRef = useRef(0);
+  const streamBatcherRef = useRef<StreamBatcher | undefined>(undefined);
 
   const setSending = useCallback((sending: boolean): void => {
     sendingRef.current = sending;
@@ -410,6 +171,10 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     });
     return task;
   }, []);
+
+  /** 串行写入：排在已入队写入之后执行，失败会阻止应用重载。 */
+  const enqueuePersistence = useCallback(<T,>(write: () => Promise<T>): Promise<T> =>
+    trackPersistence(persistQueueRef.current.then(write)), [trackPersistence]);
 
   const trackMetadata = useCallback(<T,>(task: Promise<T>): Promise<T> => {
     metadataTasksRef.current.add(task);
@@ -442,11 +207,45 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     dispatch(action);
   }, []);
 
+  const emitIfMounted = useCallback((action: ChatAction) => {
+    if (mountedRef.current) emit(action);
+  }, [emit]);
+
+  const reportStorageError = useCallback(() => {
+    emitIfMounted({ errorCode: "STORAGE_ERROR", type: "load-failed" });
+  }, [emitIfMounted]);
+
   const cancelMetadata = useCallback(() => {
     metadataGenerationRef.current += 1;
     metadataControllerRef.current?.abort();
     metadataControllerRef.current = undefined;
   }, []);
+
+  const abortCompression = useCallback(() => {
+    const compressController = compressControllerRef.current;
+    if (compressController === undefined) return;
+    compressControllerRef.current = undefined;
+    compressController.abort();
+    emitIfMounted({ type: "clear-error" });
+  }, [emitIfMounted]);
+
+  /** 立即解除当前生成与其流式缓冲；调用方负责决定是否持久化中断结果。 */
+  const detachActiveRun = useCallback((): ActiveRun | undefined => {
+    const active = activeRef.current;
+    if (active === undefined) return undefined;
+    activeRef.current = undefined;
+    if (active.timer !== undefined) clearTimeout(active.timer);
+    streamBatcherRef.current?.flush();
+    active.controller.abort();
+    return active;
+  }, []);
+
+  /** 撤回/重生成前清空一切后台任务，避免旧结果在截断后回写。 */
+  const interruptBackgroundWork = useCallback(() => {
+    cancelMetadata();
+    abortCompression();
+    detachActiveRun();
+  }, [abortCompression, cancelMetadata, detachActiveRun]);
 
   const refreshUserMemoryHistory = useCallback(async (): Promise<void> => {
     const request = ++memoryHistoryRequestRef.current;
@@ -460,6 +259,26 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
 
   useEffect(() => { void refreshUserMemoryHistory(); }, [refreshUserMemoryHistory, state.userMemory]);
 
+  /** 后台整理任务的独占控制器：同一时刻只保留一个，超时自动中止。 */
+  const beginBackgroundTask = useCallback(() => {
+    cancelMetadata();
+    const controller = new AbortController();
+    metadataControllerRef.current = controller;
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, backgroundTaskTimeout);
+    return {
+      controller,
+      timedOut: () => timedOut,
+      finish: () => {
+        clearTimeout(timer);
+        if (metadataControllerRef.current === controller) metadataControllerRef.current = undefined;
+      },
+    };
+  }, [cancelMetadata]);
+
   const updateMetadata = useCallback(async (assistant: ChatMessage): Promise<void> => {
     const snapshot = stateRef.current;
     const conversation = snapshot.activeConversation;
@@ -467,41 +286,37 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     const repository = servicesRef.current.repository;
     if (!mountedRef.current || conversation?.id !== assistant.conversationId || user === undefined ||
       repository.applyConversationMetadata === undefined) return;
-    cancelMetadata();
-    const controller = new AbortController();
-    metadataControllerRef.current = controller;
+    const task = beginBackgroundTask();
+    const { signal } = task.controller;
     const config = activeLlmConfigRef.current;
-    const timer = setTimeout(() => controller.abort(), 30_000);
     let writing = false;
     try {
       const memory = await repository.getUserMemory();
       const conversationMemory = await repository.getConversationMemory?.(conversation.id) ?? memory;
-      if (controller.signal.aborted) return;
+      if (signal.aborted) return;
       const metadata = await generateConversationMetadata({
         conversation, user, assistant, memory: conversationMemory, config,
         streamChat: servicesRef.current.streamChat,
-        signal: controller.signal,
+        signal,
       });
-      if (metadata === undefined || controller.signal.aborted || !mountedRef.current) return;
+      if (metadata === undefined || signal.aborted || !mountedRef.current) return;
       writing = true;
       const applied = await repository.applyConversationMetadata(
-        conversation.id, assistant.id, memory, metadata, controller.signal,
+        conversation.id, assistant.id, memory, metadata, signal,
       );
-      if (controller.signal.aborted || !mountedRef.current) return;
+      if (signal.aborted || !mountedRef.current) return;
       if (applied.conversation !== undefined) {
         emit({ type: "conversation-metadata-updated", conversation: applied.conversation });
       }
       if (applied.memory !== undefined) emit({ type: "user-memory-updated", memory: applied.memory });
     } catch {
-      if (writing && !controller.signal.aborted) persistenceFailedRef.current = true;
+      if (writing && !signal.aborted) persistenceFailedRef.current = true;
       // 后台整理失败保留已保存内容，下一次完整对话可重试。
     } finally {
-      clearTimeout(timer);
-      if (metadataControllerRef.current === controller) metadataControllerRef.current = undefined;
+      task.finish();
     }
-  }, [cancelMetadata, emit]);
+  }, [activeLlmConfigRef, beginBackgroundTask, emit]);
 
-  const streamBatcherRef = useRef<StreamBatcher | undefined>(undefined);
   useEffect(() => {
     const batcher = createStreamBatcher(emit);
     streamBatcherRef.current = batcher;
@@ -511,12 +326,11 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     };
   }, [emit]);
 
-  const queueMessage = useCallback((message: ChatMessage): Promise<void> => {
-    const task = persistQueueRef.current.then(() =>
-      servicesRef.current.repository.putMessage(message),
-    );
-    return trackPersistence(task);
-  }, [trackPersistence]);
+  const queueMessage = useCallback(
+    (message: ChatMessage): Promise<void> =>
+      enqueuePersistence(() => servicesRef.current.repository.putMessage(message)),
+    [enqueuePersistence],
+  );
 
   const createConversation = useCallback(
     async (locale: Locale): Promise<InitialData> => {
@@ -534,35 +348,32 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     let ignored = false;
 
     initializationRef.current ??= (async () => {
+      const repository = servicesRef.current.repository;
       const [locale, conversations, userMemory] = await Promise.all([
-        servicesRef.current.repository.getLocale(),
-        servicesRef.current.repository.listConversations(),
-        servicesRef.current.repository.getUserMemory().catch(() => ""),
+        repository.getLocale(),
+        repository.listConversations(),
+        repository.getUserMemory().catch(() => ""),
       ]);
       const latest = conversations[0];
       if (latest === undefined) {
         return { ...(await createConversation(locale)), userMemory };
       }
       lastTimestampRef.current = Math.max(lastTimestampRef.current, latest.updatedAt);
-      // UI 窗口化：只加载最近 windowSize 条，更早历史经 loadEarlier 按需上翻；
-      // 多取 1 条探测是否还有更早历史（hasMoreHistory），避免额外的计数查询
-      const storedMessages = await servicesRef.current.repository.listMessages(latest.id, {
-        limit: historyWindowSize + 1,
-      });
-      const hasMoreHistory = storedMessages.length > historyWindowSize;
-      const messages = storedMessages.slice(hasMoreHistory ? 1 : 0).map((message) =>
+      const window = await loadMessageWindow(repository, latest.id);
+      // 上次异常退出残留的 streaming 消息按中断处理并回写
+      const messages = window.messages.map((message) =>
         message.status === "streaming" ? { ...message, status: "stopped" as const } : message,
       );
       for (let index = 0; index < messages.length; index += 1) {
-        if (messages[index] !== storedMessages[index]) await queueMessage(messages[index]!);
+        if (messages[index] !== window.messages[index]) await queueMessage(messages[index]!);
       }
-      if (locale !== latest.locale) await servicesRef.current.repository.setLocale(latest.locale);
+      if (locale !== latest.locale) await repository.setLocale(latest.locale);
       return {
         conversation: latest,
         locale: latest.locale,
         messages,
         userMemory,
-        hasMoreHistory,
+        hasMoreHistory: window.hasMoreHistory,
       };
     })();
 
@@ -589,17 +400,9 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       ignored = true;
       mountedRef.current = false;
       cancelMetadata();
-      const compressController = compressControllerRef.current;
-      if (compressController !== undefined) {
-        compressControllerRef.current = undefined;
-        compressController.abort();
-      }
-      const active = activeRef.current;
+      abortCompression();
+      const active = detachActiveRun();
       if (active !== undefined) {
-        activeRef.current = undefined;
-        if (active.timer !== undefined) clearTimeout(active.timer);
-        streamBatcherRef.current?.flush();
-        active.controller.abort();
         void active.preparation
           .catch(() => undefined)
           .then(() =>
@@ -612,120 +415,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
           .catch(() => undefined);
       }
     };
-  }, [cancelMetadata, createConversation, emit, queueMessage]);
-
-  const makeRequestMessages = useCallback(
-    async (
-      messages: ChatMessage[],
-      pendingImage?: StoredImage,
-      reserveCharacters = 0,
-      overrideSummary?: string,
-    ): Promise<StreamChatMessage[]> => {
-      const activeSkills = activeSkillsRef.current ?? [];
-      const hasSkills = activeSkills.length > 0;
-      const skillUserText = hasSkills
-        ? `【技能指令 / Skill Instructions】\n以下技能已激活，回复时必须严格遵守：\n\n${activeSkills
-            .map((skill) => skill.content)
-            .join("\n\n---\n\n")}`
-        : "";
-      const skillAssistantText = hasSkills
-        ? stateRef.current.locale === "ja-JP"
-          ? "（技能指示を確認しました。厳守して実行します）"
-          : "（已收到技能指令，将严格遵守执行）"
-        : "";
-      const skillChars = hasSkills
-        ? [...skillUserText].length + [...skillAssistantText].length
-        : 0;
-
-      const activeUserMemory = truncateUnicode(stateRef.current.userMemory ?? "", 3000);
-      const hasUserMemory =
-        typeof activeUserMemory === "string" && activeUserMemory.trim().length > 0;
-
-      const memoryUserText = hasUserMemory
-        ? stateRef.current.locale === "ja-JP"
-          ? `【彩葉についての長期記憶（全ての会話で共有される事実）】\n${activeUserMemory.trim()}\nこれは実際に起きた確定した事実として扱ってください。`
-          : `【关于彩叶的长期记忆（所有对话共享的事实）】\n${activeUserMemory.trim()}\n以下内容请作为真实发生的既定事实对待。`
-        : "";
-      const memoryAssistantText = hasUserMemory
-        ? stateRef.current.locale === "ja-JP"
-          ? "（彩葉のこと、ちゃんと覚えていますよ）"
-          : "（关于彩叶的事情，我一直都记得哦~）"
-        : "";
-
-      const memoryChars = hasUserMemory
-        ? [...memoryUserText].length + [...memoryAssistantText].length
-        : 0;
-
-      const activeSummary = truncateUnicode(overrideSummary ?? stateRef.current.activeConversation?.summary ?? "", 3000);
-      const hasSummary = typeof activeSummary === "string" && activeSummary.trim().length > 0;
-
-      const summaryUserText = hasSummary
-        ? stateRef.current.locale === "ja-JP"
-          ? `【これまでの会話の記憶・背景（実際に起きた確定した事実）】\n${activeSummary.trim()}\nこれは私たちが実際に経験した会話の記録です。既定の事実として守り、引き継いでください。`
-          : `【前情提要 / 历史背景记忆（真实发生的既定事实）】\n${activeSummary.trim()}\n这是我们真实经历过的对话记录，请作为既定事实遵守并延续。`
-        : "";
-      const summaryAssistantText = hasSummary
-        ? stateRef.current.locale === "ja-JP"
-          ? "（これまでの経緯と記憶を把握しました。会話を続けます）"
-          : "（已记住我们之前的对话与经历，继续交流~）"
-        : "";
-
-      const summaryChars = hasSummary
-        ? [...summaryUserText].length + [...summaryAssistantText].length
-        : 0;
-
-      const reservedPrefixMessages =
-        (hasSkills ? 2 : 0) + (hasUserMemory ? 2 : 0) + (hasSummary ? 2 : 0);
-      const maxHistoryMessages = maximumRequestMessages - reservedPrefixMessages;
-      const history = requestHistory(
-        messages,
-        reserveCharacters + summaryChars + memoryChars + skillChars,
-        maxHistoryMessages,
-        stateRef.current.activeConversation?.compressedUpTo,
-      );
-      const lastIndex = history.length - 1;
-
-      const chatMessages = await Promise.all(
-        history.map(async ({ message, text }, index) => {
-          const requestMessage: StreamChatMessage = {
-            role: message.role,
-            text,
-          };
-          if (index === lastIndex && message.role === "user" && message.imageId !== undefined) {
-            const image =
-              pendingImage?.id === message.imageId
-                ? pendingImage
-                : await servicesRef.current.repository.getImage(message.imageId);
-            if (image !== undefined) requestMessage.imageDataUrl = await blobToDataUrl(image);
-          }
-          return requestMessage;
-        }),
-      );
-
-      const prefixMessages: StreamChatMessage[] = [];
-      if (hasSkills) {
-        prefixMessages.push(
-          { role: "user", text: skillUserText },
-          { role: "assistant", text: skillAssistantText },
-        );
-      }
-      if (hasUserMemory) {
-        prefixMessages.push(
-          { role: "user", text: memoryUserText },
-          { role: "assistant", text: memoryAssistantText },
-        );
-      }
-      if (hasSummary) {
-        prefixMessages.push(
-          { role: "user", text: summaryUserText },
-          { role: "assistant", text: summaryAssistantText },
-        );
-      }
-
-      return [...prefixMessages, ...chatMessages];
-    },
-    [],
-  );
+  }, [abortCompression, cancelMetadata, createConversation, detachActiveRun, emit, queueMessage]);
 
   const finishRun = useCallback(
     async (
@@ -757,24 +447,22 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
           ...(truncated === true ? { truncated: true } : {}),
           ...(run.sources !== undefined ? { sources: run.sources } : {}),
         };
-        if (mountedRef.current) {
-          if (status === "complete") {
-            emit({ messageId: run.assistant.id, type: "completed", usage: finalUsage, latencyMs });
-          } else if (status === "stopped") {
-            emit({ messageId: run.assistant.id, type: "stopped", latencyMs });
-          } else {
-            emit({
-              errorCode: errorCode ?? "SERVICE_UNAVAILABLE",
-              messageId: run.assistant.id,
-              type: "failed",
-              latencyMs,
-            });
-          }
+        if (status === "complete") {
+          emitIfMounted({ messageId: run.assistant.id, type: "completed", usage: finalUsage, latencyMs });
+        } else if (status === "stopped") {
+          emitIfMounted({ messageId: run.assistant.id, type: "stopped", latencyMs });
+        } else {
+          emitIfMounted({
+            errorCode: errorCode ?? "SERVICE_UNAVAILABLE",
+            messageId: run.assistant.id,
+            type: "failed",
+            latencyMs,
+          });
         }
         let persisted = true;
         await queueMessage(message).catch(() => {
           persisted = false;
-          if (mountedRef.current) emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
+          reportStorageError();
         });
         if (persisted && status === "complete" && truncated !== true && !run.controller.signal.aborted &&
           metadataGenerationRef.current === run.metadataGeneration) {
@@ -783,7 +471,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       })();
       return run.finishing;
     },
-    [emit, queueMessage, trackMetadata, updateMetadata],
+    [emitIfMounted, queueMessage, reportStorageError, trackMetadata, updateMetadata],
   );
 
   const startAssistant = useCallback(
@@ -794,8 +482,8 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     ): Promise<void> => {
       cancelMetadata();
       const activeConfig = activeLlmConfigRef.current;
-      const currentProvider = activeConfig?.provider ?? "glm";
-      const currentModel = activeConfig?.model ?? "glm-4.7-flash";
+      const currentProvider = activeConfig?.provider ?? fallbackProvider;
+      const currentModel = activeConfig?.model ?? fallbackModel;
       const assistant: ChatMessage = {
         conversationId: history.at(-1)?.conversationId ?? "",
         createdAt: nextTimestamp(),
@@ -835,17 +523,18 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         await finishRun(run, "failed", "STORAGE_ERROR");
         return;
       }
-      if (activeRef.current?.token !== run.token) return;
+      const isCurrentRun = () => activeRef.current?.token === run.token;
+      if (!isCurrentRun()) return;
       if (run.controller.signal.aborted) {
         await finishRun(run, "stopped");
         return;
       }
 
       const schedulePartialPersistence = () => {
-        if (run.timer !== undefined || activeRef.current?.token !== run.token) return;
+        if (run.timer !== undefined || !isCurrentRun()) return;
         run.timer = setTimeout(() => {
           run.timer = undefined;
-          if (activeRef.current?.token !== run.token) return;
+          if (!isCurrentRun()) return;
           void queueMessage({
             ...run.assistant,
             status: "streaming",
@@ -859,50 +548,41 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       };
 
       try {
-        const requestMessages = await makeRequestMessages(history, pendingImage);
-        // 流正常结束但零输出（如推理模型思考耗尽 token 预算）视为可重试失败，
-        // 避免空气泡被静默隐藏
-        const currentTime = formatClientTimestamp(
-          servicesRef.current.now(),
-          stateRef.current.locale,
-        );
-        const eligibleHistory = history.filter(isHistoryMessage);
-        const currentMsg = eligibleHistory.at(-1);
-        const previousMsg = eligibleHistory.at(-2);
-        const lastMessageIntervalMs =
-          currentMsg !== undefined && previousMsg !== undefined
-            ? Math.max(0, currentMsg.createdAt - previousMsg.createdAt)
-            : undefined;
-        const previousTime =
-          previousMsg !== undefined
-            ? formatClientTimestamp(previousMsg.createdAt, stateRef.current.locale)
-            : undefined;
+        const snapshot = stateRef.current;
+        const requestMessages = await buildRequestMessages({
+          messages: history,
+          locale: snapshot.locale,
+          skills: activeSkillsRef.current ?? [],
+          userMemory: snapshot.userMemory,
+          summary: snapshot.activeConversation?.summary,
+          compressedUpTo: snapshot.activeConversation?.compressedUpTo,
+          pendingImage,
+          getImage: (id) => servicesRef.current.repository.getImage(id),
+        });
+        const timing = buildRequestTiming(history, servicesRef.current.now(), stateRef.current.locale);
+        const webSearch = webSearchEnabledRef.current;
 
         const result = await servicesRef.current.streamChat(
           {
             locale: stateRef.current.locale,
             messages: requestMessages,
-            currentTime,
-            ...(previousTime !== undefined ? { previousTime } : {}),
-            ...(lastMessageIntervalMs !== undefined ? { lastMessageIntervalMs } : {}),
+            ...timing,
             ...(activeConfig !== undefined
               ? { provider: activeConfig.provider, apiKey: activeConfig.apiKey, model: activeConfig.model }
               : {}),
-            ...(webSearchEnabledRef.current === true ? { webSearch: true } : {}),
-            ...(webSearchEnabledRef.current === true && webSearchSmartRef.current === true
-              ? { smartSearch: true }
-              : {}),
+            ...(webSearch ? { webSearch: true } : {}),
+            ...(webSearch && webSearchSmartRef.current ? { smartSearch: true } : {}),
             ...(multiBubbleRef.current === false ? { multiBubble: false } : {}),
           },
           {
             onDelta(text) {
-              if (activeRef.current?.token !== run.token || text.length === 0) return;
+              if (!isCurrentRun() || text.length === 0) return;
               run.text += text;
               streamBatcherRef.current?.push({ messageId: run.assistant.id, text, type: "delta" });
               schedulePartialPersistence();
             },
             onThought(text) {
-              if (activeRef.current?.token !== run.token || text.length === 0) return;
+              if (!isCurrentRun() || text.length === 0) return;
               run.thought = (run.thought ?? "") + text;
               streamBatcherRef.current?.push({
                 messageId: run.assistant.id,
@@ -912,7 +592,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
               schedulePartialPersistence();
             },
             onSources(sources) {
-              if (activeRef.current?.token !== run.token || sources.length === 0) return;
+              if (!isCurrentRun() || sources.length === 0) return;
               run.sources = sources;
               emit({ messageId: run.assistant.id, sources, type: "sources-received" });
               schedulePartialPersistence();
@@ -920,15 +600,18 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
             signal: run.controller.signal,
           },
         );
+        // 流正常结束但零输出（如推理模型思考耗尽 token 预算）视为可重试失败，
+        // 避免空气泡被静默隐藏
+        const empty = run.text.length === 0;
         await finishRun(
           run,
-          run.text.length === 0 ? "failed" : "complete",
-          run.text.length === 0 ? "PROVIDER_ERROR" : undefined,
-          run.text.length === 0 ? undefined : result.truncated,
+          empty ? "failed" : "complete",
+          empty ? "PROVIDER_ERROR" : undefined,
+          empty ? undefined : result.truncated,
           result.usage,
         );
       } catch (error) {
-        if (activeRef.current?.token !== run.token) return;
+        if (!isCurrentRun()) return;
         const code =
           error instanceof ChatClientError
             ? error.code
@@ -939,20 +622,14 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         else await finishRun(run, "failed", code);
       }
     },
-    [cancelMetadata, emit, finishRun, makeRequestMessages, nextTimestamp, queueMessage],
+    [activeLlmConfigRef, activeSkillsRef, cancelMetadata, emit, finishRun, multiBubbleRef, nextTimestamp,
+      queueMessage, webSearchEnabledRef, webSearchSmartRef],
   );
 
   const compressConversation = useCallback(
     async (): Promise<boolean> => {
       const snapshot = stateRef.current;
-      if (
-        sendingRef.current ||
-        snapshot.activeConversation === undefined ||
-        snapshot.phase === "loading" ||
-        snapshot.phase === "streaming" ||
-        snapshot.phase === "compressing" ||
-        snapshot.phase === "offline"
-      ) {
+      if (sendingRef.current || snapshot.activeConversation === undefined || isRequestBlocked(snapshot.phase)) {
         return false;
       }
 
@@ -985,11 +662,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
             pending.slice(processed),
             snapshot.locale,
             summary,
-            {
-              messages: maximumRequestMessages,
-              messageCharacters: maximumRequestMessageCharacters,
-              totalCharacters: maximumRequestCharacters,
-            },
+            requestLimits,
           );
           if (batch === undefined || !isCurrent()) return false;
           let output = "";
@@ -1042,19 +715,32 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         }
       }
     },
-    [emit, nextTimestamp, setSending],
+    [activeLlmConfigRef, emit, nextTimestamp, setSending],
   );
+
+  /** 未压缩历史达到阈值且不在失败冷却期时，发送前先增量压缩（为摘要/长期记忆前缀预留槽位）。 */
+  const compressBeforeSendIfNeeded = useCallback(async (snapshot: ChatState): Promise<void> => {
+    const lastAttempt = lastCompressionAttemptRef.current;
+    const coolingDown = lastAttempt.failed &&
+      servicesRef.current.now() - lastAttempt.timestamp < compressionFailureCooldown;
+    if (coolingDown || countUncompressedMessages(
+      snapshot.messages,
+      snapshot.activeConversation?.compressedUpTo,
+    ) < compressionTriggerUncompressedMessages) return;
+
+    setSending(false);
+    const success = await compressConversation();
+    lastCompressionAttemptRef.current = {
+      failed: !success,
+      timestamp: servicesRef.current.now(),
+    };
+    setSending(true);
+  }, [compressConversation, setSending]);
+
   const send = useCallback(
     async (text: string): Promise<void> => {
       const snapshot = stateRef.current;
-      if (
-        sendingRef.current ||
-        snapshot.activeConversation === undefined ||
-        snapshot.phase === "loading" ||
-        snapshot.phase === "streaming" ||
-        snapshot.phase === "compressing" ||
-        snapshot.phase === "offline"
-      ) {
+      if (sendingRef.current || snapshot.activeConversation === undefined || isRequestBlocked(snapshot.phase)) {
         return;
       }
 
@@ -1062,40 +748,9 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       if (normalized.length === 0 && snapshot.pendingImage === undefined) return;
 
       const targetConversationId = snapshot.activeConversation.id;
-      const currentMessages = snapshot.messages;
       setSending(true);
-        try {
-        // 未压缩历史达到阈值且非失败冷却期时先增量压缩，再发送（为摘要/长期记忆前缀预留槽位）
-        const lastAttempt = lastCompressionAttemptRef.current;
-        const failureCooldown = 120_000;
-        const isCooldown =
-          lastAttempt.failed &&
-          servicesRef.current.now() - lastAttempt.timestamp < failureCooldown;
-
-        if (
-          !isCooldown &&
-          countUncompressedMessages(
-            currentMessages,
-            snapshot.activeConversation.compressedUpTo,
-          ) >= compressionTriggerUncompressedMessages
-        ) {
-          setSending(false);
-          const success = await compressConversation();
-          lastCompressionAttemptRef.current = {
-            failed: !success,
-            timestamp: servicesRef.current.now(),
-          };
-          setSending(true);
-
-          const currentSnapshot = stateRef.current;
-          if (
-            !mountedRef.current ||
-            currentSnapshot.activeConversation?.id !== targetConversationId ||
-            currentSnapshot.phase === "offline"
-          ) {
-            return;
-          }
-        }
+      try {
+        await compressBeforeSendIfNeeded(snapshot);
 
         const currentSnapshot = stateRef.current;
         if (
@@ -1119,14 +774,14 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
           status: "complete",
           text: normalized,
         };
-        await startAssistant([...stateRef.current.messages, user], user, image);
+        await startAssistant([...currentSnapshot.messages, user], user, image);
       } catch {
-        if (mountedRef.current) emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
+        reportStorageError();
       } finally {
         setSending(false);
       }
     },
-    [compressConversation, emit, nextTimestamp, setSending, startAssistant],
+    [compressBeforeSendIfNeeded, nextTimestamp, reportStorageError, setSending, startAssistant],
   );
 
   const retry = useCallback(async (): Promise<void> => {
@@ -1152,18 +807,13 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
 
   const stop = useCallback(async (): Promise<void> => {
     cancelMetadata();
-    const compressController = compressControllerRef.current;
-    if (compressController !== undefined) {
-      compressControllerRef.current = undefined;
-      compressController.abort();
-      if (mountedRef.current) emit({ type: "clear-error" });
-    }
+    abortCompression();
     const run = activeRef.current;
     if (run === undefined) return;
     run.controller.abort();
     await run.preparation.catch(() => undefined);
     await finishRun(run, "stopped");
-  }, [cancelMetadata, emit, finishRun]);
+  }, [abortCompression, cancelMetadata, finishRun]);
 
   const recall = useCallback(async (): Promise<RecalledMessageData | undefined> => {
     const snapshot = stateRef.current;
@@ -1176,176 +826,100 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     }
 
     const messages = snapshot.messages;
-    let lastUserIndex = -1;
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-      if (messages[index]?.role === "user") {
-        lastUserIndex = index;
-        break;
-      }
-    }
-
-    if (lastUserIndex === -1) {
-      return undefined;
-    }
-
-    cancelMetadata();
-
-    const compressController = compressControllerRef.current;
-    if (compressController !== undefined) {
-      compressControllerRef.current = undefined;
-      compressController.abort();
-      if (mountedRef.current) emit({ type: "clear-error" });
-    }
-
-    const active = activeRef.current;
-    if (active !== undefined) {
-      activeRef.current = undefined;
-      if (active.timer !== undefined) clearTimeout(active.timer);
-      streamBatcherRef.current?.flush();
-      active.controller.abort();
-    }
-
+    const lastUserIndex = lastIndexWhere(messages, (message) => message.role === "user");
     const recalledUser = messages[lastUserIndex];
     if (recalledUser === undefined) return undefined;
+
+    interruptBackgroundWork();
 
     const remainingMessages = messages.slice(0, lastUserIndex);
     const conversationId = snapshot.activeConversation.id;
 
     try {
-      const task = persistQueueRef.current.then(async () => {
+      const memory = await enqueuePersistence(async () => {
         const repository = servicesRef.current.repository;
         if (repository.recallMessagesFrom !== undefined) {
           return repository.recallMessagesFrom(conversationId, recalledUser.createdAt);
         }
-        await repository.deleteMessagesFrom(
-          conversationId,
-          recalledUser.createdAt,
-        );
+        await repository.deleteMessagesFrom(conversationId, recalledUser.createdAt);
+        return undefined;
       });
-      trackPersistence(task);
-      const memory = await task;
 
-      if (mountedRef.current) {
-        if (memory !== undefined) emit({ type: "user-memory-updated", memory });
-        emit({ messages: remainingMessages, fromCreatedAt: recalledUser.createdAt, type: "messages-reverted" });
-      }
+      if (memory !== undefined) emitIfMounted({ type: "user-memory-updated", memory });
+      emitIfMounted({ messages: remainingMessages, fromCreatedAt: recalledUser.createdAt, type: "messages-reverted" });
 
       return {
         imageId: recalledUser.imageId,
         text: recalledUser.text,
       };
     } catch {
-      if (mountedRef.current) emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
+      reportStorageError();
       return undefined;
     }
-  }, [cancelMetadata, emit, trackPersistence]);
+  }, [emitIfMounted, enqueuePersistence, interruptBackgroundWork, reportStorageError]);
 
   const regenerate = useCallback(
     async (messageId?: string): Promise<void> => {
       const snapshot = stateRef.current;
-      if (
-        sendingRef.current ||
-        snapshot.activeConversation === undefined ||
-        snapshot.phase === "loading" ||
-        snapshot.phase === "streaming" ||
-        snapshot.phase === "compressing" ||
-        snapshot.phase === "offline"
-      ) {
+      if (sendingRef.current || snapshot.activeConversation === undefined || isRequestBlocked(snapshot.phase)) {
         return;
       }
 
       const messages = snapshot.messages;
-      let targetIndex = -1;
-      if (messageId !== undefined) {
-        targetIndex = messages.findIndex(
-          (msg) => msg.id === messageId && msg.role === "assistant",
-        );
-      } else {
-        for (let index = messages.length - 1; index >= 0; index -= 1) {
-          if (messages[index]?.role === "assistant") {
-            targetIndex = index;
-            break;
-          }
-        }
-      }
-
-      if (targetIndex === -1) return;
+      const targetIndex = messageId !== undefined
+        ? messages.findIndex((message) => message.id === messageId && message.role === "assistant")
+        : lastIndexWhere(messages, (message) => message.role === "assistant");
+      // 水位线 = 被重生成的 assistant 消息；它及其后的所有记录（含窗口外）定点删除
+      const targetMessage = messages[targetIndex];
+      if (targetMessage === undefined) return;
 
       const precedingMessages = messages.slice(0, targetIndex);
-      const hasPrecedingUser = precedingMessages.some((msg) => msg.role === "user");
-      if (!hasPrecedingUser) return;
+      if (!precedingMessages.some((message) => message.role === "user")) return;
 
-      cancelMetadata();
-
-      const compressController = compressControllerRef.current;
-      if (compressController !== undefined) {
-        compressControllerRef.current = undefined;
-        compressController.abort();
-        if (mountedRef.current) emit({ type: "clear-error" });
-      }
-
-      const active = activeRef.current;
-      if (active !== undefined) {
-        activeRef.current = undefined;
-        if (active.timer !== undefined) clearTimeout(active.timer);
-        streamBatcherRef.current?.flush();
-        active.controller.abort();
-      }
-
+      interruptBackgroundWork();
       setSending(true);
       const conversationId = snapshot.activeConversation.id;
-      // 水位线 = 被重生成的 assistant 消息；它及其后的所有记录（含窗口外）定点删除
-      const targetMessage = messages[targetIndex]!;
 
       try {
-        const task = persistQueueRef.current.then(async () => {
-          await servicesRef.current.repository.deleteMessagesFrom(
-            conversationId,
-            targetMessage.createdAt,
-          );
-        });
-        trackPersistence(task);
-        await task;
-
-        if (mountedRef.current) {
-          emit({ messages: precedingMessages, fromCreatedAt: targetMessage.createdAt, type: "messages-reverted" });
-        }
-
+        await enqueuePersistence(() =>
+          servicesRef.current.repository.deleteMessagesFrom(conversationId, targetMessage.createdAt),
+        );
+        emitIfMounted({ messages: precedingMessages, fromCreatedAt: targetMessage.createdAt, type: "messages-reverted" });
         await startAssistant(precedingMessages, undefined);
       } catch {
-        if (mountedRef.current) emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
+        reportStorageError();
       } finally {
         setSending(false);
       }
     },
-    [cancelMetadata, emit, setSending, startAssistant, trackPersistence],
+    [emitIfMounted, enqueuePersistence, interruptBackgroundWork, reportStorageError, setSending, startAssistant],
   );
 
-  const stopAndWait = useCallback(async () => {
-    await stop();
-  }, [stop]);
+  /** 切换到已有/新建会话时丢弃上一会话的待发送图片与错误提示。 */
+  const clearTransientState = useCallback(() => {
+    if (stateRef.current.pendingImage !== undefined) {
+      emit({ type: "pending-image-changed", image: undefined });
+    }
+    if (stateRef.current.errorCode !== undefined) {
+      emit({ type: "clear-error" });
+    }
+  }, [emit]);
 
   const newConversation = useCallback(async (): Promise<void> => {
-    await stopAndWait();
+    await stop();
     const repository = servicesRef.current.repository;
     const currentActive = stateRef.current.activeConversation;
     const currentLocale = stateRef.current.locale;
 
-    // 1. 若当前活跃会话本身就是空会话且底层存储依然存在，直接停留在当前会话
+    // 1. 当前会话本身就是空会话且仍存在于存储中时，直接停留在当前会话
     if (
       currentActive !== undefined &&
       stateRef.current.messages.length === 0 &&
       !stateRef.current.hasMoreHistory
     ) {
       try {
-        const existing = await repository.getConversation(currentActive.id);
-        if (existing !== undefined) {
-          if (stateRef.current.pendingImage !== undefined) {
-            emit({ type: "pending-image-changed", image: undefined });
-          }
-          if (stateRef.current.errorCode !== undefined) {
-            emit({ type: "clear-error" });
-          }
+        if (await repository.getConversation(currentActive.id) !== undefined) {
+          clearTransientState();
           return;
         }
       } catch {
@@ -1353,58 +927,34 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       }
     }
 
-    // 2. 若当前会话非空，检查存储中是否已有其他未使用的默认空会话（避免产生多个空会话）
+    // 2. 复用存储中已有的其他未使用空会话，避免产生多个空会话
     try {
-      const conversations = await repository.listConversations();
-      let targetEmptyConversation: Conversation | undefined;
-
-      for (const conversation of conversations) {
-        if (conversation.id === currentActive?.id) continue;
-        const messages = await repository.listMessages(conversation.id, { limit: 1 });
-        if (
-          messages.length === 0 &&
-          isUntitledConversation(conversation)
-        ) {
-          if (targetEmptyConversation === undefined) {
-            targetEmptyConversation = conversation;
-          } else if (repository.deleteConversation !== undefined) {
-            // 清理多余的历史遗留默认空会话
-            await repository.deleteConversation(conversation.id).catch(() => undefined);
-          }
-        }
-      }
-
-      if (targetEmptyConversation !== undefined) {
+      const reusable = await claimReusableEmptyConversation(repository, currentActive?.id);
+      if (reusable !== undefined) {
         const now = nextTimestamp();
-        const expectedTitle = currentLocale === "ja-JP" ? "新しい会話" : "新的对话";
-        await repository.touchConversation?.(targetEmptyConversation.id, now);
-        if (targetEmptyConversation.locale !== currentLocale) {
-          await repository.setConversationLocale(targetEmptyConversation.id, currentLocale);
+        await repository.touchConversation?.(reusable.id, now);
+        if (reusable.locale !== currentLocale) {
+          await repository.setConversationLocale(reusable.id, currentLocale);
         }
         await repository.setLocale(currentLocale);
         emit({
           conversation: {
-            ...targetEmptyConversation,
+            ...reusable,
             locale: currentLocale,
-            title: expectedTitle,
+            title: currentLocale === "ja-JP" ? "新しい会話" : "新的对话",
             updatedAt: now,
           },
           messages: [],
           type: "conversation-selected",
         });
-        if (stateRef.current.pendingImage !== undefined) {
-          emit({ type: "pending-image-changed", image: undefined });
-        }
-        if (stateRef.current.errorCode !== undefined) {
-          emit({ type: "clear-error" });
-        }
+        clearTransientState();
         return;
       }
     } catch {
       // 存储查询异常时降级走标准创建路径
     }
 
-    // 3. 存储中不存在任何空会话，正常创建新的会话
+    // 3. 不存在可复用的空会话，正常创建
     try {
       const loaded = await createConversation(currentLocale);
       emit({
@@ -1416,32 +966,28 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     } catch {
       emit({ errorCode: "CONVERSATION_LIMIT", type: "load-failed" });
     }
-  }, [createConversation, emit, nextTimestamp, stopAndWait]);
+  }, [clearTransientState, createConversation, emit, nextTimestamp, stop]);
 
   const selectConversation = useCallback(
     async (id: string): Promise<void> => {
-      await stopAndWait();
+      await stop();
       try {
-        const conversation = await servicesRef.current.repository.getConversation(id);
+        const repository = servicesRef.current.repository;
+        const conversation = await repository.getConversation(id);
         if (conversation === undefined) throw new TypeError("Conversation is missing.");
-        // UI 窗口化：切换会话同样只加载最近 windowSize 条，多取 1 条探测更早历史
-        const stored = await servicesRef.current.repository.listMessages(id, {
-          limit: historyWindowSize + 1,
-        });
-        const hasMoreHistory = stored.length > historyWindowSize;
-        const messages = hasMoreHistory ? stored.slice(1) : stored;
-        await servicesRef.current.repository.setLocale(conversation.locale);
+        const window = await loadMessageWindow(repository, id);
+        await repository.setLocale(conversation.locale);
         emit({
           conversation,
-          messages,
+          messages: window.messages,
           type: "conversation-selected",
-          ...(hasMoreHistory ? { hasMoreHistory: true } : {}),
+          ...(window.hasMoreHistory ? { hasMoreHistory: true } : {}),
         });
       } catch {
         emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
       }
     },
-    [emit, stopAndWait],
+    [emit, stop],
   );
 
   const loadEarlier = useCallback(async (): Promise<void> => {
@@ -1459,13 +1005,13 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         emit({ messages: earlier, type: "load-earlier-loaded" });
       }
     } catch {
-      if (mountedRef.current) emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
+      reportStorageError();
     }
-  }, [emit]);
+  }, [emit, reportStorageError]);
 
   const setLocale = useCallback(
     async (locale: Locale): Promise<void> => {
-      await stopAndWait();
+      await stop();
       try {
         await servicesRef.current.repository.setLocale(locale);
         const conversation = stateRef.current.activeConversation;
@@ -1477,7 +1023,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
         emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
       }
     },
-    [emit, stopAndWait],
+    [emit, stop],
   );
 
   const setPendingImage = useCallback(
@@ -1499,15 +1045,15 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       const normalized = memory.trim();
       try {
         await servicesRef.current.repository.updateUserMemory(normalized);
-        if (mountedRef.current) emit({ type: "user-memory-updated", memory: normalized });
+        emitIfMounted({ type: "user-memory-updated", memory: normalized });
         await refreshUserMemoryHistory();
         return true;
       } catch {
-        if (mountedRef.current) emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
+        reportStorageError();
         return false;
       }
     },
-    [cancelMetadata, emit, refreshUserMemoryHistory],
+    [cancelMetadata, emitIfMounted, refreshUserMemoryHistory, reportStorageError],
   );
 
   const deleteConversation = useCallback(async (id: string): Promise<boolean> => {
@@ -1518,28 +1064,28 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
     try {
       const deletedMemory = await repository.deleteConversation(id);
       const memory = typeof deletedMemory === "string" ? deletedMemory : await repository.getUserMemory();
-      if (mountedRef.current) emit({ type: "user-memory-updated", memory });
+      emitIfMounted({ type: "user-memory-updated", memory });
       await refreshUserMemoryHistory();
       return true;
     } catch {
-      if (mountedRef.current) emit({ errorCode: "STORAGE_ERROR", type: "load-failed" });
+      reportStorageError();
       return false;
     }
-  }, [cancelMetadata, emit, refreshUserMemoryHistory, stop]);
+  }, [cancelMetadata, emitIfMounted, refreshUserMemoryHistory, reportStorageError, stop]);
 
   const undoUserMemoryChange = useCallback(async (revisionId: string): Promise<boolean> => {
     cancelMetadata();
     try {
       const memory = await servicesRef.current.repository.undoUserMemoryChange?.(revisionId);
       if (memory === undefined) return false;
-      if (mountedRef.current) emit({ type: "user-memory-updated", memory });
+      emitIfMounted({ type: "user-memory-updated", memory });
       return true;
     } catch {
       return false;
     } finally {
       await refreshUserMemoryHistory();
     }
-  }, [cancelMetadata, emit, refreshUserMemoryHistory]);
+  }, [cancelMetadata, emitIfMounted, refreshUserMemoryHistory]);
 
   const rememberMessage = useCallback(async (messageId: string): Promise<RememberMessageResult> => {
     const snapshot = stateRef.current;
@@ -1551,40 +1097,37 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
       user?.role !== "user" || user.status !== "complete" || !user.text.trim() ||
       repository.rememberMessageMemory === undefined) return "failed";
     if ([...JSON.stringify({ userText: user.text })].length > 4000) return "too-long";
-    cancelMetadata();
-    const controller = new AbortController();
-    metadataControllerRef.current = controller;
-    let timedOut = false;
-    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 30_000);
+    const task = beginBackgroundTask();
+    const { signal } = task.controller;
+    const interrupted = (): RememberMessageResult => task.timedOut() ? "failed" : "cancelled";
     let writing = false;
     try {
       const memory = await repository.getUserMemory();
       const conversationMemory = await repository.getConversationMemory?.(conversation.id) ?? memory;
-      if (controller.signal.aborted) return timedOut ? "failed" : "cancelled";
+      if (signal.aborted) return interrupted();
       if ([...conversationMemory].length > 2000 || JSON.stringify(conversationMemory).length > 3500) return "too-long";
       const metadata = await generateConversationMetadata({
         conversation, user, assistant: { ...user, role: "assistant", text: "" }, memory: conversationMemory,
         memoryOnly: true, config: activeLlmConfigRef.current,
-        streamChat: servicesRef.current.streamChat, signal: controller.signal,
+        streamChat: servicesRef.current.streamChat, signal,
       });
-      if (controller.signal.aborted || !mountedRef.current) return timedOut ? "failed" : "cancelled";
+      if (signal.aborted || !mountedRef.current) return interrupted();
       if (metadata === undefined) return "failed";
       if (metadata.memory === null || metadata.memory === conversationMemory) return "unchanged";
       writing = true;
-      const applied = await repository.rememberMessageMemory(conversation.id, user.id, memory, metadata.memory, controller.signal);
-      if (controller.signal.aborted || !mountedRef.current) return timedOut ? "failed" : "cancelled";
+      const applied = await repository.rememberMessageMemory(conversation.id, user.id, memory, metadata.memory, signal);
+      if (signal.aborted || !mountedRef.current) return interrupted();
       if (applied === undefined) return "failed";
       emit({ type: "user-memory-updated", memory: applied });
       await refreshUserMemoryHistory();
       return "saved";
     } catch {
-      if (writing && !controller.signal.aborted) persistenceFailedRef.current = true;
-      return controller.signal.aborted && !timedOut ? "cancelled" : "failed";
+      if (writing && !signal.aborted) persistenceFailedRef.current = true;
+      return signal.aborted && !task.timedOut() ? "cancelled" : "failed";
     } finally {
-      clearTimeout(timer);
-      if (metadataControllerRef.current === controller) metadataControllerRef.current = undefined;
+      task.finish();
     }
-  }, [cancelMetadata, emit, refreshUserMemoryHistory]);
+  }, [activeLlmConfigRef, beginBackgroundTask, emit, refreshUserMemoryHistory]);
 
   const trackedRememberMessage = useCallback(
     (messageId: string) => trackMetadata(rememberMessage(messageId)),
@@ -1595,7 +1138,7 @@ export function useChatController(options: ChatControllerOptions): ChatControlle
 
   return {
     ...state,
-    messages: overlayStreamedText(state),
+    messages: selectVisibleMessages(state),
     clearError,
     prepareForReload,
     newConversation,

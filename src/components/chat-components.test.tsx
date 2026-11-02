@@ -6,12 +6,47 @@ import type { useChatController } from "../app/use-chat-controller";
 import type { ChatMessage } from "../domain/chat";
 import type { ProcessedImage } from "../features/capture/image-processor";
 import { copyFor } from "../i18n/messages";
+import type { SharedViewProps } from "../views/layout-types";
 import { MobileLayout } from "../views/mobile/MobileLayout";
 import { Composer } from "./Composer";
 import { ControlDock } from "./ControlDock";
 import { ConversationView } from "./ConversationView";
 import { SkillsPanel } from "./SkillsPanel";
 import { TopControls } from "./TopControls";
+
+/** MobileLayout 只关心布局交互，这里用最小桩补齐视图契约 */
+function mobileLayoutProps(controller: SharedViewProps["controller"]): SharedViewProps {
+  return {
+    controller,
+    copy: copyFor("zh-CN"),
+    isOnline: true,
+    imageUrls: new Map(),
+    pwa: { needRefresh: false, offlineReady: false, setNeedRefresh: vi.fn(), setOfflineReady: vi.fn(), updateServiceWorker: vi.fn() },
+    showToast: vi.fn(),
+    composer: {
+      value: "",
+      setValue: vi.fn(),
+      imageSupported: true,
+      processImage: vi.fn(),
+      attachImage: vi.fn(),
+      removeImage: vi.fn(),
+      send: vi.fn(),
+    },
+    messageActions: { recall: vi.fn(), regenerate: vi.fn() },
+    conversations: { items: [], refresh: vi.fn(), create: vi.fn(), rename: vi.fn(), remove: vi.fn() },
+    settings: {
+      llm: { entries: [], refresh: vi.fn(), save: vi.fn(), clear: vi.fn(), activate: vi.fn() },
+      activeSkillIds: [],
+      toggleSkill: vi.fn(),
+      webSearch: { enabled: false, smart: true, showSources: true },
+      changeWebSearch: vi.fn(),
+      multiBubble: true,
+      changeMultiBubble: vi.fn(),
+    },
+    onboarding: { open: false, close: vi.fn(), reopen: vi.fn() },
+    account: { setLocale: vi.fn(), clearData: vi.fn(), signOut: vi.fn() },
+  };
+}
 
 describe("reference chat components", () => {
   it("长按完整用户消息可以主动记住，并沿用桌面菜单入口", () => {
@@ -967,43 +1002,7 @@ describe("reference chat components", () => {
     } as unknown as ReturnType<typeof useChatController>;
 
     const { container } = render(
-      <MobileLayout
-        activeProviderSupportsImage={true}
-        activeSkillIds={[]}
-        composerValue=""
-        controller={mockController}
-        conversations={[]}
-        copy={copyFor("zh-CN")}
-        imageUrls={new Map()}
-        isOnline={true}
-        llmEntries={[]}
-        onClearData={vi.fn()}
-        onDelete={vi.fn()}
-        onImage={vi.fn()}
-        onLlmActivate={vi.fn()}
-        onLlmClear={vi.fn()}
-        onLlmSave={vi.fn()}
-        onLocale={vi.fn()}
-        onNewChat={vi.fn()}
-        onboardingOpen={false}
-        onCloseOnboarding={vi.fn()}
-        onOpenOnboarding={vi.fn()}
-        onRecall={vi.fn()}
-        onRegenerate={vi.fn()}
-        onRename={vi.fn()}
-        onSend={vi.fn()}
-        onSignOut={vi.fn()}
-        onSkillToggle={vi.fn()}
-        onWebSearchSettingsChange={vi.fn()}
-        processImage={vi.fn()}
-        pwa={{ needRefresh: false, offlineReady: false, setNeedRefresh: vi.fn(), setOfflineReady: vi.fn(), updateServiceWorker: vi.fn() }}
-        refreshHistory={vi.fn()}
-        refreshLlm={vi.fn()}
-        setComposerValue={vi.fn()}
-        setPendingImageDataUrl={vi.fn()}
-        showToast={vi.fn()}
-        webSearchSettings={{ enabled: false, smart: true, showSources: true }}
-      />,
+      <MobileLayout {...mobileLayoutProps(mockController)} />,
     );
 
     const chatBottom = container.querySelector(".chat-bottom");
@@ -1051,43 +1050,7 @@ describe("reference chat components", () => {
     } as unknown as ReturnType<typeof useChatController>;
 
     const { container } = render(
-      <MobileLayout
-        activeProviderSupportsImage={true}
-        activeSkillIds={[]}
-        composerValue=""
-        controller={mockController}
-        conversations={[]}
-        copy={copyFor("zh-CN")}
-        imageUrls={new Map()}
-        isOnline={true}
-        llmEntries={[]}
-        onClearData={vi.fn()}
-        onDelete={vi.fn()}
-        onImage={vi.fn()}
-        onLlmActivate={vi.fn()}
-        onLlmClear={vi.fn()}
-        onLlmSave={vi.fn()}
-        onLocale={vi.fn()}
-        onNewChat={vi.fn()}
-        onboardingOpen={false}
-        onCloseOnboarding={vi.fn()}
-        onOpenOnboarding={vi.fn()}
-        onRecall={vi.fn()}
-        onRegenerate={vi.fn()}
-        onRename={vi.fn()}
-        onSend={vi.fn()}
-        onSignOut={vi.fn()}
-        onSkillToggle={vi.fn()}
-        onWebSearchSettingsChange={vi.fn()}
-        processImage={vi.fn()}
-        pwa={{ needRefresh: false, offlineReady: false, setNeedRefresh: vi.fn(), setOfflineReady: vi.fn(), updateServiceWorker: vi.fn() }}
-        refreshHistory={vi.fn()}
-        refreshLlm={vi.fn()}
-        setComposerValue={vi.fn()}
-        setPendingImageDataUrl={vi.fn()}
-        showToast={vi.fn()}
-        webSearchSettings={{ enabled: false, smart: true, showSources: true }}
-      />,
+      <MobileLayout {...mobileLayoutProps(mockController)} />,
     );
 
     const chatBottom = container.querySelector(".chat-bottom");
@@ -1154,48 +1117,8 @@ describe("reference chat components", () => {
       userMemory: "",
     } as unknown as ReturnType<typeof useChatController>;
 
-    const onNewChat = vi.fn().mockImplementation(async () => {
-      await mockController.newConversation();
-    });
-
     const { container, rerender } = render(
-      <MobileLayout
-        activeProviderSupportsImage={true}
-        activeSkillIds={[]}
-        composerValue=""
-        controller={mockController}
-        conversations={[]}
-        copy={copyFor("zh-CN")}
-        imageUrls={new Map()}
-        isOnline={true}
-        llmEntries={[]}
-        onClearData={vi.fn()}
-        onDelete={vi.fn()}
-        onImage={vi.fn()}
-        onLlmActivate={vi.fn()}
-        onLlmClear={vi.fn()}
-        onLlmSave={vi.fn()}
-        onLocale={vi.fn()}
-        onNewChat={onNewChat}
-        onboardingOpen={false}
-        onCloseOnboarding={vi.fn()}
-        onOpenOnboarding={vi.fn()}
-        onRecall={vi.fn()}
-        onRegenerate={vi.fn()}
-        onRename={vi.fn()}
-        onSend={vi.fn()}
-        onSignOut={vi.fn()}
-        onSkillToggle={vi.fn()}
-        onWebSearchSettingsChange={vi.fn()}
-        processImage={vi.fn()}
-        pwa={{ needRefresh: false, offlineReady: false, setNeedRefresh: vi.fn(), setOfflineReady: vi.fn(), updateServiceWorker: vi.fn() }}
-        refreshHistory={vi.fn()}
-        refreshLlm={vi.fn()}
-        setComposerValue={vi.fn()}
-        setPendingImageDataUrl={vi.fn()}
-        showToast={vi.fn()}
-        webSearchSettings={{ enabled: false, smart: true, showSources: true }}
-      />,
+      <MobileLayout {...mobileLayoutProps(mockController)} />,
     );
 
     const chatBottom = container.querySelector(".chat-bottom");
@@ -1216,43 +1139,7 @@ describe("reference chat components", () => {
     currentMessages = [];
 
     rerender(
-      <MobileLayout
-        activeProviderSupportsImage={true}
-        activeSkillIds={[]}
-        composerValue=""
-        controller={mockController}
-        conversations={[]}
-        copy={copyFor("zh-CN")}
-        imageUrls={new Map()}
-        isOnline={true}
-        llmEntries={[]}
-        onClearData={vi.fn()}
-        onDelete={vi.fn()}
-        onImage={vi.fn()}
-        onLlmActivate={vi.fn()}
-        onLlmClear={vi.fn()}
-        onLlmSave={vi.fn()}
-        onLocale={vi.fn()}
-        onNewChat={onNewChat}
-        onboardingOpen={false}
-        onCloseOnboarding={vi.fn()}
-        onOpenOnboarding={vi.fn()}
-        onRecall={vi.fn()}
-        onRegenerate={vi.fn()}
-        onRename={vi.fn()}
-        onSend={vi.fn()}
-        onSignOut={vi.fn()}
-        onSkillToggle={vi.fn()}
-        onWebSearchSettingsChange={vi.fn()}
-        processImage={vi.fn()}
-        pwa={{ needRefresh: false, offlineReady: false, setNeedRefresh: vi.fn(), setOfflineReady: vi.fn(), updateServiceWorker: vi.fn() }}
-        refreshHistory={vi.fn()}
-        refreshLlm={vi.fn()}
-        setComposerValue={vi.fn()}
-        setPendingImageDataUrl={vi.fn()}
-        showToast={vi.fn()}
-        webSearchSettings={{ enabled: false, smart: true, showSources: true }}
-      />,
+      <MobileLayout {...mobileLayoutProps(mockController)} />,
     );
 
     // 验证底栏成功恢复展开
@@ -1312,43 +1199,7 @@ describe("reference chat components", () => {
     } as unknown as ReturnType<typeof useChatController>;
 
     const { container } = render(
-      <MobileLayout
-        activeProviderSupportsImage={true}
-        activeSkillIds={[]}
-        composerValue=""
-        controller={mockController}
-        conversations={[]}
-        copy={copyFor("zh-CN")}
-        imageUrls={new Map()}
-        isOnline={true}
-        llmEntries={[]}
-        onClearData={vi.fn()}
-        onDelete={vi.fn()}
-        onImage={vi.fn()}
-        onLlmActivate={vi.fn()}
-        onLlmClear={vi.fn()}
-        onLlmSave={vi.fn()}
-        onLocale={vi.fn()}
-        onNewChat={vi.fn()}
-        onboardingOpen={false}
-        onCloseOnboarding={vi.fn()}
-        onOpenOnboarding={vi.fn()}
-        onRecall={vi.fn()}
-        onRegenerate={vi.fn()}
-        onRename={vi.fn()}
-        onSend={vi.fn()}
-        onSignOut={vi.fn()}
-        onSkillToggle={vi.fn()}
-        onWebSearchSettingsChange={vi.fn()}
-        processImage={vi.fn()}
-        pwa={{ needRefresh: false, offlineReady: false, setNeedRefresh: vi.fn(), setOfflineReady: vi.fn(), updateServiceWorker: vi.fn() }}
-        refreshHistory={vi.fn()}
-        refreshLlm={vi.fn()}
-        setComposerValue={vi.fn()}
-        setPendingImageDataUrl={vi.fn()}
-        showToast={vi.fn()}
-        webSearchSettings={{ enabled: false, smart: true, showSources: true }}
-      />,
+      <MobileLayout {...mobileLayoutProps(mockController)} />,
     );
 
     const chatBottom = container.querySelector(".chat-bottom");

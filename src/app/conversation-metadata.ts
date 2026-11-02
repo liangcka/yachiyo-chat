@@ -1,7 +1,7 @@
 import { isUntitledConversation, parseConversationMetadata, type ConversationMetadata } from "../domain/conversation-metadata";
 import type { ChatMessage, Conversation } from "../domain/chat";
 import type { ActiveLlmConfig } from "../domain/llm";
-import type { StreamChatFunction } from "./use-chat-controller";
+import type { StreamChatFunction } from "./chat/contracts";
 
 /** JSON 转义后的长度也计入服务端单条消息预算。 */
 function boundedData(key: string, text: string, maximum: number): string {

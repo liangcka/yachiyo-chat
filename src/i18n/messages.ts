@@ -162,8 +162,11 @@ export interface UiCopy {
   readonly allSettings: string;
   readonly activeModelLabel: string;
   readonly defaultModelLabel: string;
-  readonly sessionSectionTitle: string;
   readonly settingsSectionTitle: string;
+  readonly conversationGroupToday: string;
+  readonly conversationGroupYesterday: string;
+  readonly conversationGroupPrevious7Days: string;
+  readonly conversationGroupEarlier: string;
   readonly onboardingTitle: string;
   readonly onboardingEntry: string;
   readonly onboardingSkip: string;
@@ -346,8 +349,11 @@ const chinese = Object.freeze({
   allSettings: "设置中心",
   activeModelLabel: "当前模型",
   defaultModelLabel: "默认服务",
-  sessionSectionTitle: "对话管理",
   settingsSectionTitle: "偏好与功能",
+  conversationGroupToday: "今天",
+  conversationGroupYesterday: "昨天",
+  conversationGroupPrevious7Days: "最近 7 天",
+  conversationGroupEarlier: "更早",
   onboardingTitle: "新手引导",
   onboardingEntry: "重看新手引导",
   onboardingSkip: "跳过",
@@ -531,8 +537,11 @@ const japanese = Object.freeze({
   allSettings: "設定センター",
   activeModelLabel: "現在のモデル",
   defaultModelLabel: "デフォルト",
-  sessionSectionTitle: "対話管理",
   settingsSectionTitle: "機能・設定",
+  conversationGroupToday: "今日",
+  conversationGroupYesterday: "昨日",
+  conversationGroupPrevious7Days: "過去 7 日間",
+  conversationGroupEarlier: "それ以前",
   onboardingTitle: "はじめてのガイド",
   onboardingEntry: "ガイドをもう一度見る",
   onboardingSkip: "スキップ",
