@@ -19,6 +19,7 @@ Status: implemented
 ## Consequences
 - 历史会话一次点击可达；搜索与列表共用一处实现。
 - `UiCopy` 新增四个分组文案，移除已无入口的 `sessionSectionTitle`。
+- 设置中心改为视口居中的弹层（`overlay--centered`）。页签保持单行分段，按面板宽度（容器查询，而非视口宽度）逐级收紧间距、隐藏图标，桌面端单列布局与 320px 窄屏下四个页签都完整可见。
 - E2E 用例通过 `openConversationList` / `sideMenu` 辅助函数定位侧边栏内的“历史记录”区域。
 
 ## Verification

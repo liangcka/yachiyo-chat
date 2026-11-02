@@ -140,7 +140,7 @@ npm run dev:mock
 
 ## Android 原生应用与 GitHub 热更新
 
-项目通过 Capacitor 8 提供 Android APK。首次使用热更新需覆盖安装支持热更新的 APK；当前原生基线为 [Android v0.1.14](https://github.com/liangcka/yachiyo-chat/releases/tag/v0.1.14)。保持应用标识与签名一致即可保留现有聊天、记忆和设置。各次 OTA 发布说明会从 `mobile-release.json` 的 `nativeVersion` 生成所需 APK 的下载链接，原生基线升级后以对应发布说明为准。
+项目通过 Capacitor 8 提供 Android APK。首次使用热更新需覆盖安装支持热更新的 APK；当前原生基线为 [Android v0.1.15](https://github.com/liangcka/yachiyo-chat/releases/tag/v0.1.15)。保持应用标识与签名一致即可保留现有聊天、记忆和设置。各次 OTA 发布说明会从 `mobile-release.json` 的 `nativeVersion` 生成所需 APK 的下载链接，原生基线升级后以对应发布说明为准。
 
 ```powershell
 npm run mob:sync    # 构建前端并同步到 Android 工程
